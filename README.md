@@ -1,28 +1,89 @@
-# fastest
+# Fastest
 
-`fastest` is a minimal rust-powered Python testing framework. This repository
-contains the initial skeleton of the tool using [pyo3](https://pyo3.rs/) and
-[maturin](https://github.com/PyO3/maturin) to build a Python extension module
-that exposes a simple CLI.
+A high-performance Python testing framework built with Rust.
 
-The project is inspired by tools like `uv` and `ruff`, aiming to eventually
-provide blazing fast test execution for Python projects.
+## Features
 
-## Building
+- Fast test execution with Rust-powered core
+- Simple and intuitive Python API
+- Parallel test execution
+- Detailed test reporting
+- Easy integration with existing test suites
 
-To build the Python package, install `maturin` and run:
+## Installation
+
+### Prerequisites
+
+- Python 3.7 or higher
+- Rust toolchain (for development)
+
+### From PyPI
 
 ```bash
-maturin develop
+pip install fastest
 ```
 
-This will compile the Rust extension and install the `fastest` package into
-your current environment.
+### From Source
+
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/fastest.git
+cd fastest
+```
+
+2. Install the Python package:
+```bash
+cd python
+pip install -e .
+```
 
 ## Usage
 
-```bash
-fastest
+Here's a simple example of how to use Fastest:
+
+```python
+from fastest import run_tests, ExampleTest
+
+# Define your test
+class MyTest(ExampleTest):
+    def test_something(self):
+        assert 1 + 1 == 2
+
+# Run the tests
+results = run_tests([MyTest()])
+print(results)
 ```
 
-Currently the implementation is a stub that prints a message.
+## Development
+
+### Setting up the development environment
+
+1. Create a virtual environment:
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+2. Install development dependencies:
+```bash
+pip install -e ".[dev]"
+```
+
+3. Build the Rust extension:
+```bash
+cargo build
+```
+
+### Running tests
+
+```bash
+# Run Python tests
+python -m pytest
+
+# Run Rust tests
+cargo test
+```
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
