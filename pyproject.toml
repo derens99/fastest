@@ -1,0 +1,19 @@
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "fastest"
+version = "0.1.0"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.8"
+description = "A rust-powered python testing framework"
+
+[tool.maturin]
+bindings = "pyo3"
+module-name = "_fastest"
+
+[project.scripts]
+fastest = "fastest.__main__:main"
