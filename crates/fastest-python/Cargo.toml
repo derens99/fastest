@@ -1,0 +1,15 @@
+[package]
+name = "fastest-python"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "fastest"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { workspace = true, features = ["extension-module"] }
+fastest-core = { path = "../fastest-core" }
+anyhow.workspace = true

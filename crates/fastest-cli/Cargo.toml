@@ -1,0 +1,19 @@
+[package]
+name = "fastest-cli"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "fastest"
+path = "src/main.rs"
+
+[dependencies]
+fastest-core = { path = "../fastest-core" }
+clap = { version = "4.5", features = ["derive"] }
+colored = "2.1"
+indicatif = "0.17"
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true 
