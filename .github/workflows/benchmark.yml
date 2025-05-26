@@ -26,11 +26,14 @@ jobs:
     
     - name: Install dependencies
       run: |
+        python -m venv venv
+        source venv/bin/activate
         pip install pytest maturin
         cd crates/fastest-python && maturin develop && cd ../..
     
     - name: Run benchmarks
       run: |
+        source venv/bin/activate
         python benchmarks/format_benchmark_json.py > benchmark_results.json
         
         # Also create markdown report
