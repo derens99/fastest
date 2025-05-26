@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # Linux
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact_name: fastest-linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: fastest-linux-aarch64
+            use_cross: true
+          
+          # macOS
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact_name: fastest-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact_name: fastest-macos-aarch64
+          
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact_name: fastest-windows-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+      
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross
+      
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }} --bin fastest
+          else
+            cargo build --release --target ${{ matrix.target }} --bin fastest
+          fi
+        shell: bash
+      
+      - name: Package
+        run: |
+          cd target/${{ matrix.target }}/release
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a ../../../${{ matrix.artifact_name }}.zip fastest.exe
+          else
+            tar czf ../../../${{ matrix.artifact_name }}.tar.gz fastest
+          fi
+        shell: bash
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: |
+            ${{ matrix.artifact_name }}.tar.gz
+            ${{ matrix.artifact_name }}.zip
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+          body: |
+            ## Installation
+            
+            ### Using the installer script (macOS and Linux)
+            ```bash
+            curl -LsSf https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+            ```
+            
+            ### Manual installation
+            Download the appropriate binary for your platform and add it to your PATH.
+            
+            ## What's Changed
+            See the full changelog below.
+
+  update-installer:
+    name: Update Installer Script
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update installer with correct repo
+        run: |
+          sed -i 's|REPO="yourusername/fastest"|REPO="${{ github.repository }}"|' install.sh
+      
+      - name: Commit and push
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add install.sh
+          git diff --staged --quiet || git commit -m "Update installer with repository name"
+          git push 
