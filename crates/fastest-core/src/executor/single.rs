@@ -1,11 +1,14 @@
+use super::TestResult;
+use crate::discovery::TestItem;
+use crate::error::{Error, Result};
+use crate::fixtures::{
+    generate_builtin_fixture_code, generate_test_code_with_fixtures, is_builtin_fixture,
+    FixtureExecutor,
+};
+use crate::markers::{extract_markers, BuiltinMarker};
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::time::Instant;
-use std::collections::HashMap;
-use crate::error::{Error, Result};
-use crate::discovery::TestItem;
-use super::TestResult;
-use crate::markers::{extract_markers, BuiltinMarker};
-use crate::fixtures::{FixtureExecutor, generate_test_code_with_fixtures, generate_builtin_fixture_code, is_builtin_fixture};
 
 /// Run a single test in its own subprocess
 pub fn run_test(test: &TestItem) -> Result<TestResult> {
@@ -20,7 +23,7 @@ pub fn run_test(test: &TestItem) -> Result<TestResult> {
 /// Run test with fixture support
 fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
     let start = Instant::now();
-    
+
     // Check for skip markers
     let markers = extract_markers(&test.decorators);
     if let Some(skip_reason) = BuiltinMarker::should_skip(&markers) {
@@ -34,13 +37,13 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
             stderr: format!("SKIPPED: {}", skip_reason),
         });
     }
-    
+
     let is_xfail = BuiltinMarker::is_xfail(&markers);
-    
+
     // Execute fixtures
     let mut fixture_executor = FixtureExecutor::new();
     let mut fixture_values = HashMap::new();
-    
+
     // Resolve fixtures in dependency order
     for fixture_name in &test.fixture_deps {
         if is_builtin_fixture(fixture_name) {
@@ -50,7 +53,7 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
             }
         }
     }
-    
+
     // Execute fixtures
     match fixture_executor.execute_fixtures(&test.fixture_deps, &test.path, &fixture_values) {
         Ok(values) => fixture_values = values,
@@ -66,10 +69,10 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
             });
         }
     }
-    
+
     // Generate test code with fixtures
     let python_code = generate_test_code_with_fixtures(test, &fixture_values);
-    
+
     // Execute the test
     let output = Command::new("python")
         .arg("-c")
@@ -78,20 +81,20 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
         .stderr(Stdio::piped())
         .output()
         .map_err(|e| Error::Execution(format!("Failed to execute test: {}", e)))?;
-    
+
     let duration = start.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     let mut passed = output.status.success();
-    
+
     // Handle xfail
     if is_xfail && !passed {
         passed = true;
     } else if is_xfail && passed {
         passed = false;
     }
-    
+
     let (output_str, error) = if is_xfail && passed {
         ("XPASS (expected failure but passed)".to_string(), None)
     } else if is_xfail && !output.status.success() {
@@ -99,10 +102,16 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
     } else if passed {
         ("PASSED".to_string(), None)
     } else {
-        ("FAILED".to_string(), Some(format!("Test failed with exit code: {}\nStderr: {}", 
-            output.status.code().unwrap_or(-1), stderr)))
+        (
+            "FAILED".to_string(),
+            Some(format!(
+                "Test failed with exit code: {}\nStderr: {}",
+                output.status.code().unwrap_or(-1),
+                stderr
+            )),
+        )
     };
-    
+
     Ok(TestResult {
         test_id: test.id.clone(),
         passed,
@@ -117,13 +126,13 @@ fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
 /// Run test without fixtures (original implementation)
 fn run_test_simple(test: &TestItem) -> Result<TestResult> {
     let start = Instant::now();
-    
+
     // Check for skip markers
     let markers = extract_markers(&test.decorators);
     if let Some(skip_reason) = BuiltinMarker::should_skip(&markers) {
         return Ok(TestResult {
             test_id: test.id.clone(),
-            passed: true,  // Skipped tests are considered "passed"
+            passed: true, // Skipped tests are considered "passed"
             duration: start.elapsed(),
             output: "SKIPPED".to_string(),
             error: Some(skip_reason.clone()),
@@ -131,13 +140,13 @@ fn run_test_simple(test: &TestItem) -> Result<TestResult> {
             stderr: format!("SKIPPED: {}", skip_reason),
         });
     }
-    
+
     // Check if test is expected to fail
     let is_xfail = BuiltinMarker::is_xfail(&markers);
-    
+
     // Build the Python command to run the test
     let python_code = build_test_runner_code(test);
-    
+
     // Execute the test in a subprocess
     let output = Command::new("python")
         .arg("-c")
@@ -146,13 +155,13 @@ fn run_test_simple(test: &TestItem) -> Result<TestResult> {
         .stderr(Stdio::piped())
         .output()
         .map_err(|e| Error::Execution(format!("Failed to execute test: {}", e)))?;
-    
+
     let duration = start.elapsed();
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    
+
     let mut passed = output.status.success();
-    
+
     // Handle xfail - if test is marked xfail and it fails, that's a pass
     if is_xfail && !passed {
         passed = true;
@@ -160,7 +169,7 @@ fn run_test_simple(test: &TestItem) -> Result<TestResult> {
         // If xfail test passes, that's actually a failure (unexpected pass)
         passed = false;
     }
-    
+
     let (output_str, error) = if is_xfail && passed {
         ("XPASS (expected failure but passed)".to_string(), None)
     } else if is_xfail && !output.status.success() {
@@ -168,10 +177,16 @@ fn run_test_simple(test: &TestItem) -> Result<TestResult> {
     } else if passed {
         ("PASSED".to_string(), None)
     } else {
-        ("FAILED".to_string(), Some(format!("Test failed with exit code: {}\nStderr: {}", 
-            output.status.code().unwrap_or(-1), stderr)))
+        (
+            "FAILED".to_string(),
+            Some(format!(
+                "Test failed with exit code: {}\nStderr: {}",
+                output.status.code().unwrap_or(-1),
+                stderr
+            )),
+        )
     };
-    
+
     Ok(TestResult {
         test_id: test.id.clone(),
         passed,
@@ -185,15 +200,19 @@ fn run_test_simple(test: &TestItem) -> Result<TestResult> {
 
 fn build_test_runner_code(test: &TestItem) -> String {
     // Get the test file's directory for adding to sys.path
-    let test_dir = test.path.parent()
+    let test_dir = test
+        .path
+        .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".to_string());
-    
+
     // Get the module name (just the file without extension)
-    let module_name = test.path.file_stem()
+    let module_name = test
+        .path
+        .file_stem()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "test".to_string());
-    
+
     // Handle both regular and async tests
     let runner_code = if test.is_async {
         format!(
@@ -231,7 +250,10 @@ except Exception as e:
             if let Some(class_name) = &test.class_name {
                 format!("\n    # Get test class and create instance\n    test_class = getattr(test_module, '{}')\n    test_instance = test_class()", class_name)
             } else {
-                format!("\n    # Get test function\n    test_func = getattr(test_module, '{}')", test.function_name)
+                format!(
+                    "\n    # Get test function\n    test_func = getattr(test_module, '{}')",
+                    test.function_name
+                )
             },
             if test.class_name.is_some() {
                 format!("test_instance.{}()", test.function_name)
@@ -267,7 +289,10 @@ except Exception as e:
             if let Some(class_name) = &test.class_name {
                 format!("\n    # Get test class and create instance\n    test_class = getattr(test_module, '{}')\n    test_instance = test_class()", class_name)
             } else {
-                format!("\n    # Get test function\n    test_func = getattr(test_module, '{}')", test.function_name)
+                format!(
+                    "\n    # Get test function\n    test_func = getattr(test_module, '{}')",
+                    test.function_name
+                )
             },
             if test.class_name.is_some() {
                 format!("test_instance.{}()", test.function_name)
@@ -276,6 +301,6 @@ except Exception as e:
             }
         )
     };
-    
+
     runner_code
-} 
+}

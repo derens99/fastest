@@ -1,7 +1,7 @@
-pub mod parallel;
-pub mod single;
 pub mod batch;
+pub mod parallel;
 pub mod process_pool;
+pub mod single;
 
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ pub struct TestResult {
     pub stderr: String,
 }
 
-pub use parallel::{ParallelExecutor, ProgressReporter};
-pub use single::run_test;
 pub use batch::BatchExecutor;
-pub use process_pool::ProcessPool; 
+pub use parallel::{ParallelExecutor, ProgressReporter};
+pub use process_pool::ProcessPool;
+pub use single::run_test;

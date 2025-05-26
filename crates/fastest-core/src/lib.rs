@@ -8,30 +8,29 @@ pub mod markers;
 pub mod parser;
 pub mod utils;
 
-pub use discovery::{discover_tests, discover_tests_cached, discover_tests_ast, discover_tests_and_fixtures, TestItem, DiscoveryResult};
+pub use cache::{default_cache_path, DiscoveryCache};
+pub use discovery::{
+    discover_tests, discover_tests_and_fixtures, discover_tests_ast, discover_tests_cached,
+    DiscoveryResult, TestItem,
+};
 pub use error::{Error, Result};
-pub use parser::{parse_test_file, parse_fixtures_and_tests, TestFunction, FixtureDefinition, AstParser};
-pub use cache::{DiscoveryCache, default_cache_path};
+pub use parser::{
+    parse_fixtures_and_tests, parse_test_file, AstParser, FixtureDefinition, TestFunction,
+};
 
 // Re-export config types
 pub use config::Config;
 
 // Re-export fixture types
 pub use fixtures::{
-    Fixture, FixtureManager, FixtureScope, extract_fixture_deps,
-    FixtureExecutor, generate_test_code_with_fixtures,
-    is_builtin_fixture, generate_builtin_fixture_code
+    extract_fixture_deps, generate_builtin_fixture_code, generate_test_code_with_fixtures,
+    is_builtin_fixture, Fixture, FixtureExecutor, FixtureManager, FixtureScope,
 };
 
 // Re-export marker types
-pub use markers::{Marker, BuiltinMarker, MarkerExpr, filter_by_markers};
+pub use markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 
 // Re-export from executor module
 pub use executor::{
-    TestResult,
-    run_test,
-    BatchExecutor,
-    ParallelExecutor,
-    ProgressReporter,
-    ProcessPool,
+    run_test, BatchExecutor, ParallelExecutor, ProcessPool, ProgressReporter, TestResult,
 };

@@ -1,10 +1,10 @@
+use super::TestResult;
+use crate::discovery::TestItem;
+use crate::error::{Error, Result};
+use crate::markers::{extract_markers, BuiltinMarker};
+use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
-use crate::error::{Error, Result};
-use crate::discovery::TestItem;
-use crate::markers::{extract_markers, BuiltinMarker};
-use super::TestResult;
 
 /// Fast batch executor that runs multiple tests in a single Python process
 pub struct BatchExecutor {
@@ -17,12 +17,12 @@ impl BatchExecutor {
             python_path: "python".to_string(),
         }
     }
-    
+
     /// Execute tests grouped by module for maximum efficiency
     pub fn execute_tests(&self, tests: Vec<TestItem>) -> Vec<TestResult> {
         let mut all_results = Vec::new();
         let mut tests_to_run = Vec::new();
-        
+
         // First, handle tests with skip markers
         for test in tests {
             let markers = extract_markers(&test.decorators);
@@ -30,7 +30,7 @@ impl BatchExecutor {
                 // Handle skipped tests immediately
                 all_results.push(TestResult {
                     test_id: test.id.clone(),
-                    passed: true,  // Skipped tests are considered "passed"
+                    passed: true, // Skipped tests are considered "passed"
                     duration: Duration::from_secs(0),
                     output: "SKIPPED".to_string(),
                     error: Some(skip_reason.clone()),
@@ -41,14 +41,17 @@ impl BatchExecutor {
                 tests_to_run.push(test);
             }
         }
-        
+
         // Group remaining tests by module
         let mut module_groups: HashMap<String, Vec<TestItem>> = HashMap::new();
         for test in tests_to_run {
             let module_path = test.path.to_string_lossy().to_string();
-            module_groups.entry(module_path).or_insert_with(Vec::new).push(test);
+            module_groups
+                .entry(module_path)
+                .or_insert_with(Vec::new)
+                .push(test);
         }
-        
+
         // Execute each module's tests in a single subprocess
         for (module_path, module_tests) in module_groups {
             let module_tests_clone = module_tests.clone();
@@ -70,16 +73,20 @@ impl BatchExecutor {
                 }
             }
         }
-        
+
         all_results
     }
-    
-    fn execute_module_tests(&self, module_path: &str, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
+
+    fn execute_module_tests(
+        &self,
+        module_path: &str,
+        tests: Vec<TestItem>,
+    ) -> Result<Vec<TestResult>> {
         let start = Instant::now();
-        
+
         // Build optimized runner code that includes xfail handling
         let runner_code = self.build_optimized_runner(&module_path, &tests);
-        
+
         // Execute all tests in one process
         let output = Command::new(&self.python_path)
             .arg("-c")
@@ -88,37 +95,42 @@ impl BatchExecutor {
             .stderr(Stdio::piped())
             .output()
             .map_err(|e| Error::Execution(format!("Failed to execute module tests: {}", e)))?;
-        
+
         let total_duration = start.elapsed();
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
         let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-        
+
         // Parse JSON results
         self.parse_results(&stdout, &stderr, tests, total_duration)
     }
-    
+
     fn build_optimized_runner(&self, module_path: &str, tests: &[TestItem]) -> String {
         let test_dir = std::path::Path::new(module_path)
             .parent()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| ".".to_string());
-        
+
         // Get the full module name by converting path to module notation
         let module_name = if let Some(test_item) = tests.first() {
             // Extract module path from test ID (e.g., "test_project.tests.test_math::test_add" -> "test_project.tests.test_math")
-            test_item.id.split("::").next().unwrap_or("test").to_string()
+            test_item
+                .id
+                .split("::")
+                .next()
+                .unwrap_or("test")
+                .to_string()
         } else {
             std::path::Path::new(module_path)
                 .file_stem()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_else(|| "test".to_string())
         };
-        
+
         let mut test_specs = String::new();
         for test in tests {
             let markers = extract_markers(&test.decorators);
             let is_xfail = BuiltinMarker::is_xfail(&markers);
-            
+
             test_specs.push_str(&format!(
                 "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}}},\n",
                 test.id,
@@ -128,7 +140,7 @@ impl BatchExecutor {
                 if is_xfail { "True" } else { "False" }
             ));
         }
-        
+
         format!(
             r#"
 import sys
@@ -242,19 +254,22 @@ for test_spec in tests:
 
 print(json.dumps({{'results': results}}))
 "#,
-            test_dir,
-            module_name,
-            module_name,
-            test_specs
+            test_dir, module_name, module_name, test_specs
         )
     }
-    
-    fn parse_results(&self, stdout: &str, stderr: &str, tests: Vec<TestItem>, total_duration: Duration) -> Result<Vec<TestResult>> {
+
+    fn parse_results(
+        &self,
+        stdout: &str,
+        stderr: &str,
+        tests: Vec<TestItem>,
+        total_duration: Duration,
+    ) -> Result<Vec<TestResult>> {
         let test_count = tests.len();
         if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(stdout) {
             if let Some(results_array) = json_data["results"].as_array() {
                 let mut results = Vec::new();
-                
+
                 for result_json in results_array {
                     let test_id = result_json["id"].as_str().unwrap_or("");
                     let passed = result_json["passed"].as_bool().unwrap_or(false);
@@ -262,10 +277,16 @@ print(json.dumps({{'results': results}}))
                     let test_stdout = result_json["stdout"].as_str().unwrap_or("").to_string();
                     let test_stderr = result_json["stderr"].as_str().unwrap_or("").to_string();
                     let error = result_json["error"].as_str().map(String::from);
-                    
-                    let is_xfail = result_json.get("xfail").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let is_xpass = result_json.get("xpass").and_then(|v| v.as_bool()).unwrap_or(false);
-                    
+
+                    let is_xfail = result_json
+                        .get("xfail")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+                    let is_xpass = result_json
+                        .get("xpass")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
+
                     let output = if is_xfail {
                         "XFAIL".to_string()
                     } else if is_xpass {
@@ -275,7 +296,7 @@ print(json.dumps({{'results': results}}))
                     } else {
                         "FAILED".to_string()
                     };
-                    
+
                     results.push(TestResult {
                         test_id: test_id.to_string(),
                         passed,
@@ -286,20 +307,23 @@ print(json.dumps({{'results': results}}))
                         stderr: test_stderr,
                     });
                 }
-                
+
                 return Ok(results);
             }
         }
-        
+
         // Fallback for parse errors
-        Ok(tests.into_iter().map(|test| TestResult {
-            test_id: test.id,
-            passed: false,
-            duration: total_duration / test_count as u32,
-            output: "FAILED".to_string(),
-            error: Some(format!("Failed to parse results. Stderr: {}", stderr)),
-            stdout: stdout.to_string(),
-            stderr: stderr.to_string(),
-        }).collect())
+        Ok(tests
+            .into_iter()
+            .map(|test| TestResult {
+                test_id: test.id,
+                passed: false,
+                duration: total_duration / test_count as u32,
+                output: "FAILED".to_string(),
+                error: Some(format!("Failed to parse results. Stderr: {}", stderr)),
+                stdout: stdout.to_string(),
+                stderr: stderr.to_string(),
+            })
+            .collect())
     }
-} 
+}

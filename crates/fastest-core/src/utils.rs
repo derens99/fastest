@@ -23,8 +23,7 @@ pub fn path_to_module_name(path: &Path) -> String {
 pub fn is_test_file(path: &Path) -> bool {
     if let Some(name) = path.file_name() {
         let name = name.to_string_lossy();
-        (name.starts_with("test_") || name.ends_with("_test.py")) 
-            && name.ends_with(".py")
+        (name.starts_with("test_") || name.ends_with("_test.py")) && name.ends_with(".py")
     } else {
         false
     }
@@ -40,7 +39,7 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
         "tox.ini",
         "pytest.ini",
     ];
-    
+
     let mut current = start;
     loop {
         for marker in &markers {
@@ -48,7 +47,7 @@ pub fn find_project_root(start: &Path) -> Option<PathBuf> {
                 return Some(current.to_path_buf());
             }
         }
-        
+
         match current.parent() {
             Some(parent) => current = parent,
             None => return None,
@@ -67,4 +66,4 @@ pub fn format_duration(millis: u128) -> String {
         let seconds = (millis % 60_000) / 1000;
         format!("{}m {}s", minutes, seconds)
     }
-} 
+}

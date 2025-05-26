@@ -1,12 +1,12 @@
-use std::process::{Command, Stdio, Child};
-use std::time::Instant;
+use super::TestResult;
+use crate::discovery::TestItem;
+use crate::error::{Error, Result};
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, Stdio};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::sync::mpsc::Sender;
-use std::io::{Write, BufRead, BufReader};
-use crate::error::{Error, Result};
-use crate::discovery::TestItem;
-use super::TestResult;
+use std::time::Instant;
 
 /// A pool of Python worker processes for test execution
 pub struct ProcessPool {
@@ -33,7 +33,7 @@ impl ProcessPool {
     pub fn new(num_workers: usize, result_tx: Sender<TestResult>) -> Result<Self> {
         let mut workers = Vec::new();
         let job_queue = Arc::new(Mutex::new(Vec::new()));
-        
+
         // Start worker processes
         for _ in 0..num_workers {
             let worker_code = r#"
@@ -120,7 +120,7 @@ while True:
         print(json.dumps(result))
         sys.stdout.flush()
 "#;
-            
+
             let mut child = Command::new("python")
                 .arg("-c")
                 .arg(worker_code)
@@ -129,45 +129,42 @@ while True:
                 .stderr(Stdio::piped())
                 .spawn()
                 .map_err(|e| Error::Execution(format!("Failed to spawn worker: {}", e)))?;
-            
+
             let stdin = child.stdin.take().unwrap();
             let stdout = child.stdout.take().unwrap();
-            
+
             workers.push(Worker {
                 process: child,
                 stdin,
                 stdout,
             });
         }
-        
+
         Ok(ProcessPool {
             workers,
             job_queue,
             result_tx,
         })
     }
-    
+
     /// Add tests to the execution queue
     pub fn queue_tests(&self, tests: Vec<TestItem>) {
         let mut queue = self.job_queue.lock().unwrap();
         for (idx, test) in tests.into_iter().enumerate() {
-            queue.push(TestJob {
-                test,
-                job_id: idx,
-            });
+            queue.push(TestJob { test, job_id: idx });
         }
     }
-    
+
     /// Start processing the queue
     pub fn start(&mut self) {
         let workers = std::mem::take(&mut self.workers);
         let job_queue = Arc::clone(&self.job_queue);
         let result_tx = self.result_tx.clone();
-        
+
         for worker in workers {
             let queue = Arc::clone(&job_queue);
             let tx = result_tx.clone();
-            
+
             thread::spawn(move || {
                 process_worker(worker, queue, tx);
             });
@@ -175,21 +172,25 @@ while True:
     }
 }
 
-fn process_worker(mut worker: Worker, job_queue: Arc<Mutex<Vec<TestJob>>>, result_tx: Sender<TestResult>) {
+fn process_worker(
+    mut worker: Worker,
+    job_queue: Arc<Mutex<Vec<TestJob>>>,
+    result_tx: Sender<TestResult>,
+) {
     let mut reader = BufReader::new(worker.stdout);
-    
+
     loop {
         // Get next job
         let job = {
             let mut queue = job_queue.lock().unwrap();
             queue.pop()
         };
-        
+
         let Some(job) = job else {
             // No more jobs
             break;
         };
-        
+
         // Send test to worker
         let test_json = serde_json::json!({
             "id": job.test.id,
@@ -199,9 +200,9 @@ fn process_worker(mut worker: Worker, job_queue: Arc<Mutex<Vec<TestJob>>>, resul
             "is_async": job.test.is_async,
             "class_name": job.test.class_name,
         });
-        
+
         let start = Instant::now();
-        
+
         // Write test to worker stdin
         if let Err(e) = writeln!(worker.stdin, "{}", test_json.to_string()) {
             let _ = result_tx.send(TestResult {
@@ -215,7 +216,7 @@ fn process_worker(mut worker: Worker, job_queue: Arc<Mutex<Vec<TestJob>>>, resul
             });
             continue;
         }
-        
+
         // Read result from worker
         let mut line = String::new();
         match reader.read_line(&mut line) {
@@ -230,12 +231,16 @@ fn process_worker(mut worker: Worker, job_queue: Arc<Mutex<Vec<TestJob>>>, resul
                     let error = result_json["error"].as_str().map(String::from);
                     let stdout = result_json["stdout"].as_str().unwrap_or("").to_string();
                     let stderr = result_json["stderr"].as_str().unwrap_or("").to_string();
-                    
+
                     let _ = result_tx.send(TestResult {
                         test_id: job.test.id,
                         passed,
                         duration: start.elapsed(),
-                        output: if passed { "PASSED".to_string() } else { "FAILED".to_string() },
+                        output: if passed {
+                            "PASSED".to_string()
+                        } else {
+                            "FAILED".to_string()
+                        },
                         error,
                         stdout,
                         stderr,
@@ -255,4 +260,4 @@ fn process_worker(mut worker: Worker, job_queue: Arc<Mutex<Vec<TestJob>>>, resul
             }
         }
     }
-} 
+}

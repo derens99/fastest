@@ -1,9 +1,9 @@
-pub mod regex;
 pub mod ast;
+pub mod regex;
 
 // Re-export common types
-pub use regex::{parse_test_file, TestFunction};
 pub use ast::AstParser;
+pub use regex::{parse_test_file, TestFunction};
 
 // Parser selection enum
 pub enum Parser {
@@ -22,7 +22,9 @@ pub struct FixtureDefinition {
     pub decorators: Vec<String>,
 }
 
-pub fn parse_fixtures_and_tests(path: &std::path::Path) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>), Box<dyn std::error::Error>> {
+pub fn parse_fixtures_and_tests(
+    path: &std::path::Path,
+) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>), Box<dyn std::error::Error>> {
     regex::RegexParser::parse_fixtures_and_tests(path)
         .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
-} 
+}

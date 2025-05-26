@@ -39,7 +39,8 @@ def tmp_path():
     atexit.register(cleanup)
     
     return path
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn generate_capsys_fixture() -> String {
@@ -82,7 +83,8 @@ class CaptureFixture:
 def capsys():
     """Capture stdout/stderr output."""
     return CaptureFixture()
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn generate_monkeypatch_fixture() -> String {
@@ -155,15 +157,20 @@ def monkeypatch():
     mp = MonkeyPatch()
     # Note: In real implementation, we'd register cleanup
     return mp
-"#.to_string()
+"#
+    .to_string()
 }
 
 /// Check if a fixture is a built-in fixture
 pub fn is_builtin_fixture(name: &str) -> bool {
     matches!(
         name,
-        names::TMP_PATH | names::TMP_PATH_FACTORY | names::CAPSYS | 
-        names::CAPFD | names::MONKEYPATCH | names::REQUEST
+        names::TMP_PATH
+            | names::TMP_PATH_FACTORY
+            | names::CAPSYS
+            | names::CAPFD
+            | names::MONKEYPATCH
+            | names::REQUEST
     )
 }
 
@@ -175,4 +182,4 @@ pub fn get_builtin_fixture_metadata(name: &str) -> Option<(String, String, bool)
         names::MONKEYPATCH => Some(("function".to_string(), "monkeypatch".to_string(), false)),
         _ => None,
     }
-} 
+}
