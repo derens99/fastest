@@ -39,11 +39,11 @@ impl RegexParser {
                 // Continue collecting decorator content
                 current_decorator.push(' ');
                 current_decorator.push_str(trimmed);
-                
+
                 // Check if decorator ends on this line
                 let open_parens = current_decorator.matches('(').count();
                 let close_parens = current_decorator.matches(')').count();
-                
+
                 if open_parens > 0 && open_parens == close_parens {
                     // Decorator is complete
                     pending_decorators.push(current_decorator.clone());
@@ -58,7 +58,7 @@ impl RegexParser {
                 // Check if it's a complete single-line decorator
                 let open_parens = trimmed.matches('(').count();
                 let close_parens = trimmed.matches(')').count();
-                
+
                 if open_parens == 0 || (open_parens > 0 && open_parens == close_parens) {
                     // Complete decorator on one line
                     pending_decorators.push(trimmed.to_string());

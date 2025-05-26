@@ -66,10 +66,10 @@ impl DiscoveryCache {
     pub fn update(&mut self, path: PathBuf, tests: Vec<TestItem>) -> Result<()> {
         let metadata = fs::metadata(&path)?;
         let modified = metadata.modified()?;
-        
+
         // Calculate content hash for more reliable caching
         let content_hash = self.calculate_content_hash(&path).ok();
-        
+
         self.entries.insert(
             path,
             CacheEntry {
@@ -93,9 +93,9 @@ impl DiscoveryCache {
 
     /// Calculate a fast hash of file content for cache invalidation
     fn calculate_content_hash(&self, path: &Path) -> Result<String> {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
-        
+        use std::hash::{Hash, Hasher};
+
         let content = fs::read_to_string(path)?;
         let mut hasher = DefaultHasher::new();
         content.hash(&mut hasher);

@@ -36,7 +36,7 @@ impl OptimizedExecutor {
             coverage_source: Vec::new(),
         }
     }
-    
+
     /// Enable coverage collection
     pub fn with_coverage(mut self, source_dirs: Vec<PathBuf>) -> Self {
         self.coverage_enabled = true;
@@ -50,30 +50,32 @@ impl OptimizedExecutor {
         }
 
         let start = Instant::now();
-        
+
         // Step 1: Pre-filter skip tests (no subprocess needed)
         let (skip_results, tests_to_run) = self.preprocess_tests(tests);
-        
+
         // Step 2: Group tests optimally
         let test_batches = self.create_optimal_batches(tests_to_run);
-        
+
         if self.verbose {
-            eprintln!("⚡ Executing {} tests in {} batches with {} workers", 
-                     test_batches.iter().map(|b| b.len()).sum::<usize>(),
-                     test_batches.len(),
-                     self.num_workers);
+            eprintln!(
+                "⚡ Executing {} tests in {} batches with {} workers",
+                test_batches.iter().map(|b| b.len()).sum::<usize>(),
+                test_batches.len(),
+                self.num_workers
+            );
         }
 
         // Step 3: Execute in parallel with work stealing
         let results = Arc::new(DashMap::new());
         let results_clone = results.clone();
-        
+
         // Configure thread pool
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(self.num_workers)
             .build()
             .map_err(|e| Error::Execution(format!("Failed to create thread pool: {}", e)))?;
-        
+
         pool.install(|| {
             test_batches.into_par_iter().for_each(|batch| {
                 if let Ok(batch_results) = self.execute_batch_optimized(batch) {
@@ -86,14 +88,11 @@ impl OptimizedExecutor {
 
         // Collect results - clone the Arc and then iterate
         let results_map = Arc::try_unwrap(results).unwrap_or_else(|arc| (*arc).clone());
-        let mut all_results: Vec<TestResult> = results_map
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect();
-        
+        let mut all_results: Vec<TestResult> = results_map.into_iter().map(|(_, v)| v).collect();
+
         // Add skip results
         all_results.extend(skip_results);
-        
+
         if self.verbose {
             let duration = start.elapsed();
             eprintln!("✅ All tests completed in {:.2}s", duration.as_secs_f64());
@@ -149,21 +148,21 @@ impl OptimizedExecutor {
     fn execute_batch_optimized(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         // Build ultra-optimized Python code
         let runner_code = self.build_ultra_fast_runner(&tests);
-        
+
         // Execute in subprocess
         self.execute_subprocess(&runner_code)
     }
 
     fn build_ultra_fast_runner(&self, tests: &[TestItem]) -> String {
         let base_code = self.build_test_runner_code(tests);
-        
+
         if self.coverage_enabled {
             self.wrap_with_coverage(&base_code)
         } else {
             base_code
         }
     }
-    
+
     fn wrap_with_coverage(&self, code: &str) -> String {
         format!(
             r#"
@@ -196,7 +195,7 @@ finally:
                 .join("\n")
         )
     }
-    
+
     fn build_test_runner_code(&self, tests: &[TestItem]) -> String {
         // Group tests by module for single import
         let mut module_tests: HashMap<String, Vec<&TestItem>> = HashMap::new();
@@ -204,52 +203,57 @@ finally:
             // Extract module name from test ID, handling leading dots
             let test_id = test.id.trim_start_matches('.');
             let module = test_id.split("::").next().unwrap_or("test");
-            module_tests.entry(module.to_string()).or_default().push(test);
+            module_tests
+                .entry(module.to_string())
+                .or_default()
+                .push(test);
         }
 
         let mut imports = String::new();
         let mut test_map = String::new();
-        
+
         for (module, tests) in module_tests {
             // Convert module path to Python import format
             let import_module = module.replace('/', ".").replace('\\', ".");
             imports.push_str(&format!("import {}\n", import_module));
-            
+
             for test in tests {
                 let is_xfail = BuiltinMarker::is_xfail(&extract_markers(&test.decorators));
-                
+
                 // Extract the function path after the module name
                 let test_id = test.id.trim_start_matches('.');
                 let function_path = if let Some(pos) = test_id.find("::") {
-                    &test_id[pos+2..]
+                    &test_id[pos + 2..]
                 } else {
                     &test.function_name
                 };
-                
+
                 // Check if this is a parametrized test
-                let params_decorator = test.decorators.iter()
+                let params_decorator = test
+                    .decorators
+                    .iter()
                     .find(|d| d.starts_with("__params__="))
                     .map(|d| d.trim_start_matches("__params__="));
-                
+
                 // Extract base function name (without parameter suffix)
                 let base_function_name = if let Some(bracket_pos) = function_path.find('[') {
                     &function_path[..bracket_pos]
                 } else {
                     function_path
                 };
-                
+
                 // For class methods, extract just the method name without class prefix
                 let method_name = if test.class_name.is_some() {
                     // If function_path contains "::", extract only the method name
                     if let Some(pos) = base_function_name.rfind("::") {
-                        &base_function_name[pos+2..]
+                        &base_function_name[pos + 2..]
                     } else {
                         base_function_name
                     }
                 } else {
                     base_function_name
                 };
-                
+
                 if let Some(params_json) = params_decorator {
                     // This is a parametrized test
                     test_map.push_str(&format!(
@@ -273,7 +277,7 @@ finally:
                     } else {
                         test.function_name.clone()
                     };
-                    
+
                     test_map.push_str(&format!(
                         "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': None}},\n",
                         test.id,
@@ -396,13 +400,13 @@ print(json.dumps({{'results': results}}))
                 eprintln!("Debug: Python code written to /tmp/fastest_debug.py");
             }
         }
-        
+
         let mut cmd = Command::new(&*PYTHON_CMD);
         cmd.arg("-c")
             .arg(code)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-            
+
         // Preserve virtual environment
         if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
             cmd.env("VIRTUAL_ENV", venv);
@@ -413,8 +417,9 @@ print(json.dumps({{'results': results}}))
         if let Ok(pythonpath) = std::env::var("PYTHONPATH") {
             cmd.env("PYTHONPATH", pythonpath);
         }
-        
-        let output = cmd.output()
+
+        let output = cmd
+            .output()
             .map_err(|e| Error::Execution(format!("Failed to execute tests: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -466,7 +471,7 @@ print(json.dumps({{'results': results}}))
         let stdout = json["stdout"].as_str().unwrap_or("").to_string();
         let stderr = json["stderr"].as_str().unwrap_or("").to_string();
         let error = json["error"].as_str().map(String::from);
-        
+
         let is_xfail = json.get("xfail").and_then(|v| v.as_bool()).unwrap_or(false);
         let output = if is_xfail {
             "XFAIL".to_string()
@@ -495,10 +500,10 @@ impl OptimizedExecutor {
         // TODO: Implement fixture caching across test runs
         self.execute(tests)
     }
-    
+
     /// Execute with test result caching for re-runs
     pub fn execute_with_cache(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         // TODO: Cache test results based on file content hash
         self.execute(tests)
     }
-} 
+}

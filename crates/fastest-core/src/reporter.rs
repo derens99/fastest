@@ -1,9 +1,9 @@
 use crate::executor::TestResult;
 use colored::*;
-use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::io::Write;
 
 pub trait Reporter: Send + Sync {
     fn on_test_start(&self, test_id: &str);
@@ -25,14 +25,16 @@ impl PrettyReporter {
     pub fn new(total_tests: usize, verbose: bool) -> Self {
         let multi_progress = MultiProgress::new();
         let progress_bar = multi_progress.add(ProgressBar::new(total_tests as u64));
-        
+
         progress_bar.set_style(
             ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
+                )
                 .unwrap()
                 .progress_chars("#>-"),
         );
-        
+
         Self {
             multi_progress,
             progress_bar,
@@ -42,7 +44,7 @@ impl PrettyReporter {
             verbose,
         }
     }
-    
+
     pub fn multi_progress(&self) -> &MultiProgress {
         &self.multi_progress
     }
@@ -51,13 +53,14 @@ impl PrettyReporter {
 impl Reporter for PrettyReporter {
     fn on_test_start(&self, test_id: &str) {
         if self.verbose {
-            self.progress_bar.set_message(format!("Running {}", test_id));
+            self.progress_bar
+                .set_message(format!("Running {}", test_id));
         }
     }
-    
+
     fn on_test_complete(&self, result: &TestResult) {
         self.progress_bar.inc(1);
-        
+
         let symbol = if result.passed {
             if result.output == "SKIPPED" {
                 *self.skipped.lock().unwrap() += 1;
@@ -77,30 +80,33 @@ impl Reporter for PrettyReporter {
                 "✗".red()
             }
         };
-        
+
         let message = format!("{} {}", symbol, result.test_id);
         self.progress_bar.set_message(message);
-        
+
         // Show failures immediately in verbose mode
         if self.verbose && !result.passed {
             self.progress_bar.println(format!(
                 "\n{} {}\n{}",
                 "FAILED".red().bold(),
                 result.test_id,
-                result.error.as_ref().unwrap_or(&"Unknown error".to_string())
+                result
+                    .error
+                    .as_ref()
+                    .unwrap_or(&"Unknown error".to_string())
             ));
         }
     }
-    
+
     fn on_run_complete(&self, results: &[TestResult], duration: Duration) {
         self.progress_bar.finish_and_clear();
-        
+
         let passed = *self.passed.lock().unwrap();
         let failed = *self.failed.lock().unwrap();
         let skipped = *self.skipped.lock().unwrap();
-        
+
         println!("\n{}", "=".repeat(70));
-        
+
         // Summary line
         if failed == 0 {
             println!(
@@ -128,7 +134,7 @@ impl Reporter for PrettyReporter {
                 },
                 duration.as_secs_f64()
             );
-            
+
             // Show failed test details
             println!("\n{}", "Failed Tests:".red().bold());
             for result in results {
@@ -140,7 +146,7 @@ impl Reporter for PrettyReporter {
                             println!("  {}", line);
                         }
                     }
-                    
+
                     // Show stdout/stderr if available
                     if !result.stdout.is_empty() {
                         println!("\n  {}:", "stdout".dimmed());
@@ -148,7 +154,7 @@ impl Reporter for PrettyReporter {
                             println!("    {}", line);
                         }
                     }
-                    
+
                     if !result.stderr.is_empty() {
                         println!("\n  {}:", "stderr".dimmed());
                         for line in result.stderr.lines() {
@@ -176,11 +182,11 @@ impl JsonReporter {
 
 impl Reporter for JsonReporter {
     fn on_test_start(&self, _test_id: &str) {}
-    
+
     fn on_test_complete(&self, result: &TestResult) {
         self.results.lock().unwrap().push(result.clone());
     }
-    
+
     fn on_run_complete(&self, results: &[TestResult], duration: Duration) {
         let output = serde_json::json!({
             "duration": duration.as_secs_f64(),
@@ -189,7 +195,7 @@ impl Reporter for JsonReporter {
             "failed": results.iter().filter(|r| !r.passed).count(),
             "results": results,
         });
-        
+
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
     }
 }
@@ -207,9 +213,9 @@ impl JunitReporter {
 
 impl Reporter for JunitReporter {
     fn on_test_start(&self, _test_id: &str) {}
-    
+
     fn on_test_complete(&self, _result: &TestResult) {}
-    
+
     fn on_run_complete(&self, results: &[TestResult], duration: Duration) {
         let mut xml = String::new();
         xml.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
@@ -219,18 +225,18 @@ impl Reporter for JunitReporter {
             results.iter().filter(|r| !r.passed).count(),
             duration.as_secs_f64()
         ));
-        
+
         for result in results {
             let class_name = result.test_id.split("::").next().unwrap_or("unknown");
             let test_name = result.test_id.split("::").last().unwrap_or(&result.test_id);
-            
+
             xml.push_str(&format!(
                 "  <testcase classname=\"{}\" name=\"{}\" time=\"{:.3}\"",
                 class_name,
                 test_name,
                 result.duration.as_secs_f64()
             ));
-            
+
             if result.passed {
                 xml.push_str("/>\n");
             } else {
@@ -245,9 +251,9 @@ impl Reporter for JunitReporter {
                 xml.push_str("  </testcase>\n");
             }
         }
-        
+
         xml.push_str("</testsuite>\n");
-        
+
         if let Some(path) = &self.output_path {
             std::fs::write(path, xml).expect("Failed to write JUnit XML");
         } else {
@@ -262,4 +268,4 @@ fn escape_xml(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
-} 
+}

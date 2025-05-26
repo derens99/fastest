@@ -2,7 +2,7 @@ use crate::cache::DiscoveryCache;
 use crate::error::Result;
 use crate::fixtures::{Fixture, FixtureScope};
 use crate::parametrize::expand_parametrized_tests;
-use crate::parser::{parse_fixtures_and_tests, FixtureDefinition, TestFunction, ParserType};
+use crate::parser::{parse_fixtures_and_tests, FixtureDefinition, ParserType, TestFunction};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -29,7 +29,10 @@ pub fn discover_tests(path: &Path, parser_type: ParserType) -> Result<Vec<TestIt
     Ok(result.tests)
 }
 
-pub fn discover_tests_and_fixtures(path: &Path, parser_type: ParserType) -> Result<DiscoveryResult> {
+pub fn discover_tests_and_fixtures(
+    path: &Path,
+    parser_type: ParserType,
+) -> Result<DiscoveryResult> {
     let mut tests = Vec::new();
     let mut fixtures = Vec::new();
 
@@ -57,12 +60,12 @@ pub fn discover_tests_and_fixtures(path: &Path, parser_type: ParserType) -> Resu
                     for func in test_functions {
                         let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
                         let test_item = create_test_item(path, &func, fixture_deps);
-                        
+
                         // Debug: print decorators
                         if !func.decorators.is_empty() {
                             eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
                         }
-                        
+
                         // Expand parametrized tests
                         let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
                         tests.extend(expanded);
@@ -84,7 +87,11 @@ pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
 }
 
 /// Discover tests with caching support
-pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache, parser_type: ParserType) -> Result<Vec<TestItem>> {
+pub fn discover_tests_cached(
+    path: &Path,
+    cache: &mut DiscoveryCache,
+    parser_type: ParserType,
+) -> Result<Vec<TestItem>> {
     let mut tests = Vec::new();
     let mut cache_hits = 0;
     let mut cache_misses = 0;
@@ -108,19 +115,21 @@ pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache, parser_typ
             // If full fixture discovery is needed with caching, this function needs to be refactored
             // similar to discover_tests_and_fixtures and cache DiscoveryResult or (Vec<FixtureDefinition>, Vec<TestFunction>).
             // For now, it uses the provided parser_type to parse tests.
-            match parse_fixtures_and_tests(path, parser_type) { // Pass parser_type here
-                Ok((_file_fixtures, test_functions)) => { // Ignoring fixtures for now in cached version
+            match parse_fixtures_and_tests(path, parser_type) {
+                // Pass parser_type here
+                Ok((_file_fixtures, test_functions)) => {
+                    // Ignoring fixtures for now in cached version
                     let mut file_tests = Vec::new();
-                    
+
                     for func in test_functions {
                         let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
                         let test_item = create_test_item(path, &func, fixture_deps);
-                        
+
                         // Debug: print decorators
                         if !func.decorators.is_empty() {
                             eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
                         }
-                        
+
                         // Expand parametrized tests
                         let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
                         file_tests.extend(expanded);
@@ -183,11 +192,13 @@ fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>)
     } else {
         format!("{}::{}", module_path, func.name)
     };
-    
+
     // Debug output
     if func.class_name.is_some() {
-        eprintln!("DEBUG: Creating test item with class - ID: {}, class: {:?}, func: {}", 
-                  test_id, func.class_name, func.name);
+        eprintln!(
+            "DEBUG: Creating test item with class - ID: {}, class: {:?}, func: {}",
+            test_id, func.class_name, func.name
+        );
     }
 
     TestItem {

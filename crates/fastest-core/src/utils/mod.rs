@@ -1,3 +1,3 @@
 pub mod python;
 
-pub use python::{PYTHON_CMD, detect_python_command, get_python_version}; 
+pub use python::{detect_python_command, get_python_version, PYTHON_CMD};

@@ -1,11 +1,11 @@
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize)]
 struct WorkerCommand {
@@ -39,11 +39,17 @@ impl PersistentWorker {
             .stderr(Stdio::piped())
             .spawn()?;
 
-        let stdin = process.stdin.take().ok_or_else(|| anyhow!("Failed to get stdin"))?;
-        let stdout = process.stdout.take().ok_or_else(|| anyhow!("Failed to get stdout"))?;
-        
+        let stdin = process
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdin"))?;
+        let stdout = process
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("Failed to get stdout"))?;
+
         let (tx, rx) = channel();
-        
+
         // Spawn reader thread
         let reader_thread = thread::spawn(move || {
             let reader = BufReader::new(stdout);
@@ -70,7 +76,7 @@ impl PersistentWorker {
             id,
             code: code.to_string(),
         };
-        
+
         let mut stdin = self.stdin.lock().unwrap();
         writeln!(stdin, "{}", serde_json::to_string(&command)?)?;
         stdin.flush()?;
@@ -110,7 +116,7 @@ pub struct PersistentWorkerPool {
 impl PersistentWorkerPool {
     pub fn new(size: usize) -> Result<Self> {
         let mut workers = Vec::with_capacity(size);
-        
+
         // Pre-spawn workers
         for _ in 0..size {
             workers.push(PersistentWorker::spawn()?);
@@ -124,7 +130,7 @@ impl PersistentWorkerPool {
 
     pub fn execute(&self, code: &str) -> Result<Vec<serde_json::Value>> {
         let mut workers = self.workers.lock().unwrap();
-        
+
         // Find available worker or spawn new one
         let worker_count = workers.len();
         for i in 0..worker_count {
@@ -137,7 +143,7 @@ impl PersistentWorkerPool {
         let new_worker = PersistentWorker::spawn()?;
         let result = new_worker.execute(worker_count, code);
         workers.push(new_worker);
-        
+
         result
     }
 
@@ -223,4 +229,4 @@ while True:
         }))
         sys.stdout.flush()
         break
-"#; 
+"#;

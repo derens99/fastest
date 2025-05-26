@@ -20,7 +20,7 @@ impl DependencyTracker {
             file_to_tests: HashMap::new(),
         }
     }
-    
+
     /// Update dependencies from test items
     pub fn update_from_tests(&mut self, tests: &[TestItem]) -> Result<()> {
         for test in tests {
@@ -31,12 +31,12 @@ impl DependencyTracker {
         }
         Ok(())
     }
-    
+
     /// Get tests that depend on a file
     pub fn get_dependents(&self, file: &Path) -> Option<&HashSet<String>> {
         self.file_to_tests.get(file)
     }
-    
+
     /// Update dependencies for a test
     pub fn update_test_dependencies(&mut self, test_id: String, dependencies: HashSet<PathBuf>) {
         // Remove old mappings
@@ -83,7 +83,7 @@ impl IncrementalTestRunner {
     pub fn load(path: &Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         let data: IncrementalData = serde_json::from_str(&content)?;
-        
+
         Ok(Self {
             test_dependencies: data.test_dependencies,
             file_timestamps: data.file_timestamps,
@@ -98,11 +98,11 @@ impl IncrementalTestRunner {
             file_timestamps: self.file_timestamps.clone(),
             file_to_tests: self.file_to_tests.clone(),
         };
-        
+
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         let content = serde_json::to_string_pretty(&data)?;
         fs::write(path, content)?;
         Ok(())
@@ -163,7 +163,7 @@ impl IncrementalTestRunner {
                 .entry(dep.clone())
                 .or_insert_with(HashSet::new)
                 .insert(test_id.clone());
-            
+
             // Update timestamp
             if let Ok(metadata) = fs::metadata(dep) {
                 if let Ok(modified) = metadata.modified() {
@@ -210,14 +210,14 @@ pub struct IncrementalStats {
 pub fn extract_python_dependencies(test_file: &Path) -> Result<HashSet<PathBuf>> {
     let content = fs::read_to_string(test_file)?;
     let mut dependencies = HashSet::new();
-    
+
     // Always include the test file itself
     dependencies.insert(test_file.to_path_buf());
-    
+
     // Simple regex-based import extraction (can be improved with AST parsing)
     for line in content.lines() {
         let line = line.trim();
-        
+
         // Handle 'import module' and 'from module import ...'
         if line.starts_with("import ") || line.starts_with("from ") {
             if let Some(module_name) = extract_module_name(line) {
@@ -227,13 +227,13 @@ pub fn extract_python_dependencies(test_file: &Path) -> Result<HashSet<PathBuf>>
             }
         }
     }
-    
+
     Ok(dependencies)
 }
 
 fn extract_module_name(import_line: &str) -> Option<String> {
     let line = import_line.trim();
-    
+
     if line.starts_with("import ") {
         // import module.submodule as alias
         let parts: Vec<&str> = line[7..].split_whitespace().collect();
@@ -247,29 +247,29 @@ fn extract_module_name(import_line: &str) -> Option<String> {
             return Some(parts[0].trim().to_string());
         }
     }
-    
+
     None
 }
 
 fn module_to_paths(module_name: &str, base_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut paths = Vec::new();
     let base = base_dir.unwrap_or(Path::new("."));
-    
+
     // Replace dots with path separators
     let module_path = module_name.replace('.', "/");
-    
+
     // Try as a module directory with __init__.py
     let init_path = base.join(&module_path).join("__init__.py");
     if init_path.exists() {
         paths.push(init_path);
     }
-    
+
     // Try as a Python file
     let py_path = base.join(format!("{}.py", module_path));
     if py_path.exists() {
         paths.push(py_path);
     }
-    
+
     // For relative imports, also check parent directories
     if module_name.starts_with('.') {
         let parent_path = base.parent().map(|p| p.to_path_buf());
@@ -278,20 +278,17 @@ fn module_to_paths(module_name: &str, base_dir: Option<&Path>) -> Vec<PathBuf> {
             paths.extend(module_to_paths(relative_module, Some(&parent)));
         }
     }
-    
+
     paths
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_extract_module_name() {
-        assert_eq!(
-            extract_module_name("import os"),
-            Some("os".to_string())
-        );
+        assert_eq!(extract_module_name("import os"), Some("os".to_string()));
         assert_eq!(
             extract_module_name("from pathlib import Path"),
             Some("pathlib".to_string())
@@ -305,4 +302,4 @@ mod tests {
             Some("..utils".to_string())
         );
     }
-} 
+}

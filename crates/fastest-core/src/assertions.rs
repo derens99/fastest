@@ -10,7 +10,7 @@ pub fn format_assertion_error(error: &str) -> String {
             return enhanced;
         }
     }
-    
+
     // Return original error if we can't enhance it
     error.to_string()
 }
@@ -21,11 +21,11 @@ fn try_enhance_assertion(error: &str) -> Option<String> {
     if error.contains("assert") && error.contains("==") {
         return enhance_equality_assertion(error);
     }
-    
+
     if error.contains("assert") && error.contains("in") {
         return enhance_membership_assertion(error);
     }
-    
+
     None
 }
 
@@ -33,35 +33,43 @@ fn try_enhance_assertion(error: &str) -> Option<String> {
 fn enhance_equality_assertion(error: &str) -> Option<String> {
     // Try to extract the values being compared
     // This is a simplified version - a full implementation would parse Python AST
-    
+
     let mut result = String::new();
-    result.push_str(&"AssertionError: Equality assertion failed".red().to_string());
+    result.push_str(
+        &"AssertionError: Equality assertion failed"
+            .red()
+            .to_string(),
+    );
     result.push_str("\n\n");
-    
+
     // If we can extract values, show a diff
     if let Some((left, right)) = extract_comparison_values(error) {
         result.push_str(&format!("Expected: {}\n", left.green()));
         result.push_str(&format!("Actual:   {}\n", right.red()));
-        
+
         // Show diff for strings
         if left.contains('\n') || right.contains('\n') {
             result.push_str("\nDifference:\n");
             result.push_str(&create_diff(&left, &right));
         }
     }
-    
+
     Some(result)
 }
 
 /// Enhance membership assertions
 fn enhance_membership_assertion(error: &str) -> Option<String> {
     let mut result = String::new();
-    result.push_str(&"AssertionError: Membership assertion failed".red().to_string());
+    result.push_str(
+        &"AssertionError: Membership assertion failed"
+            .red()
+            .to_string(),
+    );
     result.push_str("\n\n");
-    
+
     // Add contextual information
     result.push_str("The item was not found in the container\n");
-    
+
     Some(result)
 }
 
@@ -76,12 +84,12 @@ fn extract_comparison_values(error: &str) -> Option<(String, String)> {
 pub fn create_diff(left: &str, right: &str) -> String {
     let diff = TextDiff::from_lines(left, right);
     let mut result = String::new();
-    
+
     for (idx, group) in diff.grouped_ops(3).iter().enumerate() {
         if idx > 0 {
             result.push_str(&"...\n".dimmed().to_string());
         }
-        
+
         for op in group {
             for change in diff.iter_changes(op) {
                 let (sign, style) = match change.tag() {
@@ -89,20 +97,20 @@ pub fn create_diff(left: &str, right: &str) -> String {
                     ChangeTag::Insert => ("+", "green"),
                     ChangeTag::Equal => (" ", "dimmed"),
                 };
-                
+
                 result.push_str(&format!(
                     "{} {}",
                     sign.color(style),
                     change.to_string().trim_end()
                 ));
-                
+
                 if change.missing_newline() {
                     result.push('\n');
                 }
             }
         }
     }
-    
+
     result
 }
 
@@ -117,7 +125,7 @@ pub fn format_python_value(value: &str) -> String {
             }
         }
     }
-    
+
     value.to_string()
 }
 
@@ -180,20 +188,20 @@ sys.excepthook = enhanced_excepthook
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_diff_creation() {
         let left = "hello\nworld\nfoo";
         let right = "hello\nplanet\nfoo";
-        
+
         let diff = create_diff(left, right);
         assert!(diff.contains("world"));
         assert!(diff.contains("planet"));
     }
-    
+
     #[test]
     fn test_format_python_value() {
         let formatted = format_python_value("{\"key\": \"value\"}");
         assert!(formatted.contains("key"));
     }
-} 
+}

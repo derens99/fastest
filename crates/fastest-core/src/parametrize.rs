@@ -13,9 +13,9 @@ pub struct ParametrizedTest {
 /// A set of parameters for a single test invocation
 #[derive(Debug, Clone)]
 pub struct ParamSet {
-    pub id: String,              // Custom ID if provided
-    pub values: Vec<Value>,      // Parameter values
-    pub marks: Vec<String>,      // Additional marks for this param set
+    pub id: String,         // Custom ID if provided
+    pub values: Vec<Value>, // Parameter values
+    pub marks: Vec<String>, // Additional marks for this param set
 }
 
 /// Parse parametrize decorator and extract parameter information
@@ -37,7 +37,7 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 
     // Extract the content between parentheses
     let content = content.trim_start_matches('(').trim_end_matches(')');
-    
+
     // Find the comma after the parameter names (which are in quotes)
     let mut quote_count = 0;
     let mut split_pos = None;
@@ -51,14 +51,20 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
             _ => {}
         }
     }
-    
+
     let split_pos = split_pos?;
-    let param_names_str = content[..split_pos].trim().trim_matches('"').trim_matches('\'');
+    let param_names_str = content[..split_pos]
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'');
     let values_str = content[split_pos + 1..].trim();
-    
+
     // Parse parameter names
     let param_names: Vec<String> = if param_names_str.contains(',') {
-        param_names_str.split(',').map(|s| s.trim().to_string()).collect()
+        param_names_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .collect()
     } else {
         vec![param_names_str.to_string()]
     };
@@ -73,22 +79,22 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
     // For now, we'll do a simple parsing that handles basic cases
     // In the future, we might want to use a proper Python AST parser
-    
+
     let values_str = values_str.trim();
     if !values_str.starts_with('[') || !values_str.ends_with(']') {
         return None;
     }
 
-    let inner = &values_str[1..values_str.len()-1];
+    let inner = &values_str[1..values_str.len() - 1];
     let mut param_sets = Vec::new();
-    
+
     // Simple parsing for tuples and single values
     let mut in_tuple = false;
     let mut current_value = String::new();
     let mut paren_depth = 0;
     let mut in_string = false;
     let mut string_char = ' ';
-    
+
     for ch in inner.chars() {
         match ch {
             '"' | '\'' if !in_string => {
@@ -135,7 +141,7 @@ fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
             }
         }
     }
-    
+
     // Handle last value
     if !current_value.trim().is_empty() {
         if let Some(value) = parse_single_value(&current_value) {
@@ -156,7 +162,7 @@ fn parse_tuple_values(tuple_str: &str) -> Option<Vec<Value>> {
         .split(',')
         .filter_map(|s| parse_single_value(s.trim()))
         .collect();
-    
+
     if values.is_empty() {
         None
     } else {
@@ -167,14 +173,15 @@ fn parse_tuple_values(tuple_str: &str) -> Option<Vec<Value>> {
 /// Parse a single value from string representation
 fn parse_single_value(value_str: &str) -> Option<Value> {
     let trimmed = value_str.trim();
-    
+
     // String literal
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) ||
-       (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
-        let inner = &trimmed[1..trimmed.len()-1];
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        let inner = &trimmed[1..trimmed.len() - 1];
         return Some(Value::String(inner.to_string()));
     }
-    
+
     // Boolean
     if trimmed == "True" {
         return Some(Value::Bool(true));
@@ -182,12 +189,12 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
     if trimmed == "False" {
         return Some(Value::Bool(false));
     }
-    
+
     // None
     if trimmed == "None" {
         return Some(Value::Null);
     }
-    
+
     // Number
     if let Ok(num) = trimmed.parse::<i64>() {
         return Some(Value::Number(serde_json::Number::from(num)));
@@ -197,19 +204,16 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
             return Some(Value::Number(n));
         }
     }
-    
+
     // Fallback to string
     Some(Value::String(trimmed.to_string()))
 }
 
 /// Expand a test function with parametrize decorators into multiple test items
-pub fn expand_parametrized_tests(
-    test: &TestItem,
-    decorators: &[String],
-) -> Result<Vec<TestItem>> {
+pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Result<Vec<TestItem>> {
     let mut expanded_tests = Vec::new();
     let mut param_info: Vec<(Vec<String>, Vec<Vec<Value>>)> = Vec::new();
-    
+
     // Collect all parametrize decorators
     for decorator in decorators {
         if decorator.contains("parametrize") {
@@ -218,30 +222,33 @@ pub fn expand_parametrized_tests(
             }
         }
     }
-    
+
     if param_info.is_empty() {
         // Not a parametrized test, return as-is
         return Ok(vec![test.clone()]);
     }
-    
+
     // Generate test cases
     let test_cases = generate_test_cases(&param_info);
-    
+
     for (_idx, case) in test_cases.iter().enumerate() {
         let mut expanded_test = test.clone();
-        
+
         // Create unique ID for this test case
         let param_id = format_param_id(&case.params);
         expanded_test.id = format!("{}[{}]", test.id, param_id);
         expanded_test.name = format!("{}[{}]", test.function_name, param_id);
-        
+
         // Store parameter info in decorators (for now)
         // In the future, we might want to add a proper field for this
-        expanded_test.decorators.push(format!("__params__={}", serde_json::to_string(&case.params).unwrap_or_default()));
-        
+        expanded_test.decorators.push(format!(
+            "__params__={}",
+            serde_json::to_string(&case.params).unwrap_or_default()
+        ));
+
         expanded_tests.push(expanded_test);
     }
-    
+
     Ok(expanded_tests)
 }
 
@@ -255,7 +262,7 @@ fn generate_test_cases(param_info: &[(Vec<String>, Vec<Vec<Value>>)]) -> Vec<Tes
     if param_info.is_empty() {
         return vec![];
     }
-    
+
     // Start with the first parametrize decorator
     let (first_names, first_values) = &param_info[0];
     let mut cases: Vec<TestCase> = first_values
@@ -270,11 +277,11 @@ fn generate_test_cases(param_info: &[(Vec<String>, Vec<Vec<Value>>)]) -> Vec<Tes
             TestCase { params }
         })
         .collect();
-    
+
     // Apply remaining parametrize decorators (cartesian product)
     for (names, value_sets) in param_info.iter().skip(1) {
         let mut new_cases = Vec::new();
-        
+
         for existing_case in &cases {
             for values in value_sets {
                 let mut new_params = existing_case.params.clone();
@@ -286,10 +293,10 @@ fn generate_test_cases(param_info: &[(Vec<String>, Vec<Vec<Value>>)]) -> Vec<Tes
                 new_cases.push(TestCase { params: new_params });
             }
         }
-        
+
         cases = new_cases;
     }
-    
+
     cases
 }
 
@@ -298,20 +305,26 @@ fn format_param_id(params: &HashMap<String, Value>) -> String {
     let mut parts = Vec::new();
     let mut keys: Vec<_> = params.keys().collect();
     keys.sort(); // Ensure consistent ordering
-    
+
     for key in keys {
         if let Some(value) = params.get(key) {
             let formatted = match value {
                 Value::String(s) => s.clone(),
                 Value::Number(n) => n.to_string(),
-                Value::Bool(b) => if *b { "True".to_string() } else { "False".to_string() },
+                Value::Bool(b) => {
+                    if *b {
+                        "True".to_string()
+                    } else {
+                        "False".to_string()
+                    }
+                }
                 Value::Null => "None".to_string(),
                 _ => value.to_string(),
             };
             parts.push(formatted);
         }
     }
-    
+
     parts.join("-")
 }
 
@@ -323,7 +336,7 @@ mod tests {
     fn test_parse_simple_parametrize() {
         let decorator = r#"@pytest.mark.parametrize("x", [1, 2, 3])"#;
         let result = parse_parametrize_decorator(decorator);
-        
+
         assert!(result.is_some());
         let (names, values) = result.unwrap();
         assert_eq!(names, vec!["x"]);
@@ -334,7 +347,7 @@ mod tests {
     fn test_parse_tuple_parametrize() {
         let decorator = r#"@pytest.mark.parametrize("x,y,expected", [(2, 3, 5), (4, 5, 9)])"#;
         let result = parse_parametrize_decorator(decorator);
-        
+
         assert!(result.is_some());
         let (names, values) = result.unwrap();
         assert_eq!(names, vec!["x", "y", "expected"]);
@@ -346,7 +359,7 @@ mod tests {
     fn test_parse_string_parametrize() {
         let decorator = r#"@pytest.mark.parametrize("word", ["hello", "world"])"#;
         let result = parse_parametrize_decorator(decorator);
-        
+
         assert!(result.is_some());
         let (names, values) = result.unwrap();
         assert_eq!(names, vec!["word"]);
@@ -361,13 +374,13 @@ mod tests {
     (10, -5, 5),
 ])"#;
         let result = parse_parametrize_decorator(decorator);
-        
+
         assert!(result.is_some());
         let (names, values) = result.unwrap();
         assert_eq!(names, vec!["x", "y", "expected"]);
         assert_eq!(values.len(), 3);
         assert_eq!(values[0].len(), 3);
-        
+
         // Check first parameter set
         assert_eq!(values[0][0], Value::Number(serde_json::Number::from(2)));
         assert_eq!(values[0][1], Value::Number(serde_json::Number::from(3)));
@@ -379,7 +392,7 @@ mod tests {
         // Test with fastest prefix
         let decorator = r#"@fastest.mark.parametrize("x", [1, 2, 3])"#;
         let result = parse_parametrize_decorator(decorator);
-        
+
         assert!(result.is_some());
         let (names, values) = result.unwrap();
         assert_eq!(names, vec!["x"]);
@@ -395,7 +408,7 @@ mod tests {
             r#"@mark.parametrize("x,y", [(1, 2), (3, 4)])"#,
             r#"parametrize("x,y", [(1, 2), (3, 4)])"#,
         ];
-        
+
         for decorator in decorators {
             let result = parse_parametrize_decorator(decorator);
             assert!(result.is_some(), "Failed to parse: {}", decorator);
@@ -404,4 +417,4 @@ mod tests {
             assert_eq!(values.len(), 2);
         }
     }
-} 
+}

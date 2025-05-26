@@ -1,6 +1,6 @@
 use fastest_core::{
-    discover_tests as core_discover, run_test as core_run_test, BatchExecutor, ParallelExecutor,
-    TestItem, parser::ParserType,
+    discover_tests as core_discover, parser::ParserType, run_test as core_run_test, BatchExecutor,
+    ParallelExecutor, TestItem,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;

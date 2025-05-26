@@ -1,10 +1,9 @@
-use std::process::Command;
 use once_cell::sync::Lazy;
+use std::process::Command;
 
 /// The detected Python command to use
-pub static PYTHON_CMD: Lazy<String> = Lazy::new(|| {
-    detect_python_command().unwrap_or_else(|| "python3".to_string())
-});
+pub static PYTHON_CMD: Lazy<String> =
+    Lazy::new(|| detect_python_command().unwrap_or_else(|| "python3".to_string()));
 
 /// Detect the correct Python command to use
 pub fn detect_python_command() -> Option<String> {
@@ -21,7 +20,7 @@ pub fn detect_python_command() -> Option<String> {
             }
         }
     }
-    
+
     // Check if we're in a conda environment
     if let Ok(_) = std::env::var("CONDA_DEFAULT_ENV") {
         if is_python_command_valid("python") {
@@ -29,33 +28,33 @@ pub fn detect_python_command() -> Option<String> {
             return Some("python".to_string());
         }
     }
-    
+
     // Try python3 first (most common on modern systems)
     if is_python_command_valid("python3") {
         return Some("python3".to_string());
     }
-    
+
     // Try python
     if is_python_command_valid("python") {
         return Some("python".to_string());
     }
-    
+
     // Try to find Python in common locations
     let common_paths = [
         "/usr/bin/python3",
-        "/usr/local/bin/python3", 
+        "/usr/local/bin/python3",
         "/opt/homebrew/bin/python3",
         "C:\\Python39\\python.exe",
         "C:\\Python310\\python.exe",
         "C:\\Python311\\python.exe",
     ];
-    
+
     for path in &common_paths {
         if is_python_command_valid(path) {
             return Some(path.to_string());
         }
     }
-    
+
     None
 }
 
@@ -85,13 +84,13 @@ pub fn get_python_version() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_python_detection() {
         assert!(!PYTHON_CMD.is_empty());
         println!("Detected Python command: {}", *PYTHON_CMD);
     }
-    
+
     #[test]
     fn test_python_version() {
         if let Some(version) = get_python_version() {
@@ -99,4 +98,4 @@ mod tests {
             assert!(version.contains("Python"));
         }
     }
-} 
+}

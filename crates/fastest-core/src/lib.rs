@@ -1,19 +1,19 @@
+pub mod assertions;
 pub mod cache;
 pub mod config;
+pub mod coverage;
 pub mod discovery;
 pub mod error;
 pub mod executor;
 pub mod fixtures;
 pub mod incremental;
 pub mod markers;
-pub mod parser;
 pub mod parametrize;
+pub mod parser;
 pub mod plugin;
 pub mod reporter;
 pub mod utils;
 pub mod watch;
-pub mod coverage;
-pub mod assertions;
 
 pub use cache::{default_cache_path, DiscoveryCache};
 pub use discovery::{
@@ -51,8 +51,8 @@ pub use plugin::{Plugin, PluginManager};
 // Re-export incremental types
 pub use incremental::{DependencyTracker, IncrementalTestRunner};
 
-// Re-export coverage types  
-pub use coverage::{CoverageRunner, CoverageReport, CoverageFormat};
+// Re-export coverage types
+pub use coverage::{CoverageFormat, CoverageReport, CoverageRunner};
 
 // Version from Cargo.toml
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

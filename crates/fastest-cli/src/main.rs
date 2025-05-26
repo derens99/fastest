@@ -1,9 +1,8 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
-    default_cache_path, discover_tests, discover_tests_cached,
-    filter_by_markers, BatchExecutor, DiscoveryCache, ParallelExecutor,
-    executor::OptimizedExecutor, parser::ParserType, Config,
+    default_cache_path, discover_tests, discover_tests_cached, executor::OptimizedExecutor,
+    filter_by_markers, parser::ParserType, BatchExecutor, Config, DiscoveryCache, ParallelExecutor,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -63,19 +62,19 @@ struct Cli {
     /// Only run tests affected by recent changes (experimental)
     #[arg(long = "incremental")]
     incremental: bool,
-    
+
     /// Watch files for changes and re-run tests
     #[arg(short = 'w', long = "watch")]
     watch: bool,
-    
+
     /// Enable coverage collection
     #[arg(long = "cov")]
     coverage: bool,
-    
+
     /// Coverage report format (term, html, xml, json)
     #[arg(long = "cov-report", default_value = "term")]
     coverage_report: String,
-    
+
     /// Source directories for coverage
     #[arg(long = "cov-source")]
     coverage_source: Vec<PathBuf>,
@@ -120,7 +119,7 @@ fn get_parser_type(parser_str: &str, verbose: bool) -> ParserType {
 
 fn main() -> anyhow::Result<()> {
     let mut cli = Cli::parse();
-    
+
     // Load config and apply defaults
     let config = Config::load().unwrap_or_default();
     apply_config_to_cli(&config, &mut cli);
@@ -138,20 +137,20 @@ fn apply_config_to_cli(config: &Config, cli: &mut Cli) {
     if cli.paths.is_empty() {
         cli.paths = config.testpaths.clone();
     }
-    
+
     // Apply fastest-specific config
     if cli.workers.is_none() {
         cli.workers = config.fastest.workers;
     }
-    
+
     if cli.parser.is_none() {
         cli.parser = Some(config.fastest.parser.clone());
     }
-    
+
     if cli.optimizer.is_none() {
         cli.optimizer = Some(config.fastest.optimizer.clone());
     }
-    
+
     // Apply other config values
     if cli.verbose {
         eprintln!("Loaded config from: {:?}", config);
@@ -164,34 +163,42 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
     let parser_type = get_parser_type(parser_str, cli.verbose);
 
     let mut all_tests = Vec::new();
-    
+
     // Discover tests from all paths
     for path in &cli.paths {
         let tests = if cli.no_cache {
             if cli.verbose {
-                eprintln!("Discovering tests in {} with {:?} parser (cache disabled)", path.display(), parser_type);
+                eprintln!(
+                    "Discovering tests in {} with {:?} parser (cache disabled)",
+                    path.display(),
+                    parser_type
+                );
             }
             discover_tests(path, parser_type)?
         } else {
             if cli.verbose {
-                eprintln!("Discovering tests in {} with {:?} parser (cache enabled)", path.display(), parser_type);
+                eprintln!(
+                    "Discovering tests in {} with {:?} parser (cache enabled)",
+                    path.display(),
+                    parser_type
+                );
             }
             let cache_path = default_cache_path();
             let mut cache =
                 DiscoveryCache::load(&cache_path).unwrap_or_else(|_| DiscoveryCache::new());
             // discover_tests_cached expects a ParserType now
             let tests = discover_tests_cached(path, &mut cache, parser_type)?;
-            
+
             // Save cache
             if let Err(e) = cache.save(&cache_path) {
                 eprintln!("Warning: Failed to save discovery cache: {}", e);
             }
-            
+
             tests
         };
         all_tests.extend(tests);
     }
-    
+
     let tests = all_tests;
 
     let duration = start.elapsed();
@@ -271,28 +278,36 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
 
     // Discover tests from all paths
     let mut discovered_tests = Vec::new();
-    
+
     for path in &cli.paths {
         let tests = if cli.no_cache {
             if cli.verbose {
-                eprintln!("Discovering tests in {} with {:?} parser (cache disabled)", path.display(), parser_type);
+                eprintln!(
+                    "Discovering tests in {} with {:?} parser (cache disabled)",
+                    path.display(),
+                    parser_type
+                );
             }
             discover_tests(path, parser_type)?
         } else {
             if cli.verbose {
-                eprintln!("Discovering tests in {} with {:?} parser (cache enabled)", path.display(), parser_type);
+                eprintln!(
+                    "Discovering tests in {} with {:?} parser (cache enabled)",
+                    path.display(),
+                    parser_type
+                );
             }
             let cache_path = default_cache_path();
             let mut cache =
                 DiscoveryCache::load(&cache_path).unwrap_or_else(|_| DiscoveryCache::new());
             // discover_tests_cached expects a ParserType now
             let tests = discover_tests_cached(path, &mut cache, parser_type)?;
-            
+
             // Save cache
             if let Err(e) = cache.save(&cache_path) {
                 eprintln!("Warning: Failed to save discovery cache: {}", e);
             }
-            
+
             tests
         };
         discovered_tests.extend(tests);
@@ -338,7 +353,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
     // Run tests using appropriate executor based on configuration
     let optimizer = cli.optimizer.as_deref().unwrap_or("optimized");
     let workers = cli.workers.unwrap_or(0);
-    
+
     let results = match optimizer {
         "standard" => {
             if cli.verbose {
@@ -355,8 +370,14 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
         }
         "aggressive" | "optimized" | _ => {
             if cli.verbose {
-                eprintln!("Using optimized executor with {} workers", 
-                    if workers == 0 { "auto-detected".to_string() } else { workers.to_string() });
+                eprintln!(
+                    "Using optimized executor with {} workers",
+                    if workers == 0 {
+                        "auto-detected".to_string()
+                    } else {
+                        workers.to_string()
+                    }
+                );
                 if cli.persistent_workers {
                     eprintln!("Persistent worker pool: enabled (experimental)");
                 }
@@ -364,7 +385,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
             // Default to optimized executor
             let num_workers = if workers == 0 { None } else { Some(workers) };
             let mut executor = OptimizedExecutor::new(num_workers, cli.verbose);
-            
+
             // Enable coverage if requested
             if cli.coverage {
                 let source_dirs = if cli.coverage_source.is_empty() {
@@ -375,7 +396,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
                 };
                 executor = executor.with_coverage(source_dirs);
             }
-            
+
             executor.execute(discovered_tests)?
         }
     };
@@ -443,7 +464,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
         if cli.verbose {
             eprintln!("\nGenerating coverage report...");
         }
-        
+
         // Use coverage module to generate report
         let coverage_format = match cli.coverage_report.as_str() {
             "html" => fastest_core::coverage::CoverageFormat::Html,
@@ -451,28 +472,27 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
             "json" => fastest_core::coverage::CoverageFormat::Json,
             _ => fastest_core::coverage::CoverageFormat::Terminal,
         };
-        
+
         let source_dirs = if cli.coverage_source.is_empty() {
             vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
         } else {
             cli.coverage_source.clone()
         };
-        
+
         let coverage_runner = fastest_core::coverage::CoverageRunner::new(source_dirs);
-        
+
         // Combine coverage data from multiple workers
         if let Err(e) = coverage_runner.combine_coverage() {
             eprintln!("Warning: Failed to combine coverage data: {}", e);
         }
-        
+
         // Generate report
         match coverage_runner.generate_report(coverage_format) {
             Ok(report) => {
                 if cli.verbose {
-                    eprintln!("\nCoverage: {:.1}% ({}/{} statements)", 
-                        report.total_coverage,
-                        report.covered_statements,
-                        report.total_statements
+                    eprintln!(
+                        "\nCoverage: {:.1}% ({}/{} statements)",
+                        report.total_coverage, report.covered_statements, report.total_statements
                     );
                 }
             }

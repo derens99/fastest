@@ -1,5 +1,5 @@
-use super::TestFunction;
 use super::FixtureDefinition;
+use super::TestFunction;
 use anyhow::{anyhow, Result};
 use tree_sitter::{Node, Parser};
 
@@ -37,7 +37,7 @@ impl AstParser {
     ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
         let content = std::fs::read_to_string(path)?;
         let mut parser = Self::new()?;
-        
+
         let tree = parser
             .parser
             .parse(&content, None)
@@ -205,12 +205,14 @@ impl AstParser {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = &source[name_node.byte_range()];
                     let line_number = name_node.start_position().row + 1;
-                    
+
                     // Check if it's a fixture
                     let is_fixture = decorators.iter().any(|d| {
-                        d.contains("pytest.fixture") || d.contains("fixture") || d.contains("fastest.fixture")
+                        d.contains("pytest.fixture")
+                            || d.contains("fixture")
+                            || d.contains("fastest.fixture")
                     });
-                    
+
                     if is_fixture {
                         let (scope, autouse) = self.parse_fixture_decorator(&decorators);
                         fixtures.push(FixtureDefinition {
@@ -250,12 +252,14 @@ impl AstParser {
                         if let Some(name_node) = definition.child_by_field_name("name") {
                             let name = &source[name_node.byte_range()];
                             let line_number = name_node.start_position().row + 1;
-                            
+
                             // Check if it's a fixture
                             let is_fixture = decorators.iter().any(|d| {
-                                d.contains("pytest.fixture") || d.contains("fixture") || d.contains("fastest.fixture")
+                                d.contains("pytest.fixture")
+                                    || d.contains("fixture")
+                                    || d.contains("fastest.fixture")
                             });
-                            
+
                             if is_fixture {
                                 let (scope, autouse) = self.parse_fixture_decorator(&decorators);
                                 fixtures.push(FixtureDefinition {
@@ -295,7 +299,13 @@ impl AstParser {
                     if class_name.starts_with("Test") {
                         // Visit class body looking for test methods
                         if let Some(body) = node.child_by_field_name("body") {
-                            self.visit_node_for_all(body, source, tests, fixtures, Some(class_name))?;
+                            self.visit_node_for_all(
+                                body,
+                                source,
+                                tests,
+                                fixtures,
+                                Some(class_name),
+                            )?;
                         }
                     }
                 }
@@ -323,7 +333,8 @@ impl AstParser {
                     let scope_part = &decorator[scope_start + 6..];
                     // Find the closing quote or comma or parenthesis
                     if let Some(quote_end) = scope_part.find(&['"', '\'', ',', ')'][..]) {
-                        let extracted_scope = scope_part[..quote_end].trim_matches(&['"', '\''][..]);
+                        let extracted_scope =
+                            scope_part[..quote_end].trim_matches(&['"', '\''][..]);
                         scope = extracted_scope.to_string();
                     }
                 }
