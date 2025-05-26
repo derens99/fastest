@@ -158,6 +158,8 @@ mod tests {
             line_number: 1,
             is_async: false,
             class_name: None,
+            decorators: vec![],
+            fixture_deps: vec![],
         }
     }
 
@@ -168,7 +170,7 @@ mod tests {
             create_test_item("dir1/test1.py", "test_one"),
             create_test_item("dir1/test1.py", "test_two"),
             create_test_item("dir2/test2.py", "test_three"),
-            create_test_item("test_root.py", "test_four"),
+            create_test_item("./test_root.py", "test_four"),
         ];
 
         let grouped = executor.group_by_module(tests);

@@ -176,7 +176,7 @@ fn run_tests_parallel(
 }
 
 #[pymodule]
-fn fastest(_py: Python, m: &PyModule) -> PyResult<()> {
+fn fastest(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(discover_tests, m)?)?;
     m.add_function(wrap_pyfunction!(run_test, m)?)?;
     m.add_function(wrap_pyfunction!(run_tests_batch, m)?)?;

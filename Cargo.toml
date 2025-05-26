@@ -13,7 +13,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-pyo3 = "0.20"
+pyo3 = "0.25"
 anyhow = "1.0"
 thiserror = "1.0"
 walkdir = "2.5"
