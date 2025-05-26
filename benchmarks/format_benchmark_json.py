@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import time
+import traceback
 
 def run_benchmark(script_name):
     """Run a benchmark script and capture its output."""
@@ -12,7 +13,7 @@ def run_benchmark(script_name):
     result = subprocess.run([sys.executable, f"benchmarks/{script_name}"], 
                           capture_output=True, text=True)
     duration = time.time() - start
-    return result.stdout, result.stderr, duration
+    return result.stdout, result.stderr, duration, result.returncode
 
 def parse_discovery_benchmark(output):
     """Parse discovery benchmark output."""
@@ -176,58 +177,78 @@ def main():
     # Run discovery benchmark
     print("Running discovery benchmark...", file=sys.stderr)
     try:
-        output, stderr, duration = run_benchmark("benchmark.py")
+        output, stderr, duration, returncode = run_benchmark("benchmark.py")
         if stderr:
             print(f"Discovery benchmark stderr: {stderr}", file=sys.stderr)
-        discovery_results = parse_discovery_benchmark(output)
-        discovery_results['benchmark_duration_s'] = duration
-        all_results['benchmarks']['discovery'] = discovery_results
+        if returncode != 0:
+            print(f"Discovery benchmark failed with return code {returncode}", file=sys.stderr)
+            all_results['benchmarks']['discovery'] = {'error': f'Return code {returncode}', 'stderr': stderr}
+        else:
+            discovery_results = parse_discovery_benchmark(output)
+            discovery_results['benchmark_duration_s'] = duration
+            all_results['benchmarks']['discovery'] = discovery_results
     except Exception as e:
         print(f"Discovery benchmark failed: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
         all_results['benchmarks']['discovery'] = {'error': str(e)}
     
     # Run parser benchmark
     print("Running parser benchmark...", file=sys.stderr)
     try:
-        output, stderr, duration = run_benchmark("benchmark_parsers.py")
+        output, stderr, duration, returncode = run_benchmark("benchmark_parsers.py")
         if stderr:
             print(f"Parser benchmark stderr: {stderr}", file=sys.stderr)
-        parser_results = parse_parser_benchmark(output)
-        parser_results['benchmark_duration_s'] = duration
-        all_results['benchmarks']['parser'] = parser_results
+        if returncode != 0:
+            print(f"Parser benchmark failed with return code {returncode}", file=sys.stderr)
+            all_results['benchmarks']['parser'] = {'error': f'Return code {returncode}', 'stderr': stderr}
+        else:
+            parser_results = parse_parser_benchmark(output)
+            parser_results['benchmark_duration_s'] = duration
+            all_results['benchmarks']['parser'] = parser_results
     except Exception as e:
         print(f"Parser benchmark failed: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
         all_results['benchmarks']['parser'] = {'error': str(e)}
     
     # Run parallel benchmark
     print("Running parallel execution benchmark...", file=sys.stderr)
     try:
-        output, stderr, duration = run_benchmark("benchmark_parallel.py")
+        output, stderr, duration, returncode = run_benchmark("benchmark_parallel.py")
         if stderr:
             print(f"Parallel benchmark stderr: {stderr}", file=sys.stderr)
-        parallel_results = parse_parallel_benchmark(output)
-        parallel_results['benchmark_duration_s'] = duration
-        all_results['benchmarks']['parallel'] = parallel_results
+        if returncode != 0:
+            print(f"Parallel benchmark failed with return code {returncode}", file=sys.stderr)
+            all_results['benchmarks']['parallel'] = {'error': f'Return code {returncode}', 'stderr': stderr}
+        else:
+            parallel_results = parse_parallel_benchmark(output)
+            parallel_results['benchmark_duration_s'] = duration
+            all_results['benchmarks']['parallel'] = parallel_results
     except Exception as e:
         print(f"Parallel benchmark failed: {e}", file=sys.stderr)
+        print(traceback.format_exc(), file=sys.stderr)
         all_results['benchmarks']['parallel'] = {'error': str(e)}
     
-    # Calculate overall metrics
+    # Calculate overall metrics (with error handling)
     discovery_results = all_results['benchmarks'].get('discovery', {})
     parser_results = all_results['benchmarks'].get('parser', {})
     parallel_results = all_results['benchmarks'].get('parallel', {})
     
+    # Get parser speedup values safely
+    parser_speedups = []
+    for k, v in parser_results.items():
+        if k.startswith('ast_speedup') and isinstance(v, (int, float)):
+            parser_speedups.append(v)
+    
+    # Get parallel speedup values safely
+    parallel_speedups = [parallel_results.get('parallel_speedup', 0)]
+    for k, v in parallel_results.items():
+        if k.startswith('speedup_') and isinstance(v, (int, float)):
+            parallel_speedups.append(v)
+    
     all_results['summary'] = {
         'discovery_speedup': discovery_results.get('discovery_speedup', 0),
-        'best_parser_speedup': max(
-            v for k, v in parser_results.items() 
-            if k.startswith('ast_speedup') and isinstance(v, (int, float))
-        ) if any(k.startswith('ast_speedup') for k in parser_results) else 0,
-        'best_parallel_speedup': max([
-            parallel_results.get('parallel_speedup', 0),
-            *[v for k, v in parallel_results.items() 
-              if k.startswith('speedup_') and isinstance(v, (int, float))]
-        ]) if parallel_results else 0
+        'best_parser_speedup': max(parser_speedups) if parser_speedups else 0,
+        'best_parallel_speedup': max(parallel_speedups) if parallel_speedups else 0
     }
     
     # Output JSON

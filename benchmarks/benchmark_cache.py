@@ -8,9 +8,28 @@ import os
 import shutil
 from pathlib import Path
 
+def get_fastest_binary():
+    """Get the path to the fastest binary."""
+    # Check for release build first (faster)
+    release_path = "./target/release/fastest"
+    if os.path.exists(release_path):
+        return release_path
+    
+    # Fall back to debug build
+    debug_path = "./target/debug/fastest"
+    if os.path.exists(debug_path):
+        return debug_path
+    
+    # Try to find it anywhere in target
+    for path in Path("target").rglob("fastest"):
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    
+    raise FileNotFoundError("Could not find fastest binary. Please run 'cargo build' first.")
+
 def run_discovery(path, use_cache=True):
     """Run fastest discovery and return the time taken."""
-    cmd = ["./target/release/fastest"]
+    cmd = [get_fastest_binary()]
     if not use_cache:
         cmd.append("--no-cache")
     cmd.extend([str(path), "discover", "--format", "count"])
@@ -57,26 +76,30 @@ def main():
     # First, benchmark on the small test project
     print("Small project (10 tests):")
     
-    # Clear cache first
-    cache_path = Path.home() / ".cache" / "fastest" / "discovery_cache.json"
-    if cache_path.exists():
-        cache_path.unlink()
-    
-    # First run (cold cache)
-    time1, count1 = run_discovery("test_project", use_cache=True)
-    print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
-    
-    # Second run (warm cache)
-    time2, count2 = run_discovery("test_project", use_cache=True)
-    print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
-    
-    # Run without cache
-    time3, count3 = run_discovery("test_project", use_cache=False)
-    print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
-    
-    if time2 and time1:
-        speedup = time1 / time2
-        print(f"  Cache speedup:           {speedup:.1f}x faster")
+    # Check if test_project exists
+    if os.path.exists("test_project"):
+        # Clear cache first
+        cache_path = Path.home() / ".cache" / "fastest" / "discovery_cache.json"
+        if cache_path.exists():
+            cache_path.unlink()
+        
+        # First run (cold cache)
+        time1, count1 = run_discovery("test_project", use_cache=True)
+        print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
+        
+        # Second run (warm cache)
+        time2, count2 = run_discovery("test_project", use_cache=True)
+        print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
+        
+        # Run without cache
+        time3, count3 = run_discovery("test_project", use_cache=False)
+        print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
+        
+        if time2 and time1:
+            speedup = time1 / time2
+            print(f"  Cache speedup:           {speedup:.1f}x faster")
+    else:
+        print("  Skipping - test_project directory not found")
     
     print("\nLarge project (1000 tests):")
     

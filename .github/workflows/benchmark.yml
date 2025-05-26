@@ -24,17 +24,43 @@ jobs:
       with:
         python-version: '3.11'
     
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo index
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Cache cargo build
+      uses: actions/cache@v3
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
+    
+    - name: Build Rust binary
+      run: |
+        cargo build --release
+        # Also build debug version which benchmarks expect
+        cargo build
+    
     - name: Install dependencies
       run: |
         python -m venv venv
         source venv/bin/activate
         pip install pytest maturin
-        cd crates/fastest-python && maturin develop && cd ../..
+        cd crates/fastest-python && maturin develop --release && cd ../..
     
     - name: Run benchmarks
       run: |
         source venv/bin/activate
-        python benchmarks/format_benchmark_json.py > benchmark_results.json
+        
+        # First run the format benchmark to generate JSON
+        python benchmarks/format_benchmark_json.py > benchmark_results.json || echo '{"error": "Failed to run benchmarks"}' > benchmark_results.json
         
         # Also create markdown report
         echo "# Benchmark Results 📊" > benchmark_results.md
@@ -47,10 +73,13 @@ jobs:
         import json
         with open('benchmark_results.json') as f:
             data = json.load(f)
-            summary = data.get('summary', {})
-            print(f\"- **Discovery**: {summary.get('discovery_speedup', 0):.1f}x faster than pytest\")
-            print(f\"- **AST Parser**: Up to {summary.get('best_parser_speedup', 0):.1f}x faster than regex\")
-            print(f\"- **Parallel Execution**: Up to {summary.get('best_parallel_speedup', 0):.1f}x speedup\")
+            if 'error' in data:
+                print('**Error:** Failed to run benchmarks')
+            else:
+                summary = data.get('summary', {})
+                print(f\"- **Discovery**: {summary.get('discovery_speedup', 0):.1f}x faster than pytest\")
+                print(f\"- **AST Parser**: Up to {summary.get('best_parser_speedup', 0):.1f}x faster than regex\")
+                print(f\"- **Parallel Execution**: Up to {summary.get('best_parallel_speedup', 0):.1f}x speedup\")
         " >> benchmark_results.md
         
         echo "" >> benchmark_results.md
@@ -60,19 +89,25 @@ jobs:
         # Run individual benchmarks for detailed output
         echo "### Discovery Benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
-        python benchmarks/benchmark.py >> benchmark_results.md
+        python benchmarks/benchmark.py >> benchmark_results.md 2>&1 || echo "Error running discovery benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
         
         echo "" >> benchmark_results.md
         echo "### Parser Benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
-        python benchmarks/benchmark_parsers.py >> benchmark_results.md
+        python benchmarks/benchmark_parsers.py >> benchmark_results.md 2>&1 || echo "Error running parser benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
         
         echo "" >> benchmark_results.md
         echo "### Parallel Execution Benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
-        python benchmarks/benchmark_parallel.py >> benchmark_results.md
+        python benchmarks/benchmark_parallel.py >> benchmark_results.md 2>&1 || echo "Error running parallel benchmark" >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        
+        echo "" >> benchmark_results.md
+        echo "### Cache Benchmark" >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        python benchmarks/benchmark_cache.py >> benchmark_results.md 2>&1 || echo "Error running cache benchmark" >> benchmark_results.md
         echo '```' >> benchmark_results.md
     
     - name: Upload benchmark results

@@ -7,6 +7,25 @@ import tempfile
 import os
 from pathlib import Path
 
+def get_fastest_binary():
+    """Get the path to the fastest binary."""
+    # Check for release build first (faster)
+    release_path = "./target/release/fastest"
+    if os.path.exists(release_path):
+        return release_path
+    
+    # Fall back to debug build
+    debug_path = "./target/debug/fastest"
+    if os.path.exists(debug_path):
+        return debug_path
+    
+    # Try to find it anywhere in target
+    for path in Path("target").rglob("fastest"):
+        if path.is_file() and os.access(path, os.X_OK):
+            return str(path)
+    
+    raise FileNotFoundError("Could not find fastest binary. Please run 'cargo build' first.")
+
 def generate_large_test_suite(num_files=100, tests_per_file=50):
     """Generate a large test suite for benchmarking."""
     test_dir = tempfile.mkdtemp(prefix="parser_benchmark_")
@@ -72,11 +91,12 @@ def generate_large_test_suite(num_files=100, tests_per_file=50):
 def benchmark_parser(test_dir, parser_type, runs=5):
     """Benchmark a specific parser."""
     times = []
+    fastest_bin = get_fastest_binary()
     
     for _ in range(runs):
         start = time.time()
         result = subprocess.run([
-            "./target/debug/fastest", 
+            fastest_bin, 
             test_dir,
             "--parser", parser_type,
             "discover",
