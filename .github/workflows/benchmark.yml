@@ -163,9 +163,16 @@ jobs:
     - name: Store benchmark result
       if: github.ref == 'refs/heads/main'
       uses: benchmark-action/github-action-benchmark@v1
+      continue-on-error: true
       with:
         tool: 'customBiggerIsBetter'
         output-file-path: benchmark_results.json
         benchmark-data-dir-path: 'dev/bench'
         github-token: ${{ secrets.GITHUB_TOKEN }}
-        auto-push: true 
+        auto-push: true
+        # Handle missing gh-pages branch
+        skip-fetch-gh-pages: true
+        comment-on-alert: false
+        alert-threshold: '200%'
+    
+ 
