@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 # Configuration
-$REPO = "yourusername/fastest"  # TODO: Update with actual GitHub username
+$REPO = "derens99/fastest"  # TODO: Update with actual GitHub username
 $BASE_URL = "https://github.com/$REPO/releases"
 $BIN_DIR = Join-Path $InstallDir "bin"
 $EXECUTABLE_NAME = "fastest.exe"

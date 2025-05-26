@@ -5,7 +5,7 @@ Thank you for your interest in contributing to Fastest! This guide will help you
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/yourusername/fastest.git`
+2. Clone your fork: `git clone https://github.com/derens99/fastest.git`
 3. Create a feature branch: `git checkout -b feature/your-feature`
 
 ## Development Setup

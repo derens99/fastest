@@ -7,7 +7,7 @@ name = "fastest"
 version = "0.1.0"
 description = "A blazing fast Python test runner built with Rust"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" }
+    { name = "Deren S", email = "derens99@gmail.com" }
 ]
 readme = "README.md"
 license = { text = "MIT" }
@@ -30,10 +30,10 @@ classifiers = [
 keywords = ["testing", "test-runner", "pytest", "rust", "performance"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/fastest"
-Documentation = "https://github.com/yourusername/fastest#readme"
-Repository = "https://github.com/yourusername/fastest"
-Issues = "https://github.com/yourusername/fastest/issues"
+Homepage = "https://github.com/derens99/fastest"
+Documentation = "https://github.com/derens99/fastest#readme"
+Repository = "https://github.com/derens99/fastest"
+Issues = "https://github.com/derens99/fastest/issues"
 
 [project.scripts]
 fastest = "fastest:main"

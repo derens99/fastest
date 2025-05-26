@@ -126,7 +126,7 @@ jobs:
       
       - name: Update installer with correct repo
         run: |
-          sed -i 's|REPO="yourusername/fastest"|REPO="${{ github.repository }}"|' install.sh
+          sed -i 's|REPO="derens99/fastest"|REPO="${{ github.repository }}"|' install.sh
       
       - name: Commit and push
         run: |
