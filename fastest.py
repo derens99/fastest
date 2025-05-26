@@ -68,19 +68,59 @@ xfail = mark.xfail
 slow = mark.slow
 asyncio = mark.asyncio
 
-# Fixture placeholder (for future implementation)
-class fixture:
-    """Fixture decorator (placeholder for future implementation)."""
+# Fixture decorator
+class FixtureDecorator:
+    """Fixture decorator for defining test fixtures."""
     
     def __init__(self, scope="function", autouse=False, params=None):
         self.scope = scope
         self.autouse = autouse
-        self.params = params
+        self.params = params or []
     
     def __call__(self, func):
-        # For now, just return the function unchanged
-        # Future: Register as a fixture
+        """Apply fixture metadata to function."""
+        func._fixture_scope = self.scope
+        func._fixture_autouse = self.autouse
+        func._fixture_params = self.params
+        func._is_fixture = True
+        
+        # Add fixture marker for discovery
+        if not hasattr(func, '_markers'):
+            func._markers = []
+        func._markers.append(MarkDecorator("fixture", kwargs={
+            "scope": self.scope,
+            "autouse": self.autouse,
+            "params": self.params
+        }))
+        
         return func
+
+def fixture(scope="function", autouse=False, params=None):
+    """
+    Decorator to mark a function as a fixture.
+    
+    Args:
+        scope: The scope of the fixture (function, class, module, session)
+        autouse: Whether to automatically use this fixture
+        params: Parameters for parametrized fixtures
+    
+    Example:
+        @fixture
+        def my_fixture():
+            return {"key": "value"}
+        
+        @fixture(scope="module")
+        def module_fixture():
+            return setup_module_resource()
+    """
+    # Handle both @fixture and @fixture() syntax
+    if callable(scope) and autouse is False and params is None:
+        # Direct decoration: @fixture
+        func = scope
+        return FixtureDecorator()(func)
+    else:
+        # Called with arguments: @fixture(scope="module")
+        return FixtureDecorator(scope, autouse, params)
 
 # Export main API
 __all__ = ['mark', 'skip', 'xfail', 'slow', 'asyncio', 'fixture'] 

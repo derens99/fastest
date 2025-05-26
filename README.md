@@ -13,6 +13,7 @@
 - **💻 Full-featured CLI** with colored output and progress bars
 - **🔍 Smart test filtering** with `-k` pattern matching and `-m` marker expressions
 - **🏷️ Full marker support** for both `pytest.mark.*` and `fastest.mark.*`
+- **🧩 Fixture support** with discovery, dependency resolution, and built-in fixtures
 - **🌳 Tree-sitter AST parser** for accurate Python parsing
 - **📦 Zero dependencies** for the test runner (your tests can use any framework)
 
@@ -31,18 +32,48 @@ Based on real benchmarks:
 
 ### Installation
 
+#### Using the installer script (Recommended)
+
+**macOS and Linux:**
+```bash
+curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
+```
+
+The installer will:
+- Download the latest binary for your platform
+- Install it to `~/.fastest/bin` (or `%USERPROFILE%\.fastest\bin` on Windows)
+- Add it to your PATH automatically
+- Handle shell configuration (bash, zsh, fish, PowerShell)
+
+#### Build from source
+
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/fastest.git
 cd fastest
 
-# Install development dependencies (optional)
-pip install -r requirements-dev.txt
-
 # Build the project (requires Rust)
 cargo build --release
 
-# Install the Python bindings (optional)
+# The binary will be at target/release/fastest
+# Copy it to a location in your PATH
+cp target/release/fastest /usr/local/bin/
+```
+
+#### Install Python bindings (optional)
+
+If you want to use Fastest as a Python library:
+
+```bash
+# Install development dependencies
+pip install -r requirements-dev.txt
+
+# Build and install Python bindings
 maturin develop
 ```
 
@@ -172,7 +203,7 @@ Fastest achieves its performance through several key optimizations:
 - ✅ Class-based tests (`class Test*` with `test_*` methods)
 - ✅ Nested test directories
 - ✅ Test markers (`@fastest.mark.*` and `@pytest.mark.*`)
-- 🚧 Fixtures (coming soon)
+- ✅ Fixtures (basic support with built-ins: `tmp_path`, `capsys`, `monkeypatch`)
 - 🚧 Parametrized tests (coming soon)
 
 ## 🎯 Roadmap
@@ -189,10 +220,13 @@ Fastest achieves its performance through several key optimizations:
 - [x] Parallel execution with work-stealing (1.2-2x speedup)
 - [x] Tree-sitter AST parser for faster parsing
 
-### Phase 3: Compatibility 🚧
+### Phase 3: Compatibility ✅
 - [x] Test markers and filtering (`-m` flag with expressions)
 - [x] Support for both `pytest.mark.*` and `fastest.mark.*`
-- [ ] Basic pytest fixture support
+- [x] Fixture discovery and dependency extraction
+- [x] Fixture execution framework with Python bridge
+- [x] Built-in fixtures (tmp_path, capsys, monkeypatch)
+- [x] Scope-based fixture caching
 - [ ] Configuration file support (pytest.ini, pyproject.toml)
 - [ ] JUnit XML output
 

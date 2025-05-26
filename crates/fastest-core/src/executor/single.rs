@@ -1,12 +1,121 @@
 use std::process::{Command, Stdio};
 use std::time::Instant;
+use std::collections::HashMap;
 use crate::error::{Error, Result};
 use crate::discovery::TestItem;
 use super::TestResult;
 use crate::markers::{extract_markers, BuiltinMarker};
+use crate::fixtures::{FixtureExecutor, generate_test_code_with_fixtures, generate_builtin_fixture_code, is_builtin_fixture};
 
 /// Run a single test in its own subprocess
 pub fn run_test(test: &TestItem) -> Result<TestResult> {
+    // If test has fixtures, use fixture-aware execution
+    if !test.fixture_deps.is_empty() {
+        run_test_with_fixtures(test)
+    } else {
+        run_test_simple(test)
+    }
+}
+
+/// Run test with fixture support
+fn run_test_with_fixtures(test: &TestItem) -> Result<TestResult> {
+    let start = Instant::now();
+    
+    // Check for skip markers
+    let markers = extract_markers(&test.decorators);
+    if let Some(skip_reason) = BuiltinMarker::should_skip(&markers) {
+        return Ok(TestResult {
+            test_id: test.id.clone(),
+            passed: true,
+            duration: start.elapsed(),
+            output: "SKIPPED".to_string(),
+            error: Some(skip_reason.clone()),
+            stdout: String::new(),
+            stderr: format!("SKIPPED: {}", skip_reason),
+        });
+    }
+    
+    let is_xfail = BuiltinMarker::is_xfail(&markers);
+    
+    // Execute fixtures
+    let mut fixture_executor = FixtureExecutor::new();
+    let mut fixture_values = HashMap::new();
+    
+    // Resolve fixtures in dependency order
+    for fixture_name in &test.fixture_deps {
+        if is_builtin_fixture(fixture_name) {
+            // Handle built-in fixtures by injecting their Python code
+            if let Some(fixture_code) = generate_builtin_fixture_code(fixture_name) {
+                fixture_executor.register_fixture_code(fixture_name.clone(), fixture_code);
+            }
+        }
+    }
+    
+    // Execute fixtures
+    match fixture_executor.execute_fixtures(&test.fixture_deps, &test.path, &fixture_values) {
+        Ok(values) => fixture_values = values,
+        Err(e) => {
+            return Ok(TestResult {
+                test_id: test.id.clone(),
+                passed: false,
+                duration: start.elapsed(),
+                output: "FAILED".to_string(),
+                error: Some(format!("Fixture setup failed: {}", e)),
+                stdout: String::new(),
+                stderr: e.to_string(),
+            });
+        }
+    }
+    
+    // Generate test code with fixtures
+    let python_code = generate_test_code_with_fixtures(test, &fixture_values);
+    
+    // Execute the test
+    let output = Command::new("python")
+        .arg("-c")
+        .arg(&python_code)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|e| Error::Execution(format!("Failed to execute test: {}", e)))?;
+    
+    let duration = start.elapsed();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    
+    let mut passed = output.status.success();
+    
+    // Handle xfail
+    if is_xfail && !passed {
+        passed = true;
+    } else if is_xfail && passed {
+        passed = false;
+    }
+    
+    let (output_str, error) = if is_xfail && passed {
+        ("XPASS (expected failure but passed)".to_string(), None)
+    } else if is_xfail && !output.status.success() {
+        ("XFAIL (expected failure)".to_string(), None)
+    } else if passed {
+        ("PASSED".to_string(), None)
+    } else {
+        ("FAILED".to_string(), Some(format!("Test failed with exit code: {}\nStderr: {}", 
+            output.status.code().unwrap_or(-1), stderr)))
+    };
+    
+    Ok(TestResult {
+        test_id: test.id.clone(),
+        passed,
+        duration,
+        output: output_str,
+        error,
+        stdout,
+        stderr,
+    })
+}
+
+/// Run test without fixtures (original implementation)
+fn run_test_simple(test: &TestItem) -> Result<TestResult> {
     let start = Instant::now();
     
     // Check for skip markers

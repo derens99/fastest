@@ -1,5 +1,6 @@
 use std::path::Path;
 use crate::error::Result;
+use super::FixtureDefinition;
 
 #[derive(Debug, Clone)]
 pub struct TestFunction {
@@ -10,51 +11,120 @@ pub struct TestFunction {
     pub decorators: Vec<String>,
 }
 
-pub fn parse_test_file(path: &Path) -> Result<Vec<TestFunction>> {
-    let content = std::fs::read_to_string(path)?;
-    let mut tests = Vec::new();
-    let mut current_class: Option<String> = None;
-    let mut class_indent = 0;
+pub struct RegexParser;
+
+impl RegexParser {
+    pub fn parse_file(path: &Path) -> Result<Vec<TestFunction>> {
+        parse_test_file(path)
+    }
     
-    for (line_num, line) in content.lines().enumerate() {
-        let trimmed = line.trim_start();
-        let indent = line.len() - trimmed.len();
+    pub fn parse_fixtures_and_tests(path: &Path) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
+        let content = std::fs::read_to_string(path)?;
+        let mut tests = Vec::new();
+        let mut fixtures = Vec::new();
+        let mut current_class: Option<String> = None;
+        let mut class_indent = 0;
+        let mut pending_decorators = Vec::new();
         
-        // Class definition
-        if trimmed.starts_with("class ") && trimmed.ends_with(':') {
-            if let Some(class_name) = extract_class_name(trimmed) {
-                current_class = Some(class_name);
-                class_indent = indent;
+        for (line_num, line) in content.lines().enumerate() {
+            let trimmed = line.trim_start();
+            let indent = line.len() - trimmed.len();
+            
+            // Collect decorators
+            if trimmed.starts_with('@') {
+                pending_decorators.push(trimmed.to_string());
+                continue;
+            }
+            
+            // Class definition
+            if trimmed.starts_with("class ") && trimmed.ends_with(':') {
+                if let Some(class_name) = extract_class_name(trimmed) {
+                    current_class = Some(class_name);
+                    class_indent = indent;
+                }
+                pending_decorators.clear();
+            }
+            
+            // Check if we've left the class
+            if current_class.is_some() && !line.trim().is_empty() {
+                if indent <= class_indent && !trimmed.starts_with("def ") && !trimmed.starts_with("async def ") {
+                    current_class = None;
+                } else if (trimmed.starts_with("def ") || trimmed.starts_with("async def ")) && indent <= class_indent {
+                    current_class = None;
+                }
+            }
+            
+            // Function definition
+            if trimmed.starts_with("def ") || trimmed.starts_with("async def ") {
+                if let Some(func_name) = extract_function_name(trimmed) {
+                    let is_async = trimmed.starts_with("async ");
+                    
+                    // Check if this is a fixture
+                    let is_fixture = pending_decorators.iter().any(|d| 
+                        d.contains("@pytest.fixture") || 
+                        d.contains("@fixture") ||
+                        d.contains("@fastest.fixture")
+                    );
+                    
+                    if is_fixture {
+                        // Parse fixture parameters
+                        let (scope, autouse) = parse_fixture_decorator(&pending_decorators);
+                        fixtures.push(FixtureDefinition {
+                            name: func_name,
+                            line_number: line_num + 1,
+                            is_async,
+                            scope,
+                            autouse,
+                            params: Vec::new(), // TODO: Parse params
+                            decorators: pending_decorators.clone(),
+                        });
+                    } else if func_name.starts_with("test_") {
+                        // It's a test function
+                        tests.push(TestFunction {
+                            name: func_name,
+                            line_number: line_num + 1,
+                            is_async,
+                            class_name: current_class.clone(),
+                            decorators: pending_decorators.clone(),
+                        });
+                    }
+                }
+                pending_decorators.clear();
             }
         }
         
-        // Check if we've left the class
-        if current_class.is_some() && !line.trim().is_empty() {
-            // If we see a non-method definition at class level or less, we've left the class
-            if indent <= class_indent && !trimmed.starts_with("def ") && !trimmed.starts_with("async def ") {
-                current_class = None;
+        Ok((fixtures, tests))
+    }
+}
+
+pub fn parse_test_file(path: &Path) -> Result<Vec<TestFunction>> {
+    let (_, tests) = RegexParser::parse_fixtures_and_tests(path)?;
+    Ok(tests)
+}
+
+fn parse_fixture_decorator(decorators: &[String]) -> (String, bool) {
+    let mut scope = "function".to_string();
+    let mut autouse = false;
+    
+    for decorator in decorators {
+        if decorator.contains("fixture") {
+            // Extract scope parameter
+            if let Some(scope_start) = decorator.find("scope=") {
+                let scope_part = &decorator[scope_start + 6..];
+                if let Some(quote_end) = scope_part.find(&['"', '\'', ',', ')'][..]) {
+                    let extracted_scope = scope_part[..quote_end].trim_matches(&['"', '\''][..]);
+                    scope = extracted_scope.to_string();
+                }
             }
-            // Also check if this is a function definition at wrong indentation (module level)
-            else if (trimmed.starts_with("def ") || trimmed.starts_with("async def ")) && indent <= class_indent {
-                current_class = None;
-            }
-        }
-        
-        // Function definition
-        if trimmed.starts_with("def test_") || trimmed.starts_with("async def test_") {
-            if let Some(func_name) = extract_function_name(trimmed) {
-                tests.push(TestFunction {
-                    name: func_name,
-                    line_number: line_num + 1,
-                    is_async: trimmed.starts_with("async "),
-                    class_name: current_class.clone(),
-                    decorators: Vec::new(), // Simple parser doesn't track decorators
-                });
+            
+            // Check for autouse
+            if decorator.contains("autouse=True") {
+                autouse = true;
             }
         }
     }
     
-    Ok(tests)
+    (scope, autouse)
 }
 
 fn extract_class_name(line: &str) -> Option<String> {

@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 use crate::error::Result;
-use crate::parser::{parse_test_file, TestFunction, AstParser};
+use crate::parser::{parse_fixtures_and_tests, TestFunction, FixtureDefinition, AstParser};
 use crate::cache::DiscoveryCache;
+use crate::fixtures::{Fixture, FixtureScope};
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TestItem {
@@ -14,20 +15,47 @@ pub struct TestItem {
     pub is_async: bool,
     pub class_name: Option<String>,
     pub decorators: Vec<String>,
+    pub fixture_deps: Vec<String>, // Fixtures required by this test
+}
+
+pub struct DiscoveryResult {
+    pub tests: Vec<TestItem>,
+    pub fixtures: Vec<Fixture>,
 }
 
 pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
+    let result = discover_tests_and_fixtures(path)?;
+    Ok(result.tests)
+}
+
+pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
     let mut tests = Vec::new();
+    let mut fixtures = Vec::new();
     
     for entry in WalkDir::new(path) {
         let entry = entry?;
         let path = entry.path();
         
         if is_test_file(path) {
-            match parse_test_file(path) {
-                Ok(test_functions) => {
+            let content = std::fs::read_to_string(path)?;
+            match parse_fixtures_and_tests(path) {
+                Ok((file_fixtures, test_functions)) => {
+                    // Convert fixtures
+                    for fixture_def in file_fixtures {
+                        fixtures.push(Fixture {
+                            name: fixture_def.name.clone(),
+                            scope: FixtureScope::from(fixture_def.scope.as_str()),
+                            autouse: fixture_def.autouse,
+                            params: vec![], // TODO: Parse params properly
+                            func_path: path.to_path_buf(),
+                            dependencies: extract_fixture_dependencies(&fixture_def, &content),
+                        });
+                    }
+                    
+                    // Convert tests
                     for func in test_functions {
-                        tests.push(create_test_item(path, &func));
+                        let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
+                        tests.push(create_test_item(path, &func, fixture_deps));
                     }
                 }
                 Err(e) => {
@@ -37,7 +65,7 @@ pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
         }
     }
     
-    Ok(tests)
+    Ok(DiscoveryResult { tests, fixtures })
 }
 
 /// Discover tests using the AST parser
@@ -54,7 +82,8 @@ pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
             match parser.parse_file(&content, path.to_str().unwrap_or("")) {
                 Ok(test_functions) => {
                     for func in test_functions {
-                        tests.push(create_test_item(path, &func));
+                        let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
+                        tests.push(create_test_item(path, &func, fixture_deps));
                     }
                 }
                 Err(e) => {
@@ -87,11 +116,15 @@ pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<
             
             // Cache miss - parse the file
             cache_misses += 1;
-            match parse_test_file(path) {
-                Ok(test_functions) => {
+            let content = std::fs::read_to_string(path)?;
+            match parse_fixtures_and_tests(path) {
+                Ok((_, test_functions)) => {
                     let file_tests: Vec<TestItem> = test_functions
                         .iter()
-                        .map(|func| create_test_item(path, func))
+                        .map(|func| {
+                            let fixture_deps = crate::fixtures::extract_fixture_deps(func, &content);
+                            create_test_item(path, func, fixture_deps)
+                        })
                         .collect();
                     
                     // Update cache
@@ -122,7 +155,7 @@ fn is_test_file(path: &Path) -> bool {
             || path.file_name().unwrap().to_str().unwrap().ends_with("_test.py"))
 }
 
-fn create_test_item(path: &Path, func: &TestFunction) -> TestItem {
+fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>) -> TestItem {
     let module_path = path.with_extension("")
         .to_string_lossy()
         .replace('/', ".")
@@ -143,5 +176,33 @@ fn create_test_item(path: &Path, func: &TestFunction) -> TestItem {
         is_async: func.is_async,
         class_name: func.class_name.clone(),
         decorators: func.decorators.clone(),
+        fixture_deps,
     }
+}
+
+fn extract_fixture_dependencies(fixture: &FixtureDefinition, content: &str) -> Vec<String> {
+    // Extract fixture dependencies from its parameters
+    let lines: Vec<&str> = content.lines().collect();
+    if fixture.line_number > 0 && fixture.line_number <= lines.len() {
+        let func_line = lines[fixture.line_number - 1];
+        
+        // Extract parameters from function signature
+        if let Some(start) = func_line.find('(') {
+            if let Some(end) = func_line.find(')') {
+                let params_str = &func_line[start + 1..end];
+                let deps: Vec<String> = params_str
+                    .split(',')
+                    .map(|p| p.trim())
+                    .filter(|p| !p.is_empty() && *p != "request") // 'request' is a special fixture
+                    .map(|p| {
+                        // Handle type annotations
+                        p.split(':').next().unwrap_or(p).trim().to_string()
+                    })
+                    .collect();
+                return deps;
+            }
+        }
+    }
+    
+    Vec::new()
 }

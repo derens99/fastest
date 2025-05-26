@@ -178,6 +178,9 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
                     if !test.decorators.is_empty() {
                         println!("    {} {}", "Decorators:".dimmed(), test.decorators.join(", "));
                     }
+                    if !test.fixture_deps.is_empty() {
+                        println!("    {} {}", "Fixtures:".dimmed(), test.fixture_deps.join(", ").cyan());
+                    }
                 }
             }
         }
