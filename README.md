@@ -11,7 +11,8 @@
 - **🦀 Written in Rust** for maximum performance
 - **🐍 Pure Python API** via PyO3 bindings
 - **💻 Full-featured CLI** with colored output and progress bars
-- **🔍 Smart test filtering** with `-k` pattern matching
+- **🔍 Smart test filtering** with `-k` pattern matching and `-m` marker expressions
+- **🏷️ Full marker support** for both `pytest.mark.*` and `fastest.mark.*`
 - **🌳 Tree-sitter AST parser** for accurate Python parsing
 - **📦 Zero dependencies** for the test runner (your tests can use any framework)
 
@@ -56,6 +57,11 @@ fastest path/to/tests
 
 # Filter tests by pattern
 fastest -k "test_important"
+
+# Filter tests by markers
+fastest -m "not slow"              # Skip slow tests
+fastest -m "unit or integration"   # Run unit or integration tests
+fastest -m "smoke and not skip"    # Run smoke tests that aren't skipped
 
 # Run with verbose output
 fastest -v
@@ -106,6 +112,29 @@ results = fastest.run_tests_parallel(tests, num_workers=4)
 # num_workers=None for auto-detection based on CPU cores
 ```
 
+### Using Markers
+
+```python
+import fastest
+
+# Use fastest native markers
+@fastest.mark.skip(reason="Not implemented yet")
+def test_future_feature():
+    pass
+
+@fastest.mark.slow
+def test_heavy_computation():
+    # Long running test
+    pass
+
+# pytest markers also work for compatibility
+import pytest
+
+@pytest.mark.xfail
+def test_known_issue():
+    assert False  # This failure is expected
+```
+
 ## 📁 Project Structure
 
 ```
@@ -142,6 +171,7 @@ Fastest achieves its performance through several key optimizations:
 - ✅ Async tests (`async def test_*`)
 - ✅ Class-based tests (`class Test*` with `test_*` methods)
 - ✅ Nested test directories
+- ✅ Test markers (`@fastest.mark.*` and `@pytest.mark.*`)
 - 🚧 Fixtures (coming soon)
 - 🚧 Parametrized tests (coming soon)
 
@@ -153,15 +183,16 @@ Fastest achieves its performance through several key optimizations:
 - [x] Python bindings
 - [x] CLI application
 
-### Phase 2: Performance 🚧
+### Phase 2: Performance ✅
 - [x] Batch execution (2.1x speedup)
 - [x] Discovery caching (1.5x speedup)
 - [x] Parallel execution with work-stealing (1.2-2x speedup)
-- [ ] Lazy module imports
+- [x] Tree-sitter AST parser for faster parsing
 
-### Phase 3: Compatibility 📋
+### Phase 3: Compatibility 🚧
+- [x] Test markers and filtering (`-m` flag with expressions)
+- [x] Support for both `pytest.mark.*` and `fastest.mark.*`
 - [ ] Basic pytest fixture support
-- [ ] Test markers and filtering
 - [ ] Configuration file support (pytest.ini, pyproject.toml)
 - [ ] JUnit XML output
 

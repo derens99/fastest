@@ -1,0 +1,132 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+    
+    - name: Install Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install pytest maturin
+        cd crates/fastest-python && maturin develop && cd ../..
+    
+    - name: Run benchmarks
+      run: |
+        python benchmarks/format_benchmark_json.py > benchmark_results.json
+        
+        # Also create markdown report
+        echo "# Benchmark Results 📊" > benchmark_results.md
+        echo "" >> benchmark_results.md
+        echo "## Summary" >> benchmark_results.md
+        echo "" >> benchmark_results.md
+        
+        # Extract key metrics from JSON
+        python -c "
+        import json
+        with open('benchmark_results.json') as f:
+            data = json.load(f)
+            summary = data.get('summary', {})
+            print(f\"- **Discovery**: {summary.get('discovery_speedup', 0):.1f}x faster than pytest\")
+            print(f\"- **AST Parser**: Up to {summary.get('best_parser_speedup', 0):.1f}x faster than regex\")
+            print(f\"- **Parallel Execution**: Up to {summary.get('best_parallel_speedup', 0):.1f}x speedup\")
+        " >> benchmark_results.md
+        
+        echo "" >> benchmark_results.md
+        echo "## Detailed Results" >> benchmark_results.md
+        echo "" >> benchmark_results.md
+        
+        # Run individual benchmarks for detailed output
+        echo "### Discovery Benchmark" >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        python benchmarks/benchmark.py >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        
+        echo "" >> benchmark_results.md
+        echo "### Parser Benchmark" >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        python benchmarks/benchmark_parsers.py >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        
+        echo "" >> benchmark_results.md
+        echo "### Parallel Execution Benchmark" >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+        python benchmarks/benchmark_parallel.py >> benchmark_results.md
+        echo '```' >> benchmark_results.md
+    
+    - name: Upload benchmark results
+      uses: actions/upload-artifact@v3
+      with:
+        name: benchmark-results
+        path: |
+          benchmark_results.json
+          benchmark_results.md
+    
+    - name: Comment PR with results
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          const results = fs.readFileSync('benchmark_results.md', 'utf8');
+          
+          // Find existing comment
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && 
+            comment.body.includes('Benchmark Results')
+          );
+          
+          if (botComment) {
+            // Update existing comment
+            github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: results
+            });
+          } else {
+            // Create new comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: results
+            });
+          }
+    
+    - name: Store benchmark result
+      if: github.ref == 'refs/heads/main'
+      uses: benchmark-action/github-action-benchmark@v1
+      with:
+        tool: 'customBiggerIsBetter'
+        output-file-path: benchmark_results.json
+        benchmark-data-dir-path: 'dev/bench'
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        auto-push: true 

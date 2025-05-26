@@ -13,6 +13,7 @@ pub struct TestItem {
     pub line_number: usize,
     pub is_async: bool,
     pub class_name: Option<String>,
+    pub decorators: Vec<String>,
 }
 
 pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
@@ -141,5 +142,6 @@ fn create_test_item(path: &Path, func: &TestFunction) -> TestItem {
         line_number: func.line_number,
         is_async: func.is_async,
         class_name: func.class_name.clone(),
+        decorators: func.decorators.clone(),
     }
 }

@@ -15,12 +15,14 @@ pub struct ProcessPool {
     result_tx: Sender<TestResult>,
 }
 
+#[allow(dead_code)]
 struct Worker {
     process: Child,
     stdin: std::process::ChildStdin,
     stdout: std::process::ChildStdout,
 }
 
+#[allow(dead_code)]
 struct TestJob {
     test: TestItem,
     job_id: usize,

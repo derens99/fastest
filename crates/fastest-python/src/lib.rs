@@ -18,6 +18,8 @@ struct PyTestItem {
     is_async: bool,
     #[pyo3(get)]
     class_name: Option<String>,
+    #[pyo3(get)]
+    decorators: Vec<String>,
 }
 
 #[pyclass]
@@ -51,6 +53,7 @@ fn discover_tests(path: String) -> PyResult<Vec<PyTestItem>> {
         line_number: t.line_number,
         is_async: t.is_async,
         class_name: t.class_name,
+        decorators: t.decorators,
     }).collect())
 }
 
@@ -64,6 +67,7 @@ fn run_test(test_item: &PyTestItem) -> PyResult<PyTestResult> {
         line_number: test_item.line_number,
         is_async: test_item.is_async,
         class_name: test_item.class_name.clone(),
+        decorators: test_item.decorators.clone(),
     };
     
     let result = core_run_test(&item)
@@ -91,6 +95,7 @@ fn run_tests_batch(test_items: Vec<PyRef<PyTestItem>>) -> PyResult<Vec<PyTestRes
         line_number: test_item.line_number,
         is_async: test_item.is_async,
         class_name: test_item.class_name.clone(),
+        decorators: test_item.decorators.clone(),
     }).collect();
     
     // Use the batch executor for much better performance
@@ -124,6 +129,7 @@ fn run_tests_parallel(
         line_number: test_item.line_number,
         is_async: test_item.is_async,
         class_name: test_item.class_name.clone(),
+        decorators: test_item.decorators.clone(),
     }).collect();
     
     // Now we can release the GIL

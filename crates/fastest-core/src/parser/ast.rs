@@ -1,47 +1,6 @@
 use tree_sitter::{Parser, Node};
-use once_cell::sync::Lazy;
 use anyhow::{Result, anyhow};
 use super::TestFunction;
-
-// Tree-sitter query for finding test functions and classes
-static PYTHON_TEST_QUERY: Lazy<String> = Lazy::new(|| {
-    r#"
-; Match test functions at module level
-(function_definition
-  name: (identifier) @function.name
-  parameters: (parameters) @function.params
-  (#match? @function.name "^test_")
-) @test.function
-
-; Match async test functions at module level  
-(function_definition
-  (decorator (identifier) @decorator (#eq? @decorator "async"))
-  name: (identifier) @function.name
-  (#match? @function.name "^test_")
-) @test.async_function
-
-; Match test classes
-(class_definition
-  name: (identifier) @class.name
-  (#match? @class.name "^Test")
-  body: (block
-    (function_definition
-      name: (identifier) @method.name
-      (#match? @method.name "^test_")
-    ) @test.method
-  )
-) @test.class
-
-; Match decorated test functions
-(decorated_definition
-  (decorator_list) @decorators
-  definition: (function_definition
-    name: (identifier) @function.name
-    (#match? @function.name "^test_")
-  )
-) @test.decorated
-"#.to_string()
-});
 
 pub struct AstParser {
     parser: Parser,
@@ -78,6 +37,17 @@ impl AstParser {
     ) -> Result<()> {
         match node.kind() {
             "function_definition" => {
+                // Check if this function is inside a decorated_definition
+                let decorators = if let Some(parent) = node.parent() {
+                    if parent.kind() == "decorated_definition" {
+                        self.get_decorators(parent, source)
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+                
                 // Check if it's an async function by looking at the first child
                 let is_async = node.child(0)
                     .map(|n| n.kind() == "async")
@@ -87,9 +57,6 @@ impl AstParser {
                     let name = &source[name_node.byte_range()];
                     if name.starts_with("test_") {
                         let line_number = name_node.start_position().row + 1;
-                        
-                        // Get decorators if any
-                        let decorators = self.get_decorators(node, source);
                         
                         tests.push(TestFunction {
                             name: name.to_string(),
@@ -102,10 +69,40 @@ impl AstParser {
                 }
             }
             "decorated_definition" => {
-                // Handle decorated functions
+                // Handle decorated functions - pass decorators down
                 if let Some(definition) = node.child_by_field_name("definition") {
                     if definition.kind() == "function_definition" {
-                        self.visit_node(definition, source, tests, current_class)?;
+                        // Don't recurse into the function_definition here
+                        // Instead, handle it directly with decorators
+                        let decorators = self.get_decorators(node, source);
+                        
+                        // Check if it's an async function
+                        let is_async = definition.child(0)
+                            .map(|n| n.kind() == "async")
+                            .unwrap_or(false);
+                        
+                        if let Some(name_node) = definition.child_by_field_name("name") {
+                            let name = &source[name_node.byte_range()];
+                            if name.starts_with("test_") {
+                                let line_number = name_node.start_position().row + 1;
+                                
+                                tests.push(TestFunction {
+                                    name: name.to_string(),
+                                    line_number,
+                                    is_async: is_async || self.has_async_decorator(&decorators),
+                                    class_name: current_class.map(String::from),
+                                    decorators,
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    // Still visit children in case there are nested structures
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() != "decorator_list" {
+                            self.visit_node(child, source, tests, current_class)?;
+                        }
                     }
                 }
             }
@@ -136,17 +133,14 @@ impl AstParser {
     fn get_decorators(&self, node: Node, source: &str) -> Vec<String> {
         let mut decorators = Vec::new();
         
-        // Look for decorator list in parent (decorated_definition)
-        if let Some(parent) = node.parent() {
-            if parent.kind() == "decorated_definition" {
-                if let Some(decorator_list) = parent.child_by_field_name("decorators") {
-                    let mut cursor = decorator_list.walk();
-                    for decorator in decorator_list.children(&mut cursor) {
-                        if decorator.kind() == "decorator" {
-                            let text = &source[decorator.byte_range()];
-                            decorators.push(text.trim_start_matches('@').to_string());
-                        }
-                    }
+        // For a decorated_definition node, look for decorator children
+        if node.kind() == "decorated_definition" {
+            let mut cursor = node.walk();
+            for child in node.children(&mut cursor) {
+                if child.kind() == "decorator" {
+                    let text = &source[child.byte_range()];
+                    let cleaned = text.trim_start_matches('@').to_string();
+                    decorators.push(cleaned);
                 }
             }
         }

@@ -1,6 +1,10 @@
 use clap::{Parser, Subcommand};
 use colored::*;
-use fastest_core::{discover_tests, discover_tests_cached, discover_tests_ast, BatchExecutor, DiscoveryCache, default_cache_path, ParallelExecutor};
+use fastest_core::{
+    discover_tests, discover_tests_cached, discover_tests_ast, 
+    BatchExecutor, DiscoveryCache, default_cache_path, ParallelExecutor,
+    filter_by_markers
+};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -17,11 +21,15 @@ struct Cli {
     path: PathBuf,
     
     /// Filter tests by pattern
-    #[arg(short = 'k', long = "filter")]
+    #[arg(short = 'k', long)]
     filter: Option<String>,
     
+    /// Filter tests by marker expression (e.g., "not slow", "skip or xfail")
+    #[arg(short = 'm', long = "markers")]
+    markers: Option<String>,
+    
     /// Number of parallel workers (0 = auto-detect CPUs, 1 = sequential)
-    #[arg(short = 'n', long = "workers", default_value = "1")]
+    #[arg(short = 'n', long, default_value = "1")]
     workers: usize,
     
     /// Stop on first failure
@@ -117,7 +125,14 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
     
     let duration = start.elapsed();
     
-    // Apply filter if provided
+    // Apply marker filter first if provided
+    let tests = if let Some(markers) = &cli.markers {
+        filter_by_markers(tests, markers)?
+    } else {
+        tests
+    };
+    
+    // Apply text filter if provided
     let filtered_tests: Vec<_> = if let Some(filter) = &cli.filter {
         tests.into_iter()
             .filter(|t| t.name.contains(filter) || t.id.contains(filter))
@@ -142,6 +157,13 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
                 duration.as_secs_f64()
             );
             
+            if let Some(markers) = &cli.markers {
+                println!("  {} {}\n", 
+                    "Marker filter:".dimmed(),
+                    markers.yellow()
+                );
+            }
+            
             for test in &filtered_tests {
                 println!("  {} {}", 
                     "●".green(),
@@ -152,6 +174,9 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
                     println!("    {} {}", "Line:".dimmed(), test.line_number);
                     if test.is_async {
                         println!("    {} {}", "Type:".dimmed(), "async".yellow());
+                    }
+                    if !test.decorators.is_empty() {
+                        println!("    {} {}", "Decorators:".dimmed(), test.decorators.join(", "));
                     }
                 }
             }
@@ -195,7 +220,17 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
         }
     };
     
-    // Apply filter
+    // Apply marker filter first if provided
+    let tests = if let Some(markers) = &cli.markers {
+        if cli.verbose {
+            eprintln!("Applying marker filter: {}", markers);
+        }
+        filter_by_markers(tests, markers)?
+    } else {
+        tests
+    };
+    
+    // Apply text filter
     let filtered_tests: Vec<_> = if let Some(filter) = &cli.filter {
         tests.into_iter()
             .filter(|t| t.name.contains(filter) || t.id.contains(filter))

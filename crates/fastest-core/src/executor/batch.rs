@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use crate::error::{Error, Result};
 use crate::discovery::TestItem;
+use crate::markers::{extract_markers, BuiltinMarker};
 use super::TestResult;
 
 /// Fast batch executor that runs multiple tests in a single Python process
@@ -19,14 +20,34 @@ impl BatchExecutor {
     
     /// Execute tests grouped by module for maximum efficiency
     pub fn execute_tests(&self, tests: Vec<TestItem>) -> Vec<TestResult> {
-        // Group tests by module
-        let mut module_groups: HashMap<String, Vec<TestItem>> = HashMap::new();
+        let mut all_results = Vec::new();
+        let mut tests_to_run = Vec::new();
+        
+        // First, handle tests with skip markers
         for test in tests {
+            let markers = extract_markers(&test.decorators);
+            if let Some(skip_reason) = BuiltinMarker::should_skip(&markers) {
+                // Handle skipped tests immediately
+                all_results.push(TestResult {
+                    test_id: test.id.clone(),
+                    passed: true,  // Skipped tests are considered "passed"
+                    duration: Duration::from_secs(0),
+                    output: "SKIPPED".to_string(),
+                    error: Some(skip_reason.clone()),
+                    stdout: String::new(),
+                    stderr: format!("SKIPPED: {}", skip_reason),
+                });
+            } else {
+                tests_to_run.push(test);
+            }
+        }
+        
+        // Group remaining tests by module
+        let mut module_groups: HashMap<String, Vec<TestItem>> = HashMap::new();
+        for test in tests_to_run {
             let module_path = test.path.to_string_lossy().to_string();
             module_groups.entry(module_path).or_insert_with(Vec::new).push(test);
         }
-        
-        let mut all_results = Vec::new();
         
         // Execute each module's tests in a single subprocess
         for (module_path, module_tests) in module_groups {
@@ -56,7 +77,7 @@ impl BatchExecutor {
     fn execute_module_tests(&self, module_path: &str, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         let start = Instant::now();
         
-        // Build optimized runner code
+        // Build optimized runner code that includes xfail handling
         let runner_code = self.build_optimized_runner(&module_path, &tests);
         
         // Execute all tests in one process
@@ -95,12 +116,16 @@ impl BatchExecutor {
         
         let mut test_specs = String::new();
         for test in tests {
+            let markers = extract_markers(&test.decorators);
+            let is_xfail = BuiltinMarker::is_xfail(&markers);
+            
             test_specs.push_str(&format!(
-                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}}},\n",
+                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}}},\n",
                 test.id,
                 test.function_name,
                 if test.is_async { "True" } else { "False" },
-                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c))
+                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c)),
+                if is_xfail { "True" } else { "False" }
             ));
         }
         
@@ -152,6 +177,7 @@ results = []
 # Run tests with minimal overhead
 for test_spec in tests:
     test_id = test_spec['id']
+    is_xfail = test_spec.get('is_xfail', False)
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     
@@ -168,25 +194,51 @@ for test_spec in tests:
                 test_func()
         
         duration = time.perf_counter() - start
-        results.append({{
-            'id': test_id,
-            'passed': True,
-            'duration': duration,
-            'stdout': stdout_capture.getvalue(),
-            'stderr': stderr_capture.getvalue(),
-            'error': None
-        }})
+        
+        # Handle xfail - if test passes but is marked xfail, it's an unexpected pass
+        if is_xfail:
+            results.append({{
+                'id': test_id,
+                'passed': False,  # Unexpected pass is a failure
+                'duration': duration,
+                'stdout': stdout_capture.getvalue(),
+                'stderr': stderr_capture.getvalue(),
+                'error': 'Test marked as xfail but passed unexpectedly',
+                'xpass': True
+            }})
+        else:
+            results.append({{
+                'id': test_id,
+                'passed': True,
+                'duration': duration,
+                'stdout': stdout_capture.getvalue(),
+                'stderr': stderr_capture.getvalue(),
+                'error': None
+            }})
     except Exception as e:
         duration = time.perf_counter() - start
-        results.append({{
-            'id': test_id,
-            'passed': False,
-            'duration': duration,
-            'stdout': stdout_capture.getvalue(),
-            'stderr': stderr_capture.getvalue(),
-            'error': str(e),
-            'traceback': traceback.format_exc()
-        }})
+        
+        # Handle xfail - if test fails and is marked xfail, it's expected
+        if is_xfail:
+            results.append({{
+                'id': test_id,
+                'passed': True,  # Expected failure is a pass
+                'duration': duration,
+                'stdout': stdout_capture.getvalue(),
+                'stderr': stderr_capture.getvalue(),
+                'error': None,
+                'xfail': True
+            }})
+        else:
+            results.append({{
+                'id': test_id,
+                'passed': False,
+                'duration': duration,
+                'stdout': stdout_capture.getvalue(),
+                'stderr': stderr_capture.getvalue(),
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }})
 
 print(json.dumps({{'results': results}}))
 "#,
@@ -211,11 +263,24 @@ print(json.dumps({{'results': results}}))
                     let test_stderr = result_json["stderr"].as_str().unwrap_or("").to_string();
                     let error = result_json["error"].as_str().map(String::from);
                     
+                    let is_xfail = result_json.get("xfail").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let is_xpass = result_json.get("xpass").and_then(|v| v.as_bool()).unwrap_or(false);
+                    
+                    let output = if is_xfail {
+                        "XFAIL".to_string()
+                    } else if is_xpass {
+                        "XPASS".to_string()
+                    } else if passed {
+                        "PASSED".to_string()
+                    } else {
+                        "FAILED".to_string()
+                    };
+                    
                     results.push(TestResult {
                         test_id: test_id.to_string(),
                         passed,
                         duration: Duration::from_secs_f64(duration_secs),
-                        output: if passed { "PASSED".to_string() } else { "FAILED".to_string() },
+                        output,
                         error,
                         stdout: test_stdout,
                         stderr: test_stderr,
