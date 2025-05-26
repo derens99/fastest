@@ -37,8 +37,6 @@ dmypy.json
 # Rust
 /target/
 **/*.rs.bk
-# Don't commit Cargo.lock for libraries
-Cargo.lock
 
 # Virtual environments
 .env

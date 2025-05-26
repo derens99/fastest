@@ -36,12 +36,12 @@ Based on real benchmarks:
 
 **macOS and Linux:**
 ```bash
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 ```
 
 **Windows (PowerShell):**
 ```powershell
-irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 ```
 
 The installer will:
@@ -54,7 +54,7 @@ The installer will:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fastest.git
+git clone https://github.com/derens99/fastest.git
 cd fastest
 
 # Build the project (requires Rust)

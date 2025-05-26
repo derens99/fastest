@@ -42,10 +42,10 @@ It supports:
 
 ```bash
 # macOS/Linux
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 
 # Or build from source
-cargo install --git https://github.com/yourusername/fastest
+cargo install --git https://github.com/derens99/fastest
 ```
 
 ## Real-World Performance
@@ -71,7 +71,7 @@ I'd love your feedback and contributions! The project is open source and looking
 - Feature requests and use cases
 - Code contributions
 
-Check it out: https://github.com/yourusername/fastest
+Check it out: https://github.com/derens99/fastest
 
 ## What's Next?
 
