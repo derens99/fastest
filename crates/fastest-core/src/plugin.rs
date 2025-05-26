@@ -184,7 +184,7 @@ impl Plugin for MarkerPlugin {
         "markers"
     }
 
-    fn pytest_collection_modifyitems(&self, tests: &mut Vec<TestItem>) -> Result<()> {
+    fn pytest_collection_modifyitems(&self, _tests: &mut Vec<TestItem>) -> Result<()> {
         // Filter tests based on markers
         // This is already handled in the main code, but could be moved here
         Ok(())
@@ -198,7 +198,7 @@ struct TimeoutPlugin {
 
 impl TimeoutPlugin {
     fn new(timeout: Option<u64>) -> Self {
-        Self { timeout }
+        Self { _timeout: timeout }
     }
 }
 
@@ -221,7 +221,7 @@ struct CapturePlugin {
 impl CapturePlugin {
     fn new() -> Self {
         Self {
-            capture_enabled: true,
+            _capture_enabled: true,
         }
     }
 }
@@ -252,7 +252,7 @@ impl ExamplePlugin {
     pub fn new(name: String) -> Self {
         Self {
             name,
-            config: HashMap::new(),
+            _config: HashMap::new(),
         }
     }
 }

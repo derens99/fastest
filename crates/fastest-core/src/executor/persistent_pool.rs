@@ -111,7 +111,7 @@ impl Drop for PersistentWorker {
 pub struct PersistentWorkerPool {
     workers: Arc<Mutex<Vec<PersistentWorker>>>,
     _size: usize,
-    next_worker: Arc<Mutex<usize>>,
+    _next_worker: Arc<Mutex<usize>>,
 }
 
 impl PersistentWorkerPool {
@@ -126,7 +126,7 @@ impl PersistentWorkerPool {
         Ok(Self {
             workers: Arc::new(Mutex::new(workers)),
             _size: size,
-            next_worker: Arc::new(Mutex::new(0)),
+            _next_worker: Arc::new(Mutex::new(0)),
         })
     }
 

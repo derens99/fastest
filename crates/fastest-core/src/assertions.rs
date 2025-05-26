@@ -1,9 +1,5 @@
-use crate::TestResult;
-use anyhow::Result;
 use colored::*;
-use regex::Regex;
 use similar::{ChangeTag, TextDiff};
-use std::fmt::Display;
 
 /// Format assertion failures with better diffs
 pub fn format_assertion_error(error: &str) -> String {
@@ -61,7 +57,7 @@ fn enhance_equality_assertion(error: &str) -> Option<String> {
 }
 
 /// Enhance membership assertions
-fn enhance_membership_assertion(error: &str) -> Option<String> {
+fn enhance_membership_assertion(_error: &str) -> Option<String> {
     let mut result = String::new();
     result.push_str(
         &"AssertionError: Membership assertion failed"
@@ -77,7 +73,7 @@ fn enhance_membership_assertion(error: &str) -> Option<String> {
 }
 
 /// Extract values from comparison (simplified)
-fn extract_comparison_values(error: &str) -> Option<(String, String)> {
+fn extract_comparison_values(_error: &str) -> Option<(String, String)> {
     // TODO: Extract actual and expected values from error message
     // For now, return None
     None

@@ -1,11 +1,9 @@
 use crate::error::Result;
 use crate::executor::TestResult;
 use std::collections::HashMap;
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
-use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Coverage data for a single file
@@ -285,9 +283,9 @@ impl Default for CoverageReport {
 
 /// Integration with test execution
 pub fn run_tests_with_coverage(
-    tests: Vec<crate::discovery::TestItem>,
+    _tests: Vec<crate::discovery::TestItem>,
     source_dirs: Vec<PathBuf>,
-    format: CoverageFormat,
+    _format: CoverageFormat,
 ) -> Result<(Vec<TestResult>, CoverageReport)> {
     let coverage = CoverageRunner::new(source_dirs);
 
@@ -310,7 +308,7 @@ pub fn run_tests_with_coverage(
 
 pub fn collect_with_tests(
     _tests: Vec<crate::discovery::TestItem>,
-    sources: Vec<String>,
+    _sources: Vec<String>,
     _format: CoverageFormat,
 ) -> Result<CoverageResult> {
     // Implementation of collect_with_tests function

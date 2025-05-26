@@ -167,8 +167,8 @@ impl TestWatcher {
 
 /// Watch mode controller
 pub struct WatchMode {
-    runner: TestRunner,
-    debouncer: Debouncer<RecommendedWatcher>,
+    watcher: TestWatcher,
+    parser_type: ParserType,
     _filter: Option<String>,
     _markers: Option<String>,
 }
@@ -183,8 +183,8 @@ impl WatchMode {
         Ok(Self {
             watcher: TestWatcher::new()?,
             parser_type,
-            filter,
-            markers,
+            _filter: filter,
+            _markers: markers,
         })
     }
 
