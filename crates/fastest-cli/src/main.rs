@@ -49,7 +49,7 @@ struct Cli {
     no_cache: bool,
 
     /// Parser to use for test discovery (regex or ast)
-    #[arg(long = "parser", default_value = "regex")]
+    #[arg(long = "parser", default_value = "ast")]
     parser: String,
 
     /// Optimization level (standard, optimized, aggressive)

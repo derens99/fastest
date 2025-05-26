@@ -223,15 +223,29 @@ impl OptimizedExecutor {
                     ));
                 } else {
                     // Regular test
+                    // For class-based tests, check if the test ID contains the class name
+                    let func_ref = if let Some(class) = &test.class_name {
+                        // Check if class name is already in the function path
+                        if function_path.contains("::") {
+                            // Class name is already in path, extract properly
+                            let parts: Vec<&str> = function_path.split("::").collect();
+                            if parts.len() >= 2 {
+                                format!("{}().{}", parts[0], parts[1])
+                            } else {
+                                format!("{}().{}", class, test.function_name)
+                            }
+                        } else {
+                            format!("{}().{}", class, test.function_name)
+                        }
+                    } else {
+                        function_path.to_string()
+                    };
+                    
                     test_map.push_str(&format!(
                         "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': None}},\n",
                         test.id,
                         import_module,
-                        if let Some(class) = &test.class_name {
-                            format!("{}().{}", class, test.function_name)
-                        } else {
-                            function_path.to_string()
-                        },
+                        func_ref,
                         if test.is_async { "True" } else { "False" },
                         if is_xfail { "True" } else { "False" }
                     ));
