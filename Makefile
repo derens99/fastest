@@ -1,58 +1,131 @@
-.PHONY: help build test clean install dev benchmark lint format
+.PHONY: all build test clean install dev-setup lint format coverage bench release
 
-help:
-	@echo "Available commands:"
-	@echo "  make build      - Build the Rust project in release mode"
-	@echo "  make dev        - Build and install for development"
-	@echo "  make test       - Run tests"
-	@echo "  make benchmark  - Run performance benchmarks"
-	@echo "  make clean      - Clean build artifacts and caches"
-	@echo "  make lint       - Run linters"
-	@echo "  make format     - Format code"
+# Default target
+all: build test
 
+# Build the project
 build:
 	cargo build --release
 
-dev:
-	maturin develop
-
+# Run all tests
 test:
-	# Run Rust tests
-	cargo test
-	# Run Python test scripts
-	@if [ -f "fastest.*.so" ] || [ -f "fastest.pyd" ]; then \
-		python tests/test_fastest.py; \
-		python tests/test_enhanced.py; \
-	else \
-		echo "Python bindings not built. Run 'make dev' first."; \
-	fi
+	cargo test --all-features
+	cargo test --test '*' --all-features
 
-benchmark:
-	@if [ -f "fastest.*.so" ] || [ -f "fastest.pyd" ]; then \
-		python benchmarks/benchmark.py; \
-	else \
-		echo "Python bindings not built. Run 'make dev' first."; \
-	fi
+# Run integration tests with Python
+test-integration: build
+	./target/release/fastest tests/ -v
 
+# Clean build artifacts
 clean:
 	cargo clean
-	rm -rf __pycache__ .pytest_cache
-	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	find . -type f -name "*.pyc" -delete 2>/dev/null || true
-	rm -f fastest.*.so fastest.pyd
+	rm -rf target/
+	rm -rf htmlcov/
+	rm -rf .coverage*
+	rm -rf tarpaulin-report.html
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type f -name "*.pyc" -delete
 
+# Install the binary
+install: build
+	cargo install --path crates/fastest-cli
+
+# Set up development environment
+dev-setup:
+	rustup component add rustfmt clippy
+	cargo install cargo-watch cargo-tarpaulin cargo-audit
+	python -m venv venv
+	./venv/bin/pip install -r requirements-dev.txt
+	pre-commit install
+
+# Run linters
 lint:
-	cargo clippy -- -D warnings
-	@if command -v ruff >/dev/null 2>&1; then \
-		ruff check .; \
-	else \
-		echo "ruff not installed. Run 'pip install -r requirements-dev.txt'"; \
-	fi
+	cargo fmt -- --check
+	cargo clippy --all-targets --all-features -- -D warnings
+	./venv/bin/python -m ruff check .
+	./venv/bin/python -m black --check .
 
+# Format code
 format:
 	cargo fmt
-	@if command -v black >/dev/null 2>&1; then \
-		black . --exclude "/(\.venv|target|test_project)/"; \
-	else \
-		echo "black not installed. Run 'pip install -r requirements-dev.txt'"; \
-	fi 
+	./venv/bin/python -m ruff check --fix .
+	./venv/bin/python -m black .
+
+# Run coverage
+coverage:
+	cargo tarpaulin --out Html --all-features
+	open tarpaulin-report.html
+
+# Run benchmarks
+bench: build
+	python benchmarks/bench_discovery.py
+	python benchmarks/bench_performance.py
+
+# Run security audit
+audit:
+	cargo audit
+
+# Create a release build
+release:
+	cargo build --release --all-features
+	strip target/release/fastest
+	ls -lh target/release/fastest
+
+# Docker operations
+docker-build:
+	docker build -t fastest:latest .
+
+docker-run:
+	docker run --rm -v $(PWD):/workspace fastest:latest tests/
+
+# Documentation
+docs:
+	cargo doc --no-deps --open
+
+# Watch for changes and run tests
+watch:
+	cargo watch -x test -x clippy
+
+# Run CI checks locally
+ci-local:
+	act -j test
+
+# Quick check before committing
+check: format lint test
+
+# Performance profiling
+profile: build
+	cargo flamegraph --bin fastest -- tests/
+
+# Update dependencies
+update:
+	cargo update
+	cargo outdated
+
+# Clean and rebuild everything
+rebuild: clean build test
+
+# Help target
+help:
+	@echo "Available targets:"
+	@echo "  all          - Build and test (default)"
+	@echo "  build        - Build the project in release mode"
+	@echo "  test         - Run all tests"
+	@echo "  test-integration - Run integration tests with Python"
+	@echo "  clean        - Clean build artifacts"
+	@echo "  install      - Install the binary"
+	@echo "  dev-setup    - Set up development environment"
+	@echo "  lint         - Run linters"
+	@echo "  format       - Format code"
+	@echo "  coverage     - Generate coverage report"
+	@echo "  bench        - Run benchmarks"
+	@echo "  audit        - Run security audit"
+	@echo "  release      - Create optimized release build"
+	@echo "  docker-build - Build Docker image"
+	@echo "  docker-run   - Run tests in Docker"
+	@echo "  docs         - Generate and open documentation"
+	@echo "  watch        - Watch for changes and run tests"
+	@echo "  check        - Format, lint, and test"
+	@echo "  profile      - Run performance profiling"
+	@echo "  update       - Update dependencies"
+	@echo "  rebuild      - Clean and rebuild everything" 

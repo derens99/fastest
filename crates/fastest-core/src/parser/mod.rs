@@ -6,7 +6,8 @@ pub use ast::AstParser;
 pub use regex::{parse_test_file, TestFunction};
 
 // Parser selection enum
-pub enum Parser {
+#[derive(Debug, Clone, Copy)]
+pub enum ParserType {
     Regex,
     Ast,
 }
@@ -24,7 +25,12 @@ pub struct FixtureDefinition {
 
 pub fn parse_fixtures_and_tests(
     path: &std::path::Path,
+    parser_type: ParserType,
 ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>), Box<dyn std::error::Error>> {
-    regex::RegexParser::parse_fixtures_and_tests(path)
-        .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+    match parser_type {
+        ParserType::Regex => regex::RegexParser::parse_fixtures_and_tests(path)
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
+        ParserType::Ast => ast::AstParser::parse_fixtures_and_tests(path)
+            .map_err(|e| Box::<dyn std::error::Error>::from(e)),
+    }
 }

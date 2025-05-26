@@ -20,24 +20,42 @@ A blazing fast Python test runner built with Rust for maximum performance and re
 
 ## 📦 Installation
 
-### From PyPI
+### Quick Install (Recommended)
+
+**macOS/Linux:**
 ```bash
-pip install fastest
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 ```
 
-### From Source
-```bash
-# Clone the repository
-git clone https://github.com/derens99/fastest.git
-cd fastest
-
-# Build and install
-cargo build --release
-pip install -e python/
-
-# Or use the install script
-./scripts/install.sh
+**Windows:**
+```powershell
+irm https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 ```
+
+### Other Installation Methods
+
+**Via pip:**
+```bash
+pip install fastest-runner
+```
+
+**Via Homebrew (macOS):**
+```bash
+brew tap derens99/fastest
+brew install fastest
+```
+
+**Via Cargo (requires Rust):**
+```bash
+cargo install fastest-cli
+```
+
+**Via Docker:**
+```bash
+docker run --rm -v $(pwd):/workspace ghcr.io/derens99/fastest tests/
+```
+
+See the [installation guide](docs/INSTALLATION.md) for more options and troubleshooting.
 
 ## 🎯 Quick Start
 
@@ -200,9 +218,47 @@ fastest/
 | Doctests | ❌ | Low priority |
 | Session fixtures | ❌ | Complex scoping |
 
+## 📊 Project Status
+
+### Test Coverage
+![Coverage](https://codecov.io/gh/derens99/fastest/branch/main/graph/badge.svg)
+
+The project maintains high test coverage with:
+- Unit tests for all core functionality
+- Integration tests for CLI commands
+- End-to-end tests with real Python test suites
+- Performance benchmarks
+
+### CI/CD
+All code is tested on:
+- **Operating Systems**: Linux, macOS, Windows
+- **Python Versions**: 3.8, 3.9, 3.10, 3.11, 3.12
+- **Rust Versions**: stable, beta, nightly
+
+### Documentation
+- [Development Guide](docs/DEVELOPMENT.md) - Set up your development environment
+- [Testing Guide](docs/TESTING.md) - How to test the project
+- [Release Process](docs/RELEASE.md) - How we release new versions
+- [Performance Guide](docs/PERFORMANCE.md) - Optimization tips
+- [Migration Guide](docs/MIGRATION_GUIDE.md) - Migrating from pytest
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Quick Start for Contributors
+```bash
+# Clone and setup
+git clone https://github.com/derens99/fastest.git
+cd fastest
+make dev-setup
+
+# Run tests
+make test
+
+# Format and lint
+make check
+```
 
 ## 📄 License
 
@@ -212,6 +268,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Built with [PyO3](https://pyo3.rs/) for seamless Python-Rust integration
 - Inspired by the pytest project and the Rust community
+- Tree-sitter for accurate Python AST parsing
 - Special thanks to all contributors
 
 ---

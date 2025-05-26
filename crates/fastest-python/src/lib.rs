@@ -1,6 +1,6 @@
 use fastest_core::{
     discover_tests as core_discover, run_test as core_run_test, BatchExecutor, ParallelExecutor,
-    TestItem,
+    TestItem, parser::ParserType,
 };
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -47,7 +47,7 @@ struct PyTestResult {
 
 #[pyfunction]
 fn discover_tests(path: String) -> PyResult<Vec<PyTestItem>> {
-    let tests = core_discover(std::path::Path::new(&path))
+    let tests = core_discover(std::path::Path::new(&path), ParserType::Ast)
         .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
 
     Ok(tests

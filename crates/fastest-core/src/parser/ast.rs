@@ -1,4 +1,5 @@
 use super::TestFunction;
+use super::FixtureDefinition;
 use anyhow::{anyhow, Result};
 use tree_sitter::{Node, Parser};
 
@@ -29,6 +30,27 @@ impl AstParser {
         self.visit_node(root, content, &mut tests, None)?;
 
         Ok(tests)
+    }
+
+    pub fn parse_fixtures_and_tests(
+        path: &std::path::Path,
+    ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
+        let content = std::fs::read_to_string(path)?;
+        let mut parser = Self::new()?;
+        
+        let tree = parser
+            .parser
+            .parse(&content, None)
+            .ok_or_else(|| anyhow!("Failed to parse Python file: {}", path.display()))?;
+
+        let root = tree.root_node();
+        let mut tests = Vec::new();
+        let mut fixtures = Vec::new();
+
+        // Visit nodes to collect both tests and fixtures
+        parser.visit_node_for_all(root, &content, &mut tests, &mut fixtures, None)?;
+
+        Ok((fixtures, tests))
     }
 
     fn visit_node(
@@ -154,6 +176,166 @@ impl AstParser {
         decorators
             .iter()
             .any(|d| d == "async" || d.starts_with("asyncio.") || d.contains("async"))
+    }
+
+    fn visit_node_for_all(
+        &self,
+        node: Node,
+        source: &str,
+        tests: &mut Vec<TestFunction>,
+        fixtures: &mut Vec<FixtureDefinition>,
+        current_class: Option<&str>,
+    ) -> Result<()> {
+        match node.kind() {
+            "function_definition" => {
+                // Check if this function is inside a decorated_definition
+                let decorators = if let Some(parent) = node.parent() {
+                    if parent.kind() == "decorated_definition" {
+                        self.get_decorators(parent, source)
+                    } else {
+                        Vec::new()
+                    }
+                } else {
+                    Vec::new()
+                };
+
+                // Check if it's an async function by looking at the first child
+                let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let name = &source[name_node.byte_range()];
+                    let line_number = name_node.start_position().row + 1;
+                    
+                    // Check if it's a fixture
+                    let is_fixture = decorators.iter().any(|d| {
+                        d.contains("pytest.fixture") || d.contains("fixture") || d.contains("fastest.fixture")
+                    });
+                    
+                    if is_fixture {
+                        let (scope, autouse) = self.parse_fixture_decorator(&decorators);
+                        fixtures.push(FixtureDefinition {
+                            name: name.to_string(),
+                            line_number,
+                            is_async: is_async || self.has_async_decorator(&decorators),
+                            scope,
+                            autouse,
+                            params: Vec::new(), // TODO: Parse params from decorator
+                            decorators: decorators.clone(),
+                        });
+                    } else if name.starts_with("test_") {
+                        tests.push(TestFunction {
+                            name: name.to_string(),
+                            line_number,
+                            is_async: is_async || self.has_async_decorator(&decorators),
+                            class_name: current_class.map(String::from),
+                            decorators,
+                        });
+                    }
+                }
+            }
+            "decorated_definition" => {
+                // Handle decorated functions - pass decorators down
+                if let Some(definition) = node.child_by_field_name("definition") {
+                    if definition.kind() == "function_definition" {
+                        // Don't recurse into the function_definition here
+                        // Instead, handle it directly with decorators
+                        let decorators = self.get_decorators(node, source);
+
+                        // Check if it's an async function
+                        let is_async = definition
+                            .child(0)
+                            .map(|n| n.kind() == "async")
+                            .unwrap_or(false);
+
+                        if let Some(name_node) = definition.child_by_field_name("name") {
+                            let name = &source[name_node.byte_range()];
+                            let line_number = name_node.start_position().row + 1;
+                            
+                            // Check if it's a fixture
+                            let is_fixture = decorators.iter().any(|d| {
+                                d.contains("pytest.fixture") || d.contains("fixture") || d.contains("fastest.fixture")
+                            });
+                            
+                            if is_fixture {
+                                let (scope, autouse) = self.parse_fixture_decorator(&decorators);
+                                fixtures.push(FixtureDefinition {
+                                    name: name.to_string(),
+                                    line_number,
+                                    is_async: is_async || self.has_async_decorator(&decorators),
+                                    scope,
+                                    autouse,
+                                    params: Vec::new(), // TODO: Parse params from decorator
+                                    decorators: decorators.clone(),
+                                });
+                            } else if name.starts_with("test_") {
+                                tests.push(TestFunction {
+                                    name: name.to_string(),
+                                    line_number,
+                                    is_async: is_async || self.has_async_decorator(&decorators),
+                                    class_name: current_class.map(String::from),
+                                    decorators,
+                                });
+                            }
+                        }
+                    }
+                } else {
+                    // Still visit children in case there are nested structures
+                    let mut cursor = node.walk();
+                    for child in node.children(&mut cursor) {
+                        if child.kind() != "decorator_list" {
+                            self.visit_node_for_all(child, source, tests, fixtures, current_class)?;
+                        }
+                    }
+                }
+            }
+            "class_definition" => {
+                // Check if class name starts with Test
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    let class_name = &source[name_node.byte_range()];
+                    if class_name.starts_with("Test") {
+                        // Visit class body looking for test methods
+                        if let Some(body) = node.child_by_field_name("body") {
+                            self.visit_node_for_all(body, source, tests, fixtures, Some(class_name))?;
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Recursively visit children
+                let mut cursor = node.walk();
+                for child in node.children(&mut cursor) {
+                    self.visit_node_for_all(child, source, tests, fixtures, current_class)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_fixture_decorator(&self, decorators: &[String]) -> (String, bool) {
+        let mut scope = "function".to_string();
+        let mut autouse = false;
+
+        for decorator in decorators {
+            if decorator.contains("fixture") {
+                // Extract scope parameter - handle both scope="..." and scope='...'
+                if let Some(scope_start) = decorator.find("scope=") {
+                    let scope_part = &decorator[scope_start + 6..];
+                    // Find the closing quote or comma or parenthesis
+                    if let Some(quote_end) = scope_part.find(&['"', '\'', ',', ')'][..]) {
+                        let extracted_scope = scope_part[..quote_end].trim_matches(&['"', '\''][..]);
+                        scope = extracted_scope.to_string();
+                    }
+                }
+
+                // Check for autouse
+                if decorator.contains("autouse=True") {
+                    autouse = true;
+                }
+            }
+        }
+
+        (scope, autouse)
     }
 }
 

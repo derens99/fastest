@@ -1,192 +1,173 @@
-# Fastest installer script for Windows
-# Inspired by Astral's UV installer
+# Fastest installer for Windows
+# Usage: irm https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 
 param(
-    [string]$InstallDir = "$env:USERPROFILE\.fastest",
-    [switch]$NoModifyPath
+    [string]$Version = "latest",
+    [string]$InstallDir = "$env:LOCALAPPDATA\fastest\bin"
 )
 
 $ErrorActionPreference = "Stop"
+$ProgressPreference = "SilentlyContinue"
 
 # Configuration
-$REPO = "derens99/fastest"
-$BASE_URL = "https://github.com/$REPO/releases"
-$BIN_DIR = Join-Path $InstallDir "bin"
-$EXECUTABLE_NAME = "fastest.exe"
+$Repo = "derens99/fastest"
+$BinaryName = "fastest.exe"
 
 # Helper functions
-function Write-ColorOutput($ForegroundColor) {
-    $fc = $host.UI.RawUI.ForegroundColor
-    $host.UI.RawUI.ForegroundColor = $ForegroundColor
-    if ($args) {
-        Write-Output $args
-    }
-    $host.UI.RawUI.ForegroundColor = $fc
+function Write-Info {
+    param([string]$Message)
+    Write-Host "info: " -ForegroundColor Blue -NoNewline
+    Write-Host $Message
 }
 
-function Info($message) {
-    Write-ColorOutput Blue "info: $message"
+function Write-Success {
+    param([string]$Message)
+    Write-Host "success: " -ForegroundColor Green -NoNewline
+    Write-Host $Message
 }
 
-function Success($message) {
-    Write-ColorOutput Green "success: $message"
+function Write-Warning {
+    param([string]$Message)
+    Write-Host "warning: " -ForegroundColor Yellow -NoNewline
+    Write-Host $Message
 }
 
-function Warning($message) {
-    Write-ColorOutput Yellow "warning: $message"
-}
-
-function ErrorMessage($message) {
-    Write-ColorOutput Red "error: $message"
+function Write-Error {
+    param([string]$Message)
+    Write-Host "error: " -ForegroundColor Red -NoNewline
+    Write-Host $Message
 }
 
 # Detect architecture
 function Get-Architecture {
-    $arch = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITECTURE")
+    $arch = $env:PROCESSOR_ARCHITECTURE
     switch ($arch) {
         "AMD64" { return "x86_64" }
         "ARM64" { return "aarch64" }
         default {
-            ErrorMessage "Unsupported architecture: $arch"
+            Write-Error "Unsupported architecture: $arch"
             exit 1
         }
     }
 }
 
-# Download the latest release
-function Download-Release {
-    param($Architecture)
-    
-    $tempFile = [System.IO.Path]::GetTempFileName() + ".zip"
-    $downloadUrl = "$BASE_URL/download/latest/fastest-windows-$Architecture.zip"
-    
-    Info "Finding latest release..."
-    Info "Downloading Fastest for windows-$Architecture..."
-    
+# Get latest version from GitHub
+function Get-LatestVersion {
     try {
-        # Use TLS 1.2
-        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        
-        $webClient = New-Object System.Net.WebClient
-        $webClient.DownloadFile($downloadUrl, $tempFile)
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
+        return $release.tag_name
     }
     catch {
-        ErrorMessage "Failed to download Fastest: $_"
+        Write-Error "Failed to get latest version: $_"
         exit 1
     }
-    
-    return $tempFile
 }
 
-# Install the binary
-function Install-Binary {
-    param($ArchiveFile)
+# Download and install
+function Install-Fastest {
+    param(
+        [string]$Version,
+        [string]$Architecture
+    )
     
-    Info "Installing to $InstallDir..."
-    
-    # Create installation directory
-    if (!(Test-Path $BIN_DIR)) {
-        New-Item -ItemType Directory -Force -Path $BIN_DIR | Out-Null
+    # Get version if not specified
+    if ($Version -eq "latest") {
+        $Version = Get-LatestVersion
+        Write-Info "Latest version: $Version"
     }
     
-    # Extract the archive
+    # Construct download URL
+    $platform = "$Architecture-pc-windows-msvc"
+    $url = "https://github.com/$Repo/releases/download/$Version/fastest-$platform.zip"
+    
+    Write-Info "Downloading fastest $Version for Windows $Architecture..."
+    
+    # Create temp directory
+    $tempDir = New-TemporaryFile | ForEach-Object { Remove-Item $_; New-Item -ItemType Directory -Path $_ }
+    $zipPath = Join-Path $tempDir "fastest.zip"
+    
     try {
-        Add-Type -AssemblyName System.IO.Compression.FileSystem
-        [System.IO.Compression.ZipFile]::ExtractToDirectory($ArchiveFile, $BIN_DIR)
+        # Download
+        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+        
+        # Extract
+        Write-Info "Extracting archive..."
+        Expand-Archive -Path $zipPath -DestinationPath $tempDir -Force
+        
+        # Create install directory
+        if (!(Test-Path $InstallDir)) {
+            New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
+        }
+        
+        # Install binary
+        $sourcePath = Join-Path $tempDir $BinaryName
+        $destPath = Join-Path $InstallDir $BinaryName
+        
+        Write-Info "Installing to $destPath..."
+        Move-Item -Path $sourcePath -Destination $destPath -Force
+        
+        # Verify installation
+        if (Test-Path $destPath) {
+            & $destPath --version | Out-Null
+            Write-Success "fastest installed successfully!"
+        }
+        else {
+            Write-Error "Installation failed"
+            exit 1
+        }
     }
-    catch {
-        ErrorMessage "Failed to extract archive: $_"
-        exit 1
+    finally {
+        # Cleanup
+        Remove-Item -Path $tempDir -Recurse -Force
     }
-    
-    # Clean up
-    Remove-Item $ArchiveFile -Force
 }
 
-# Setup PATH
-function Setup-Path {
-    if ($NoModifyPath) {
-        Warning "Not modifying PATH. Please add $BIN_DIR to your PATH manually."
-        return
-    }
+# Add to PATH
+function Add-ToPath {
+    param([string]$Dir)
     
-    $User = [EnvironmentVariableTarget]::User
-    $Path = [Environment]::GetEnvironmentVariable('Path', $User)
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     
-    if ($Path -notlike "*$BIN_DIR*") {
-        Info "Adding $BIN_DIR to PATH..."
+    if ($userPath -notlike "*$Dir*") {
+        Write-Info "Adding $Dir to user PATH..."
         
-        # Add to user PATH
-        $NewPath = "$BIN_DIR;$Path"
-        [Environment]::SetEnvironmentVariable('Path', $NewPath, $User)
+        $newPath = if ($userPath) { "$userPath;$Dir" } else { $Dir }
+        [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
         
         # Update current session
-        $env:Path = "$BIN_DIR;$env:Path"
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + $newPath
         
-        Info "PATH updated. You may need to restart your terminal."
+        Write-Warning "PATH updated. You may need to restart your terminal."
     }
     else {
-        Info "PATH already contains $BIN_DIR"
+        Write-Info "PATH already contains $Dir"
     }
 }
 
-# Verify installation
-function Verify-Installation {
-    $fastestPath = Join-Path $BIN_DIR $EXECUTABLE_NAME
-    
-    if (Test-Path $fastestPath) {
-        try {
-            $version = & $fastestPath --version 2>$null
-            Success "Fastest $version installed successfully!"
-        }
-        catch {
-            Warning "Installation completed but verification failed"
-        }
-    }
-    else {
-        ErrorMessage "Installation verification failed - executable not found"
-        exit 1
-    }
-}
-
-# Main installation flow
+# Main
 function Main {
-    Write-Host "🚀 Installing Fastest - The blazing fast Python test runner" -ForegroundColor Cyan
+    Write-Host "🚀 Installing fastest - The blazing fast Python test runner" -ForegroundColor Cyan
     Write-Host ""
     
-    # Check if already installed
-    $fastestPath = Join-Path $BIN_DIR $EXECUTABLE_NAME
-    if (Test-Path $fastestPath) {
-        Warning "Fastest is already installed at $fastestPath"
-        $response = Read-Host "Do you want to reinstall? [y/N]"
-        if ($response -ne 'y' -and $response -ne 'Y') {
-            exit 0
-        }
-    }
-    
-    # Detect architecture
+    # Get architecture
     $arch = Get-Architecture
-    Info "Detected architecture: windows-$arch"
+    Write-Info "Detected architecture: $arch"
     
-    # Download release
-    $tempArchive = Download-Release -Architecture $arch
+    # Install
+    Install-Fastest -Version $Version -Architecture $arch
     
-    # Install binary
-    Install-Binary -ArchiveFile $tempArchive
-    
-    # Setup PATH
-    Setup-Path
-    
-    # Verify installation
-    Verify-Installation
+    # Add to PATH
+    Add-ToPath -Dir $InstallDir
     
     Write-Host ""
-    Write-Host "📚 Get started with:" -ForegroundColor Cyan
-    Write-Host "    fastest --help"
+    Write-Success "Installation complete! 🎉"
     Write-Host ""
-    Write-Host "📖 Documentation: https://github.com/$REPO" -ForegroundColor Blue
-    Write-Host "🐛 Report issues: https://github.com/$REPO/issues" -ForegroundColor Blue
+    Write-Host "To get started, try:"
+    Write-Host "  fastest --help"
+    Write-Host "  fastest tests/"
+    Write-Host ""
+    Write-Host "For more information, visit: https://github.com/$Repo"
 }
 
-# Run main function
+# Run main
 Main 

@@ -1,23 +1,38 @@
-# Base image for building the fastest project
-FROM python:3.11-slim AS build
+# Build stage
+FROM rust:1.75-slim as builder
 
-# Install Rust and maturin
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl \
-    && curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && /root/.cargo/bin/cargo install --locked maturin \
+WORKDIR /app
+
+# Install dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PATH="/root/.cargo/bin:${PATH}"
-WORKDIR /usr/src/fastest
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
 
-COPY . .
-RUN maturin build --release --manylinux off
+# Build release binary
+RUN cargo build --release --bin fastest
 
+# Runtime stage
 FROM python:3.11-slim
 
-COPY --from=build /usr/src/fastest/target/wheels/*.whl /tmp/
-RUN pip install /tmp/fastest-*.whl && rm -rf /tmp/fastest-*.whl
+# Install Python dependencies that might be needed for testing
+RUN pip install --no-cache-dir pytest pytest-asyncio coverage
 
+# Copy the binary from builder
+COPY --from=builder /app/target/release/fastest /usr/local/bin/fastest
+
+# Create a non-root user
+RUN useradd -m -u 1000 testrunner && \
+    mkdir -p /workspace && \
+    chown -R testrunner:testrunner /workspace
+
+USER testrunner
+WORKDIR /workspace
+
+# Set entrypoint
 ENTRYPOINT ["fastest"]
 CMD ["--help"]

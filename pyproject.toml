@@ -1,19 +1,18 @@
 [build-system]
-requires = ["maturin>=1.4,<2.0"]
-build-backend = "maturin"
+requires = ["setuptools>=45", "wheel", "setuptools-rust>=1.5.2"]
+build-backend = "setuptools.build_meta"
 
 [project]
-name = "fastest"
+name = "fastest-runner"
 version = "0.1.0"
 description = "A blazing fast Python test runner built with Rust"
-authors = [
-    { name = "Deren S", email = "derens99@gmail.com" }
-]
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.8"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -25,20 +24,43 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Testing :: Unit",
-    "Operating System :: OS Independent",
 ]
-keywords = ["testing", "test-runner", "pytest", "rust", "performance"]
+requires-python = ">=3.8"
+keywords = ["testing", "test-runner", "pytest", "performance", "rust"]
 
 [project.urls]
-Homepage = "https://github.com/derens99/fastest"
-Documentation = "https://github.com/derens99/fastest#readme"
-Repository = "https://github.com/derens99/fastest"
-Issues = "https://github.com/derens99/fastest/issues"
+Homepage = "https://github.com/yourusername/fastest"
+Documentation = "https://github.com/yourusername/fastest/tree/main/docs"
+Repository = "https://github.com/yourusername/fastest"
+Issues = "https://github.com/yourusername/fastest/issues"
+Changelog = "https://github.com/yourusername/fastest/blob/main/CHANGELOG.md"
 
 [project.scripts]
-fastest = "fastest:main"
+fastest = "fastest_runner:main"
 
-[tool.maturin]
-features = ["pyo3/extension-module"]
-python-source = "python"
-module-name = "fastest._fastest" 
+[tool.cibuildwheel]
+# Build for common platforms
+build = ["cp38-*", "cp39-*", "cp310-*", "cp311-*", "cp312-*"]
+skip = ["*-musllinux_*", "*-win32", "pp*"]
+
+# Use rustup to install Rust
+before-all = "curl https://sh.rustup.rs -sSf | sh -s -- -y"
+environment = { PATH = "$HOME/.cargo/bin:$PATH" }
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "curl https://sh.rustup.rs -sSf | sh -s -- -y",
+    "yum install -y openssl-devel || apt-get update && apt-get install -y libssl-dev"
+]
+
+[tool.cibuildwheel.macos]
+before-all = [
+    "curl https://sh.rustup.rs -sSf | sh -s -- -y",
+    "rustup target add aarch64-apple-darwin"
+]
+
+[tool.cibuildwheel.windows]
+before-all = [
+    "rustup-init.exe -y",
+    "rustup target add i686-pc-windows-msvc"
+] 

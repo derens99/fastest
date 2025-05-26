@@ -2,87 +2,82 @@ use crate::discovery::TestItem;
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CacheEntry {
     pub tests: Vec<TestItem>,
-    pub last_modified: SystemTime,
-    pub file_hash: Option<String>,
+    pub modified: SystemTime,
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DiscoveryCache {
     entries: HashMap<PathBuf, CacheEntry>,
-    cache_version: String,
 }
 
 impl DiscoveryCache {
     pub fn new() -> Self {
         Self {
             entries: HashMap::new(),
-            cache_version: env!("CARGO_PKG_VERSION").to_string(),
         }
     }
 
     /// Load cache from disk
-    pub fn load(cache_path: &Path) -> Result<Self> {
-        if !cache_path.exists() {
-            return Ok(Self::new());
-        }
-
-        let content = std::fs::read_to_string(cache_path)?;
+    pub fn load(path: &Path) -> Result<Self> {
+        let content = fs::read_to_string(path)?;
         let cache: Self = serde_json::from_str(&content)?;
-
-        // Check version compatibility
-        if cache.cache_version != env!("CARGO_PKG_VERSION") {
-            return Ok(Self::new());
-        }
-
         Ok(cache)
     }
 
     /// Save cache to disk
-    pub fn save(&self, cache_path: &Path) -> Result<()> {
-        let content = serde_json::to_string_pretty(self)?;
-        if let Some(parent) = cache_path.parent() {
-            std::fs::create_dir_all(parent)?;
+    pub fn save(&self, path: &Path) -> Result<()> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
         }
-        std::fs::write(cache_path, content)?;
+        let content = serde_json::to_string_pretty(self)?;
+        fs::write(path, content)?;
         Ok(())
     }
 
     /// Get cached tests for a file if still valid
-    pub fn get(&self, path: &Path) -> Option<&Vec<TestItem>> {
-        let entry = self.entries.get(path)?;
-
-        // Check if file has been modified
-        if let Ok(metadata) = path.metadata() {
-            if let Ok(modified) = metadata.modified() {
-                if modified <= entry.last_modified {
-                    return Some(&entry.tests);
-                }
+    pub fn get(&self, path: &Path) -> Option<Vec<TestItem>> {
+        self.entries.get(path).and_then(|entry| {
+            // Check if file has been modified
+            match fs::metadata(path) {
+                Ok(metadata) => match metadata.modified() {
+                    Ok(modified) => {
+                        if modified == entry.modified {
+                            Some(entry.tests.clone())
+                        } else {
+                            None
+                        }
+                    }
+                    Err(_) => None,
+                },
+                Err(_) => None,
             }
-        }
-
-        None
+        })
     }
 
     /// Update cache entry for a file
     pub fn update(&mut self, path: PathBuf, tests: Vec<TestItem>) -> Result<()> {
-        let metadata = path.metadata()?;
-        let last_modified = metadata.modified()?;
-
+        let metadata = fs::metadata(&path)?;
+        let modified = metadata.modified()?;
+        
+        // Calculate content hash for more reliable caching
+        let content_hash = self.calculate_content_hash(&path).ok();
+        
         self.entries.insert(
             path,
             CacheEntry {
                 tests,
-                last_modified,
-                file_hash: None, // Could add content hashing for extra safety
+                modified,
+                content_hash,
             },
         );
-
         Ok(())
     }
 
@@ -92,8 +87,19 @@ impl DiscoveryCache {
     }
 
     /// Remove stale entries (files that no longer exist)
-    pub fn cleanup(&mut self) {
-        self.entries.retain(|path, _| path.exists());
+    pub fn remove(&mut self, path: &Path) -> bool {
+        self.entries.remove(path).is_some()
+    }
+
+    /// Calculate a fast hash of file content for cache invalidation
+    fn calculate_content_hash(&self, path: &Path) -> Result<String> {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+        
+        let content = fs::read_to_string(path)?;
+        let mut hasher = DefaultHasher::new();
+        content.hash(&mut hasher);
+        Ok(format!("{:x}", hasher.finish()))
     }
 
     /// Get cache statistics

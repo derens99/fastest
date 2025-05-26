@@ -2,32 +2,23 @@ use super::TestResult;
 use crate::discovery::TestItem;
 use crate::error::{Error, Result};
 use crate::markers::{extract_markers, BuiltinMarker};
+use crate::utils::PYTHON_CMD;
 use dashmap::DashMap;
-use once_cell::sync::Lazy;
-use parking_lot::RwLock;
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-// Global Python process pool for reuse
-static PYTHON_POOL: Lazy<Arc<RwLock<Vec<PythonWorker>>>> = 
-    Lazy::new(|| Arc::new(RwLock::new(Vec::new())));
-
-struct PythonWorker {
-    process: std::process::Child,
-    stdin: std::process::ChildStdin,
-    stdout: std::process::ChildStdout,
-}
-
-/// Ultra-optimized test executor using persistent Python processes
+/// Ultra-optimized test executor using advanced techniques
 pub struct OptimizedExecutor {
     num_workers: usize,
-    use_persistent_workers: bool,
     batch_size: usize,
     verbose: bool,
+    coverage_enabled: bool,
+    coverage_source: Vec<PathBuf>,
 }
 
 impl OptimizedExecutor {
@@ -39,10 +30,18 @@ impl OptimizedExecutor {
 
         Self {
             num_workers,
-            use_persistent_workers: true,
             batch_size: 50, // Optimal batch size based on benchmarks
             verbose,
+            coverage_enabled: false,
+            coverage_source: Vec::new(),
         }
+    }
+    
+    /// Enable coverage collection
+    pub fn with_coverage(mut self, source_dirs: Vec<PathBuf>) -> Self {
+        self.coverage_enabled = true;
+        self.coverage_source = source_dirs;
+        self
     }
 
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
@@ -59,21 +58,30 @@ impl OptimizedExecutor {
         let test_batches = self.create_optimal_batches(tests_to_run);
         
         if self.verbose {
-            eprintln!("⚡ Executing {} tests in {} batches", 
+            eprintln!("⚡ Executing {} tests in {} batches with {} workers", 
                      test_batches.iter().map(|b| b.len()).sum::<usize>(),
-                     test_batches.len());
+                     test_batches.len(),
+                     self.num_workers);
         }
 
         // Step 3: Execute in parallel with work stealing
         let results = Arc::new(DashMap::new());
         let results_clone = results.clone();
         
-        test_batches.into_par_iter().for_each(|batch| {
-            if let Ok(batch_results) = self.execute_batch_optimized(batch) {
-                for result in batch_results {
-                    results_clone.insert(result.test_id.clone(), result);
+        // Configure thread pool
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(self.num_workers)
+            .build()
+            .map_err(|e| Error::Execution(format!("Failed to create thread pool: {}", e)))?;
+        
+        pool.install(|| {
+            test_batches.into_par_iter().for_each(|batch| {
+                if let Ok(batch_results) = self.execute_batch_optimized(batch) {
+                    for result in batch_results {
+                        results_clone.insert(result.test_id.clone(), result);
+                    }
                 }
-            }
+            });
         });
 
         // Collect results - clone the Arc and then iterate
@@ -142,18 +150,54 @@ impl OptimizedExecutor {
         // Build ultra-optimized Python code
         let runner_code = self.build_ultra_fast_runner(&tests);
         
-        // Use persistent worker if available
-        if self.use_persistent_workers {
-            if let Some(result) = self.try_persistent_worker(&runner_code) {
-                return result;
-            }
-        }
-
-        // Fallback to subprocess
+        // Execute in subprocess
         self.execute_subprocess(&runner_code)
     }
 
     fn build_ultra_fast_runner(&self, tests: &[TestItem]) -> String {
+        let base_code = self.build_test_runner_code(tests);
+        
+        if self.coverage_enabled {
+            self.wrap_with_coverage(&base_code)
+        } else {
+            base_code
+        }
+    }
+    
+    fn wrap_with_coverage(&self, code: &str) -> String {
+        format!(
+            r#"
+import coverage
+import sys
+import os
+
+# Start coverage collection
+cov = coverage.Coverage(
+    data_file='.coverage.fastest.{{}}',
+    source={:?},
+    omit=['*/test_*.py', '*/tests/*', '*/conftest.py']
+)
+cov.start()
+
+try:
+{}
+finally:
+    # Stop coverage and save
+    cov.stop()
+    cov.save()
+"#,
+            self.coverage_source
+                .iter()
+                .map(|p| p.to_string_lossy().to_string())
+                .collect::<Vec<_>>(),
+            code.lines()
+                .map(|line| format!("    {}", line))
+                .collect::<Vec<_>>()
+                .join("\n")
+        )
+    }
+    
+    fn build_test_runner_code(&self, tests: &[TestItem]) -> String {
         // Group tests by module for single import
         let mut module_tests: HashMap<String, Vec<&TestItem>> = HashMap::new();
         for test in tests {
@@ -223,22 +267,11 @@ impl OptimizedExecutor {
                     ));
                 } else {
                     // Regular test
-                    // For class-based tests, check if the test ID contains the class name
+                    // For class-based tests, properly reference the method
                     let func_ref = if let Some(class) = &test.class_name {
-                        // Check if class name is already in the function path
-                        if function_path.contains("::") {
-                            // Class name is already in path, extract properly
-                            let parts: Vec<&str> = function_path.split("::").collect();
-                            if parts.len() >= 2 {
-                                format!("{}().{}", parts[0], parts[1])
-                            } else {
-                                format!("{}().{}", class, test.function_name)
-                            }
-                        } else {
-                            format!("{}().{}", class, test.function_name)
-                        }
+                        format!("{}().{}", class, test.function_name)
                     } else {
-                        function_path.to_string()
+                        test.function_name.clone()
                     };
                     
                     test_map.push_str(&format!(
@@ -355,11 +388,6 @@ print(json.dumps({{'results': results}}))
         )
     }
 
-    fn try_persistent_worker(&self, _code: &str) -> Option<Result<Vec<TestResult>>> {
-        // TODO: Implement persistent worker pool
-        None
-    }
-
     fn execute_subprocess(&self, code: &str) -> Result<Vec<TestResult>> {
         // Debug: write code to file
         if self.verbose {
@@ -369,12 +397,24 @@ print(json.dumps({{'results': results}}))
             }
         }
         
-        let output = Command::new("python")
-            .arg("-c")
+        let mut cmd = Command::new(&*PYTHON_CMD);
+        cmd.arg("-c")
             .arg(code)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
+            .stderr(Stdio::piped());
+            
+        // Preserve virtual environment
+        if let Ok(venv) = std::env::var("VIRTUAL_ENV") {
+            cmd.env("VIRTUAL_ENV", venv);
+        }
+        if let Ok(path) = std::env::var("PATH") {
+            cmd.env("PATH", path);
+        }
+        if let Ok(pythonpath) = std::env::var("PYTHONPATH") {
+            cmd.env("PYTHONPATH", pythonpath);
+        }
+        
+        let output = cmd.output()
             .map_err(|e| Error::Execution(format!("Failed to execute tests: {}", e)))?;
 
         let stdout = String::from_utf8_lossy(&output.stdout);

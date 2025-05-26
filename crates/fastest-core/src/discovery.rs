@@ -2,7 +2,7 @@ use crate::cache::DiscoveryCache;
 use crate::error::Result;
 use crate::fixtures::{Fixture, FixtureScope};
 use crate::parametrize::expand_parametrized_tests;
-use crate::parser::{parse_fixtures_and_tests, AstParser, FixtureDefinition, TestFunction};
+use crate::parser::{parse_fixtures_and_tests, FixtureDefinition, TestFunction, ParserType};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -24,12 +24,12 @@ pub struct DiscoveryResult {
     pub fixtures: Vec<Fixture>,
 }
 
-pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
-    let result = discover_tests_and_fixtures(path)?;
+pub fn discover_tests(path: &Path, parser_type: ParserType) -> Result<Vec<TestItem>> {
+    let result = discover_tests_and_fixtures(path, parser_type)?;
     Ok(result.tests)
 }
 
-pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
+pub fn discover_tests_and_fixtures(path: &Path, parser_type: ParserType) -> Result<DiscoveryResult> {
     let mut tests = Vec::new();
     let mut fixtures = Vec::new();
 
@@ -39,7 +39,7 @@ pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
 
         if is_test_file(path) {
             let content = std::fs::read_to_string(path)?;
-            match parse_fixtures_and_tests(path) {
+            match parse_fixtures_and_tests(path, parser_type) {
                 Ok((file_fixtures, test_functions)) => {
                     // Convert fixtures
                     for fixture_def in file_fixtures {
@@ -78,45 +78,13 @@ pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
     Ok(DiscoveryResult { tests, fixtures })
 }
 
-/// Discover tests using the AST parser
+/// Discover tests using the AST parser (now uses discover_tests_and_fixtures)
 pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
-    let mut tests = Vec::new();
-    let mut parser = AstParser::new()?;
-
-    for entry in WalkDir::new(path) {
-        let entry = entry?;
-        let path = entry.path();
-
-        if is_test_file(path) {
-            let content = std::fs::read_to_string(path)?;
-            match parser.parse_file(&content, path.to_str().unwrap_or("")) {
-                Ok(test_functions) => {
-                    for func in test_functions {
-                        let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
-                        let test_item = create_test_item(path, &func, fixture_deps);
-                        
-                        // Debug: print decorators
-                        if !func.decorators.is_empty() {
-                            eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
-                        }
-                        
-                        // Expand parametrized tests
-                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
-                        tests.extend(expanded);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("Warning: Failed to parse {}: {}", path.display(), e);
-                }
-            }
-        }
-    }
-
-    Ok(tests)
+    discover_tests(path, ParserType::Ast) // Calls the main discover_tests with Ast parser
 }
 
 /// Discover tests with caching support
-pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<Vec<TestItem>> {
+pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache, parser_type: ParserType) -> Result<Vec<TestItem>> {
     let mut tests = Vec::new();
     let mut cache_hits = 0;
     let mut cache_misses = 0;
@@ -128,7 +96,7 @@ pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<
         if is_test_file(path) {
             // Try to get from cache first
             if let Some(cached_tests) = cache.get(path) {
-                tests.extend(cached_tests.clone());
+                tests.extend(cached_tests);
                 cache_hits += 1;
                 continue;
             }
@@ -136,8 +104,12 @@ pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<
             // Cache miss - parse the file
             cache_misses += 1;
             let content = std::fs::read_to_string(path)?;
-            match parse_fixtures_and_tests(path) {
-                Ok((_, test_functions)) => {
+            // NOTE: discover_tests_cached now only returns TestItems.
+            // If full fixture discovery is needed with caching, this function needs to be refactored
+            // similar to discover_tests_and_fixtures and cache DiscoveryResult or (Vec<FixtureDefinition>, Vec<TestFunction>).
+            // For now, it uses the provided parser_type to parse tests.
+            match parse_fixtures_and_tests(path, parser_type) { // Pass parser_type here
+                Ok((_file_fixtures, test_functions)) => { // Ignoring fixtures for now in cached version
                     let mut file_tests = Vec::new();
                     
                     for func in test_functions {
@@ -211,6 +183,12 @@ fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>)
     } else {
         format!("{}::{}", module_path, func.name)
     };
+    
+    // Debug output
+    if func.class_name.is_some() {
+        eprintln!("DEBUG: Creating test item with class - ID: {}, class: {:?}, func: {}", 
+                  test_id, func.class_name, func.name);
+    }
 
     TestItem {
         id: test_id,

@@ -1,24 +1,22 @@
 #!/usr/bin/env bash
 # Fastest installer script
-# Inspired by Astral's UV installer
+# Usage: curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 
-set -euo pipefail
+set -e
 
 # Configuration
 REPO="derens99/fastest"
-BASE_URL="https://github.com/${REPO}/releases"
-INSTALL_DIR="${FASTEST_INSTALL_DIR:-$HOME/.fastest}"
-BIN_DIR="${INSTALL_DIR}/bin"
-EXECUTABLE_NAME="fastest"
+INSTALL_DIR="${FASTEST_INSTALL_DIR:-$HOME/.local/bin}"
+TEMP_DIR=$(mktemp -d)
 
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Helper functions
+# Logging functions
 info() {
     printf "${BLUE}info${NC}: %s\n" "$1"
 }
@@ -35,6 +33,12 @@ error() {
     printf "${RED}error${NC}: %s\n" "$1" >&2
 }
 
+# Cleanup on exit
+cleanup() {
+    rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
+
 # Detect OS and architecture
 detect_platform() {
     local os
@@ -42,165 +46,181 @@ detect_platform() {
     
     # Detect OS
     case "$(uname -s)" in
-        Linux*)     os="linux";;
-        Darwin*)    os="macos";;
-        CYGWIN*|MINGW*|MSYS*) os="windows";;
-        *)          error "Unsupported operating system"; exit 1;;
+        Linux*)     os="unknown-linux-gnu";;
+        Darwin*)    os="apple-darwin";;
+        CYGWIN*|MINGW*|MSYS*) os="pc-windows-msvc";;
+        *)          error "Unsupported OS: $(uname -s)"; exit 1;;
     esac
     
     # Detect architecture
     case "$(uname -m)" in
-        x86_64|amd64)  arch="x86_64";;
+        x86_64|amd64) arch="x86_64";;
         aarch64|arm64) arch="aarch64";;
-        *)             error "Unsupported architecture"; exit 1;;
+        *)          error "Unsupported architecture: $(uname -m)"; exit 1;;
     esac
     
-    echo "${os}-${arch}"
+    echo "${arch}-${os}"
 }
 
-# Download the latest release
-download_release() {
-    local platform=$1
-    local temp_file=$(mktemp)
+# Get the latest release version
+get_latest_version() {
+    curl -s "https://api.github.com/repos/${REPO}/releases/latest" | \
+        grep '"tag_name"' | \
+        sed -E 's/.*"([^"]+)".*/\1/'
+}
+
+# Download and install fastest
+install_fastest() {
+    local platform="$1"
+    local version="${2:-$(get_latest_version)}"
     
-    # Get latest release URL
-    info "Finding latest release..."
-    local latest_url="${BASE_URL}/latest"
-    local download_url="${BASE_URL}/download/latest/${EXECUTABLE_NAME}-${platform}.tar.gz"
+    info "Installing fastest ${version} for ${platform}..."
     
-    # Download the file
-    info "Downloading Fastest for ${platform}..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL -o "$temp_file" "$download_url"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$temp_file" "$download_url"
-    else
-        error "Neither curl nor wget found. Please install one of them."
+    # Construct download URL
+    local binary_name="fastest"
+    local archive_ext="tar.gz"
+    if [[ "$platform" == *"windows"* ]]; then
+        binary_name="fastest.exe"
+        archive_ext="zip"
+    fi
+    
+    local url="https://github.com/${REPO}/releases/download/${version}/fastest-${platform}.${archive_ext}"
+    local archive_path="${TEMP_DIR}/fastest.${archive_ext}"
+    
+    # Download
+    info "Downloading from ${url}..."
+    if ! curl -LsSf "$url" -o "$archive_path"; then
+        error "Failed to download fastest"
+        error "URL: ${url}"
         exit 1
     fi
     
-    echo "$temp_file"
-}
-
-# Install the binary
-install_binary() {
-    local archive_file=$1
-    
-    # Create installation directory
-    info "Installing to ${INSTALL_DIR}..."
-    mkdir -p "$BIN_DIR"
-    
-    # Extract the archive
-    tar -xzf "$archive_file" -C "$BIN_DIR"
-    
-    # Make executable
-    chmod +x "${BIN_DIR}/${EXECUTABLE_NAME}"
-    
-    # Clean up
-    rm -f "$archive_file"
-}
-
-# Setup shell integration
-setup_shell() {
-    local shell_name=$(basename "$SHELL")
-    local added_path=false
-    
-    # Function to add path to shell config
-    add_to_path() {
-        local config_file=$1
-        local path_line="export PATH=\"${BIN_DIR}:\$PATH\""
-        
-        if [ -f "$config_file" ]; then
-            if ! grep -q "${BIN_DIR}" "$config_file"; then
-                echo "" >> "$config_file"
-                echo "# Added by Fastest installer" >> "$config_file"
-                echo "$path_line" >> "$config_file"
-                added_path=true
-                info "Added ${BIN_DIR} to PATH in ${config_file}"
-            else
-                info "PATH already contains ${BIN_DIR}"
-            fi
-        fi
-    }
-    
-    case "$shell_name" in
-        bash)
-            add_to_path "$HOME/.bashrc"
-            [ -f "$HOME/.bash_profile" ] && add_to_path "$HOME/.bash_profile"
-            ;;
-        zsh)
-            add_to_path "$HOME/.zshrc"
-            ;;
-        fish)
-            local fish_config="$HOME/.config/fish/config.fish"
-            if [ -f "$fish_config" ]; then
-                if ! grep -q "${BIN_DIR}" "$fish_config"; then
-                    echo "" >> "$fish_config"
-                    echo "# Added by Fastest installer" >> "$fish_config"
-                    echo "set -gx PATH ${BIN_DIR} \$PATH" >> "$fish_config"
-                    added_path=true
-                    info "Added ${BIN_DIR} to PATH in ${fish_config}"
-                fi
-            fi
-            ;;
-        *)
-            warning "Unknown shell: $shell_name. Please manually add ${BIN_DIR} to your PATH."
-            ;;
-    esac
-    
-    if [ "$added_path" = true ]; then
-        info "Run 'source ~/.$shell_name*rc' or start a new shell to use fastest"
+    # Extract
+    info "Extracting archive..."
+    cd "$TEMP_DIR"
+    if [[ "$archive_ext" == "zip" ]]; then
+        unzip -q "$archive_path"
+    else
+        tar -xzf "$archive_path"
     fi
-}
-
-# Verify installation
-verify_installation() {
-    if "${BIN_DIR}/${EXECUTABLE_NAME}" --version >/dev/null 2>&1; then
-        local version=$("${BIN_DIR}/${EXECUTABLE_NAME}" --version | cut -d' ' -f2)
-        success "Fastest ${version} installed successfully!"
+    
+    # Create install directory if it doesn't exist
+    mkdir -p "$INSTALL_DIR"
+    
+    # Install binary
+    info "Installing to ${INSTALL_DIR}/${binary_name}..."
+    mv "$binary_name" "${INSTALL_DIR}/"
+    chmod +x "${INSTALL_DIR}/${binary_name}"
+    
+    # Verify installation
+    if "${INSTALL_DIR}/${binary_name}" --version >/dev/null 2>&1; then
+        success "fastest installed successfully!"
     else
         error "Installation verification failed"
         exit 1
     fi
 }
 
+# Check if directory is in PATH
+check_path() {
+    local dir="$1"
+    case ":$PATH:" in
+        *":$dir:"*) return 0;;
+        *) return 1;;
+    esac
+}
+
+# Add directory to shell configuration
+add_to_path() {
+    local dir="$1"
+    local shell_config=""
+    
+    # Detect shell configuration file
+    if [[ -n "$BASH_VERSION" ]]; then
+        if [[ -f "$HOME/.bashrc" ]]; then
+            shell_config="$HOME/.bashrc"
+        elif [[ -f "$HOME/.bash_profile" ]]; then
+            shell_config="$HOME/.bash_profile"
+        fi
+    elif [[ -n "$ZSH_VERSION" ]]; then
+        shell_config="$HOME/.zshrc"
+    elif [[ -f "$HOME/.profile" ]]; then
+        shell_config="$HOME/.profile"
+    fi
+    
+    if [[ -n "$shell_config" ]]; then
+        echo "" >> "$shell_config"
+        echo "# Added by fastest installer" >> "$shell_config"
+        echo "export PATH=\"$dir:\$PATH\"" >> "$shell_config"
+        info "Added $dir to PATH in $shell_config"
+        warning "Please restart your shell or run: source $shell_config"
+    else
+        warning "Could not detect shell configuration file"
+        warning "Please add $dir to your PATH manually"
+    fi
+}
+
 # Main installation flow
 main() {
-    echo "🚀 Installing Fastest - The blazing fast Python test runner"
+    echo "🚀 Installing fastest - The blazing fast Python test runner"
     echo ""
     
-    # Check if already installed
-    if [ -f "${BIN_DIR}/${EXECUTABLE_NAME}" ]; then
-        warning "Fastest is already installed at ${BIN_DIR}/${EXECUTABLE_NAME}"
-        read -p "Do you want to reinstall? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 0
-        fi
+    # Check for curl
+    if ! command -v curl >/dev/null 2>&1; then
+        error "curl is required but not installed"
+        exit 1
     fi
     
     # Detect platform
-    local platform=$(detect_platform)
+    local platform
+    platform=$(detect_platform)
     info "Detected platform: ${platform}"
     
-    # Download release
-    local temp_archive=$(download_release "$platform")
+    # Parse arguments
+    local version=""
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --version)
+                version="$2"
+                shift 2
+                ;;
+            --install-dir)
+                INSTALL_DIR="$2"
+                shift 2
+                ;;
+            --help)
+                echo "Usage: $0 [OPTIONS]"
+                echo ""
+                echo "Options:"
+                echo "  --version VERSION      Install a specific version (default: latest)"
+                echo "  --install-dir DIR      Installation directory (default: ~/.local/bin)"
+                echo "  --help                 Show this help message"
+                exit 0
+                ;;
+            *)
+                error "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
     
-    # Install binary
-    install_binary "$temp_archive"
+    # Install
+    install_fastest "$platform" "$version"
     
-    # Setup shell
-    setup_shell
-    
-    # Verify installation
-    verify_installation
+    # Check PATH
+    if ! check_path "$INSTALL_DIR"; then
+        warning "${INSTALL_DIR} is not in your PATH"
+        add_to_path "$INSTALL_DIR"
+    fi
     
     echo ""
-    echo "📚 Get started with:"
-    echo "    ${EXECUTABLE_NAME} --help"
+    success "Installation complete! 🎉"
     echo ""
-    echo "📖 Documentation: https://github.com/${REPO}"
-    echo "🐛 Report issues: https://github.com/${REPO}/issues"
+    echo "To get started, try:"
+    echo "  fastest --help"
+    echo "  fastest tests/"
+    echo ""
+    echo "For more information, visit: https://github.com/${REPO}"
 }
 
 # Run main function

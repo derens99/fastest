@@ -6,9 +6,10 @@ pub mod optimized;
 pub mod persistent_pool;
 
 use std::time::Duration;
+use serde::{Serialize, Deserialize};
 
 /// Result of running a test
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
     pub test_id: String,
     pub passed: bool,
