@@ -1,7 +1,8 @@
 use crate::executor::TestResult;
 use colored::*;
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use std::io::Write;
+use indicatif::{ProgressBar, ProgressStyle};
+use std::io::{self, Write as _};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 

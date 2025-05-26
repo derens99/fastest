@@ -167,10 +167,10 @@ impl TestWatcher {
 
 /// Watch mode controller
 pub struct WatchMode {
-    watcher: TestWatcher,
-    parser_type: ParserType,
-    filter: Option<String>,
-    markers: Option<String>,
+    runner: TestRunner,
+    debouncer: Debouncer<RecommendedWatcher>,
+    _filter: Option<String>,
+    _markers: Option<String>,
 }
 
 impl WatchMode {

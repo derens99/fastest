@@ -1,6 +1,9 @@
 use colored::*;
 use similar::{ChangeTag, TextDiff};
 use std::fmt::Display;
+use anyhow::Result;
+use regex::Regex;
+use crate::TestResult;
 
 /// Format assertion failures with better diffs
 pub fn format_assertion_error(error: &str) -> String {
@@ -75,8 +78,8 @@ fn enhance_membership_assertion(error: &str) -> Option<String> {
 
 /// Extract values from comparison (simplified)
 fn extract_comparison_values(error: &str) -> Option<(String, String)> {
-    // This is a placeholder - real implementation would parse the error better
-    // For now, we'll just return a dummy example
+    // TODO: Extract actual and expected values from error message
+    // For now, return None
     None
 }
 

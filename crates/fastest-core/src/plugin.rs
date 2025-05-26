@@ -160,9 +160,10 @@ impl PluginManager {
         self.register(Arc::new(CapturePlugin::new()));
     }
 
-    /// Load plugins from config
-    pub fn load_from_config(&mut self, config: &crate::Config) -> Result<()> {
-        // TODO: Load plugins specified in config.required_plugins
+    /// Load plugins based on configuration
+    pub fn load_from_config(&mut self, _config: &crate::Config) -> Result<()> {
+        // TODO: Load plugins from configuration
+        // For now, just load default plugins
         Ok(())
     }
 }
@@ -192,7 +193,7 @@ impl Plugin for MarkerPlugin {
 
 /// Built-in timeout plugin
 struct TimeoutPlugin {
-    timeout: Option<u64>,
+    _timeout: Option<u64>,
 }
 
 impl TimeoutPlugin {
@@ -214,7 +215,7 @@ impl Plugin for TimeoutPlugin {
 
 /// Built-in output capture plugin
 struct CapturePlugin {
-    capture_enabled: bool,
+    _capture_enabled: bool,
 }
 
 impl CapturePlugin {
@@ -244,7 +245,7 @@ impl Plugin for CapturePlugin {
 /// Example third-party plugin structure
 pub struct ExamplePlugin {
     name: String,
-    config: HashMap<String, String>,
+    _config: HashMap<String, String>,
 }
 
 impl ExamplePlugin {
@@ -263,6 +264,12 @@ impl Plugin for ExamplePlugin {
 
     fn pytest_collection_start(&self, _config: &crate::Config) -> Result<()> {
         println!("Example plugin: collection starting");
+        Ok(())
+    }
+
+    fn pytest_collection_modifyitems(&self, _tests: &mut Vec<TestItem>) -> Result<()> {
+        // This is where pytest would call hooks like pytest_collection_modifyitems
+        // We'll implement plugin-specific behavior later
         Ok(())
     }
 }
