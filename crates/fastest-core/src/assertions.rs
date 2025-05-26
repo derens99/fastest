@@ -1,9 +1,9 @@
+use crate::TestResult;
+use anyhow::Result;
 use colored::*;
+use regex::Regex;
 use similar::{ChangeTag, TextDiff};
 use std::fmt::Display;
-use anyhow::Result;
-use regex::Regex;
-use crate::TestResult;
 
 /// Format assertion failures with better diffs
 pub fn format_assertion_error(error: &str) -> String {
