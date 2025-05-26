@@ -113,7 +113,7 @@ install_fastest() {
     chmod +x "${INSTALL_DIR}/${binary_name}"
     
     # Verify installation
-    if "${INSTALL_DIR}/${binary_name}" --version >/dev/null 2>&1; then
+    if "${INSTALL_DIR}/${binary_name}" --help >/dev/null 2>&1; then
         success "fastest installed successfully!"
     else
         error "Installation verification failed"
