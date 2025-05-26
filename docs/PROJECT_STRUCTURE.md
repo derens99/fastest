@@ -1,124 +1,106 @@
 # Fastest Project Structure
 
-This document provides an overview of the Fastest project organization.
+This document provides an overview of the Fastest codebase organization.
 
-## Directory Structure
+## Directory Layout
 
 ```
 fastest/
-├── crates/                      # Rust workspace members
-│   ├── fastest-cli/            # Command-line interface
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       └── main.rs         # CLI entry point
-│   │
-│   ├── fastest-core/           # Core functionality
-│   │   ├── Cargo.toml
-│   │   └── src/
-│   │       ├── lib.rs          # Core library exports
-│   │       ├── discovery.rs    # Test discovery logic
-│   │       ├── cache.rs        # Discovery caching
-│   │       ├── error.rs        # Error types
-│   │       ├── utils.rs        # Utility functions
-│   │       ├── config/         # Configuration handling
-│   │       ├── executor/       # Test execution engines
-│   │       │   ├── mod.rs      # Public executor API
-│   │       │   ├── single.rs   # Single test execution
-│   │       │   ├── batch.rs    # Batch test execution
-│   │       │   ├── parallel.rs # Parallel execution
-│   │       │   └── process_pool.rs # Process pool (WIP)
-│   │       ├── fixtures/       # Fixture support (WIP)
-│   │       ├── markers/        # Test markers and filtering
-│   │       └── parser/         # Test file parsing
-│   │           ├── mod.rs      # Parser module exports
-│   │           ├── regex.rs    # Regex-based parser
-│   │           └── ast.rs      # Tree-sitter AST parser
-│   │
-│   └── fastest-python/         # Python bindings
-│       ├── Cargo.toml
-│       └── src/
-│           └── lib.rs          # PyO3 bindings
-│
-├── benchmarks/                 # Performance benchmarks
-│   ├── benchmark.py           # Discovery performance
-│   ├── benchmark_parsers.py   # Parser comparison
-│   ├── benchmark_parallel.py  # Parallel execution
-│   └── format_benchmark_json.py # CI benchmark formatter
-│
-├── docs/                      # Documentation
-│   ├── FASTEST_MARKERS.md    # Marker system guide
-│   ├── PROJECT_STRUCTURE.md  # This file
-│   ├── parallel-execution-guide.md
-│   ├── TREE_SITTER_PLAN.md
-│   └── development/          # Development notes
-│
-├── tests/                     # Test scripts
-│   ├── test_fastest.py       # Basic functionality tests
-│   └── test_enhanced.py      # Advanced feature tests
-│
-├── test_project/             # Sample project for testing
-│   └── tests/               # Sample test files
-│
-├── .github/                  # GitHub configuration
-│   └── workflows/
-│       └── benchmark.yml    # CI benchmark workflow
-│
-├── fastest.py               # Python module for markers
-├── Cargo.toml              # Workspace configuration
-├── Cargo.lock              # Dependency lock file
-├── Makefile                # Common development tasks
-├── requirements-dev.txt    # Python dev dependencies
-├── README.md               # Project documentation
-├── LICENSE                 # MIT license
-├── Dockerfile              # Container build file
-└── .gitignore             # Git ignore patterns
+├── crates/                    # Rust workspace
+│   ├── fastest-cli/          # Command-line interface
+│   ├── fastest-core/         # Core test discovery and execution
+│   └── fastest-python/       # Python bindings (PyO3)
+├── python/                   # Python package
+├── benchmarks/              # Performance benchmarks
+├── tests/                   # Integration tests
+├── docs/                    # Documentation
+└── scripts/                 # Build and installation scripts
 ```
 
-## Key Components
+## Core Components
 
 ### fastest-cli
-The command-line interface that users interact with. Handles:
-- Argument parsing with clap
-- Test discovery and filtering
-- Progress reporting
-- Output formatting
+The command-line interface that users interact with.
+
+**Key files:**
+- `main.rs` - Entry point and CLI argument parsing
+- `commands/` - Command implementations (run, discover, version)
+- `output.rs` - Formatted output and progress bars
 
 ### fastest-core
-The core library containing all the business logic:
-- **discovery.rs**: Walks directories to find test files
-- **parser/**: Two parsing strategies (regex for speed, AST for accuracy)
-- **executor/**: Different execution strategies (single, batch, parallel)
-- **markers/**: Test marker support for both pytest and fastest
-- **cache.rs**: Caches discovery results with file modification tracking
-- **config/**: Configuration file support (pytest.ini, pyproject.toml)
+The heart of Fastest - handles test discovery, execution, and all core functionality.
+
+**Key modules:**
+- `discovery/` - Test discovery with regex and AST parsers
+- `execution/` - Test execution strategies (single, batch, parallel)
+- `fixtures/` - Fixture system implementation
+- `markers/` - Test marker support
+- `cache/` - Discovery caching for performance
+- `config/` - Configuration file handling
 
 ### fastest-python
-Python bindings using PyO3 that expose:
-- `discover_tests()`: Find tests in a directory
-- `run_test()`: Run a single test
-- `run_tests_batch()`: Run tests in batches
-- `run_tests_parallel()`: Run tests in parallel
+Python bindings using PyO3 to expose Rust functionality to Python.
 
-## Development Workflow
+**Key files:**
+- `lib.rs` - PyO3 module definition
+- `test_info.rs` - Python-compatible test information structures
+- `discovery.rs` - Python API for test discovery
+- `execution.rs` - Python API for test execution
 
-1. **Build**: `cargo build --release`
-2. **Test**: `cargo test`
-3. **Python bindings**: `cd crates/fastest-python && maturin develop`
-4. **Format**: `cargo fmt`
-5. **Lint**: `cargo clippy`
-6. **Clean**: `make clean`
+## Architecture Highlights
 
-## Adding New Features
+### Test Discovery
+1. **File Walker** - Efficiently traverses directories looking for test files
+2. **Parser** - Two strategies:
+   - Regex parser (default): Fast pattern matching
+   - AST parser (--parser ast): Tree-sitter based, more accurate
+3. **Cache** - Stores discovery results with file modification tracking
 
-1. **Core functionality**: Add to `fastest-core`
-2. **CLI options**: Update `fastest-cli/src/main.rs`
-3. **Python API**: Update `fastest-python/src/lib.rs`
-4. **Documentation**: Update relevant docs and README
+### Test Execution
+1. **Single** - Run tests one by one (debugging)
+2. **Batch** - Group tests by module for efficiency (default)
+3. **Parallel** - Work-stealing thread pool for maximum performance
 
-## Performance Considerations
+### Python Integration
+- Uses subprocess for test execution to ensure isolation
+- JSON serialization for data exchange
+- Minimal overhead design
 
-- Regex parser is faster for large codebases (>5000 tests)
-- AST parser is more accurate and faster for smaller codebases
-- Batch execution groups tests by module to minimize overhead
-- Parallel execution uses work-stealing for load balancing
-- Discovery cache avoids re-parsing unchanged files 
+## Development Setup
+
+### Prerequisites
+- Rust 1.70+ (via [rustup](https://rustup.rs/))
+- Python 3.8+
+- maturin (for Python bindings)
+
+### Building
+```bash
+# Build all Rust crates
+cargo build --release
+
+# Build Python bindings
+maturin develop
+
+# Run tests
+cargo test
+python -m pytest tests/
+```
+
+### Key Dependencies
+- **clap** - CLI argument parsing
+- **rayon** - Parallel processing
+- **serde** - Serialization
+- **pyo3** - Python bindings
+- **tree-sitter** - AST parsing
+- **indicatif** - Progress bars
+
+## Contributing
+
+When contributing to Fastest:
+
+1. **Rust code** goes in the appropriate crate under `crates/`
+2. **Python code** for bindings goes in `crates/fastest-python/`
+3. **Tests** should cover both Rust (unit) and Python (integration) levels
+4. **Benchmarks** should be added for performance-critical changes
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for detailed guidelines 

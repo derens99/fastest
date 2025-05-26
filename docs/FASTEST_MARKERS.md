@@ -1,234 +1,224 @@
-# Fastest Marker Support 🏷️
+# Test Markers in Fastest
 
-Fastest supports both `pytest.mark.*` and its own `fastest.mark.*` decorators for marking tests. This allows you to use Fastest as a drop-in replacement for pytest while also taking advantage of Fastest-specific features.
+Fastest supports both `pytest.mark.*` and `fastest.mark.*` decorators for organizing and filtering your tests.
 
 ## Quick Start
 
 ```python
 import fastest
-
-@fastest.mark.skip(reason="Not implemented yet")
-def test_feature():
-    pass
+import pytest  # pytest marks also work!
 
 @fastest.mark.slow
 def test_heavy_computation():
     # This test takes a while
     pass
-```
 
-## Supported Marker Formats
-
-Fastest recognizes markers in both formats:
-- `@pytest.mark.skip` - PyTest style (for compatibility)
-- `@fastest.mark.skip` - Fastest native style
-
-Both work identically and can be mixed in the same test file:
-
-```python
-import pytest
-import fastest
-
-@pytest.mark.skip
-def test_pytest_style():
-    pass
-
-@fastest.mark.skip
-def test_fastest_style():
-    pass
-```
-
-## Built-in Markers
-
-### skip
-Skip a test unconditionally:
-```python
-@fastest.mark.skip
-def test_not_ready():
-    pass
-
-@fastest.mark.skip(reason="Waiting for API implementation")
-def test_api_call():
-    pass
-```
-
-### xfail
-Mark a test as expected to fail:
-```python
-@fastest.mark.xfail
-def test_known_bug():
-    assert False  # This failure is expected
-```
-
-### slow
-Mark tests that take longer to run:
-```python
-@fastest.mark.slow
-def test_integration():
-    # Long-running test
-    pass
-```
-
-### Custom Markers
-You can create any custom marker:
-```python
-@fastest.mark.unit
-def test_unit():
-    pass
-
-@fastest.mark.integration
-def test_integration():
+@pytest.mark.skip(reason="Not implemented yet")
+def test_future_feature():
     pass
 
 @fastest.mark.smoke
-def test_critical_path():
+@fastest.mark.unit
+def test_critical_functionality():
+    # Multiple markers are supported
     pass
 ```
 
-## Filtering Tests by Markers
+## Running Tests with Markers
 
 Use the `-m` flag to filter tests based on markers:
 
 ```bash
-# Run only tests marked as 'slow'
-fastest -m slow
+# Run only slow tests
+fastest -m "slow"
 
-# Run all tests except those marked as 'slow'
+# Skip slow tests
 fastest -m "not slow"
 
-# Run tests marked as 'unit' OR 'smoke'
-fastest -m "unit or smoke"
+# Run unit OR integration tests
+fastest -m "unit or integration"
 
-# Run tests marked as 'integration' AND 'slow'
-fastest -m "integration and slow"
+# Run smoke tests that aren't marked as skip
+fastest -m "smoke and not skip"
 
 # Complex expressions
-fastest -m "not skip and (unit or integration)"
+fastest -m "(unit or integration) and not slow"
 ```
 
-## Multiple Markers
+## Available Markers
 
-Tests can have multiple markers:
+### Built-in Markers
+
+#### `@fastest.mark.skip` / `@pytest.mark.skip`
+Skip test execution entirely.
 
 ```python
-@fastest.mark.slow
-@fastest.mark.integration
+@fastest.mark.skip(reason="Database not available in CI")
 def test_database_integration():
     pass
 ```
 
-## Using the Fastest Module
-
-Install the fastest module in your project:
+#### `@fastest.mark.slow` / `@pytest.mark.slow`
+Mark tests that take a long time to run.
 
 ```python
-# fastest.py (included with Fastest)
-import fastest
-
-# Use markers
-@fastest.mark.skip
-def test_skipped():
-    pass
-
-# Use shortcuts
-@fastest.skip  # Shortcut for @fastest.mark.skip
-def test_also_skipped():
+@fastest.mark.slow
+def test_large_file_processing():
+    # Process 1GB file
     pass
 ```
 
-## Parser Support
-
-Both the regex and AST parsers support marker detection:
-
-```bash
-# Works with both parsers
-fastest --parser regex -m slow
-fastest --parser ast -m slow
-```
-
-## Implementation Status
-
-### ✅ Implemented
-- Marker detection (both pytest.mark and fastest.mark)
-- Marker filtering with `-m` flag
-- Complex marker expressions (and/or/not)
-- Skip marker execution behavior
-- Xfail marker execution behavior
-- Custom marker support
-
-### 🚧 Coming Soon
-- `@fastest.mark.parametrize` - Run test with multiple parameter sets
-- `@fastest.mark.skipif` - Conditional skipping
-- `@fastest.mark.timeout` - Test timeout support
-- Marker inheritance in test classes
-
-## Examples
-
-### Example Test File
+#### `@fastest.mark.xfail` / `@pytest.mark.xfail`
+Mark tests that are expected to fail.
 
 ```python
-import fastest
-import pytest
+@pytest.mark.xfail(reason="Known bug in third-party library")
+def test_external_api():
+    assert external_api.call() == "expected"
+```
 
-class TestMath:
-    @fastest.mark.unit
-    def test_addition(self):
-        assert 1 + 1 == 2
-    
-    @fastest.mark.unit
-    @fastest.mark.smoke
-    def test_multiplication(self):
-        assert 2 * 3 == 6
+### Custom Markers
 
-@pytest.mark.slow
+You can create any custom markers:
+
+```python
+@fastest.mark.smoke
+def test_login():
+    """Critical path test"""
+    pass
+
 @fastest.mark.integration
-async def test_async_database():
-    # Both pytest and fastest markers work
-    await db.connect()
-    assert await db.query("SELECT 1") == 1
+def test_api_endpoint():
+    """Requires external services"""
+    pass
 
-@fastest.mark.skip(reason="Feature not implemented")
-def test_future_feature():
-    raise NotImplementedError
+@fastest.mark.unit
+def test_pure_function():
+    """No external dependencies"""
+    pass
 ```
 
-### Running Examples
+## Marker Expressions
+
+The `-m` flag supports boolean expressions:
+
+- `and` - Both conditions must be true
+- `or` - Either condition must be true
+- `not` - Negates the condition
+- `()` - Groups expressions
+
+### Examples
 
 ```bash
-# Run all unit tests
-fastest -m unit
+# Run all tests except slow ones
+fastest -m "not slow"
 
-# Run smoke tests that aren't slow
-fastest -m "smoke and not slow"
+# Run smoke tests on Linux only
+fastest -m "smoke and linux"
 
-# Skip integration tests
-fastest -m "not integration"
+# Run either unit tests or fast integration tests
+fastest -m "unit or (integration and not slow)"
 
-# Run only async tests (when implemented)
-fastest -m asyncio
+# Skip WIP (work in progress) and experimental tests
+fastest -m "not (wip or experimental)"
 ```
 
 ## Best Practices
 
-1. **Use descriptive markers**: Create markers that clearly indicate the test's purpose
-2. **Document custom markers**: Keep a list of your project's custom markers
-3. **Combine markers thoughtfully**: Use multiple markers to create flexible test suites
-4. **Prefer fastest.mark**: When writing new tests, use `fastest.mark` for better integration
+### 1. Use Semantic Marker Names
+```python
+# Good
+@fastest.mark.requires_database
+@fastest.mark.external_api
+@fastest.mark.smoke
 
-## Migration from PyTest
+# Less clear
+@fastest.mark.test1
+@fastest.mark.group_a
+```
 
-If migrating from pytest, you can:
-1. Keep all `@pytest.mark.*` decorators - they'll work as-is
-2. Gradually migrate to `@fastest.mark.*` for new tests
-3. Mix both styles during the transition
+### 2. Document Your Markers
+Add marker descriptions in your project documentation:
 
 ```python
-# Both work identically
-@pytest.mark.skip
-def test_old_style():
-    pass
+# markers.py or conftest.py
+"""
+Project Test Markers:
 
-@fastest.mark.skip  
-def test_new_style():
+@fastest.mark.slow: Tests that take > 1 second
+@fastest.mark.smoke: Core functionality tests
+@fastest.mark.integration: Tests requiring external services
+@fastest.mark.unit: Pure unit tests with no I/O
+"""
+```
+
+### 3. Combine Markers Logically
+```python
+@fastest.mark.slow
+@fastest.mark.integration
+@fastest.mark.requires_database
+def test_full_database_migration():
+    """This test is slow, requires integration, and needs a database"""
     pass
-``` 
+```
+
+### 4. Use Markers in CI/CD
+```yaml
+# .github/workflows/test.yml
+- name: Run unit tests
+  run: fastest -m "unit"
+
+- name: Run smoke tests
+  run: fastest -m "smoke and not slow"
+
+- name: Run all tests except experimental
+  run: fastest -m "not experimental"
+```
+
+## Marker Inheritance
+
+Class-level markers are inherited by all methods:
+
+```python
+@fastest.mark.integration
+class TestAPIEndpoints:
+    # All methods inherit the 'integration' marker
+    
+    def test_get_user(self):
+        pass
+    
+    @fastest.mark.slow
+    def test_bulk_import(self):
+        # This test has both 'integration' and 'slow' markers
+        pass
+```
+
+## Performance Tip
+
+Using markers to skip unnecessary tests can significantly speed up your test runs:
+
+```bash
+# During development - skip slow integration tests
+fastest -m "not (slow or integration)"
+
+# Before commit - run everything except experimental
+fastest -m "not experimental"
+
+# In CI - run different marker sets in parallel jobs
+```
+
+## Compatibility Note
+
+Fastest supports both `pytest.mark.*` and `fastest.mark.*` for maximum compatibility. You can mix and match in the same file:
+
+```python
+import pytest
+import fastest
+
+@pytest.mark.skip  # Works!
+@fastest.mark.slow  # Also works!
+def test_mixed_markers():
+    pass
+```
+
+This makes migrating from pytest seamless - your existing markers will continue to work! 
