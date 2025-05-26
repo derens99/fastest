@@ -5,7 +5,7 @@
 set -euo pipefail
 
 # Configuration
-REPO="derens99/fastest"  # TODO: Update with actual GitHub username
+REPO="derens99/fastest"
 BASE_URL="https://github.com/${REPO}/releases"
 INSTALL_DIR="${FASTEST_INSTALL_DIR:-$HOME/.fastest}"
 BIN_DIR="${INSTALL_DIR}/bin"

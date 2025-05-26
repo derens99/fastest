@@ -1,6 +1,7 @@
 use crate::cache::DiscoveryCache;
 use crate::error::Result;
 use crate::fixtures::{Fixture, FixtureScope};
+use crate::parametrize::expand_parametrized_tests;
 use crate::parser::{parse_fixtures_and_tests, AstParser, FixtureDefinition, TestFunction};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
@@ -55,7 +56,16 @@ pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
                     // Convert tests
                     for func in test_functions {
                         let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
-                        tests.push(create_test_item(path, &func, fixture_deps));
+                        let test_item = create_test_item(path, &func, fixture_deps);
+                        
+                        // Debug: print decorators
+                        if !func.decorators.is_empty() {
+                            eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
+                        }
+                        
+                        // Expand parametrized tests
+                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        tests.extend(expanded);
                     }
                 }
                 Err(e) => {
@@ -83,7 +93,16 @@ pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
                 Ok(test_functions) => {
                     for func in test_functions {
                         let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
-                        tests.push(create_test_item(path, &func, fixture_deps));
+                        let test_item = create_test_item(path, &func, fixture_deps);
+                        
+                        // Debug: print decorators
+                        if !func.decorators.is_empty() {
+                            eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
+                        }
+                        
+                        // Expand parametrized tests
+                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        tests.extend(expanded);
                     }
                 }
                 Err(e) => {
@@ -119,14 +138,21 @@ pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<
             let content = std::fs::read_to_string(path)?;
             match parse_fixtures_and_tests(path) {
                 Ok((_, test_functions)) => {
-                    let file_tests: Vec<TestItem> = test_functions
-                        .iter()
-                        .map(|func| {
-                            let fixture_deps =
-                                crate::fixtures::extract_fixture_deps(func, &content);
-                            create_test_item(path, func, fixture_deps)
-                        })
-                        .collect();
+                    let mut file_tests = Vec::new();
+                    
+                    for func in test_functions {
+                        let fixture_deps = crate::fixtures::extract_fixture_deps(&func, &content);
+                        let test_item = create_test_item(path, &func, fixture_deps);
+                        
+                        // Debug: print decorators
+                        if !func.decorators.is_empty() {
+                            eprintln!("Test {} has decorators: {:?}", func.name, func.decorators);
+                        }
+                        
+                        // Expand parametrized tests
+                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        file_tests.extend(expanded);
+                    }
 
                     // Update cache
                     if let Err(e) = cache.update(path.to_path_buf(), file_tests.clone()) {

@@ -6,6 +6,7 @@ pub mod executor;
 pub mod fixtures;
 pub mod markers;
 pub mod parser;
+pub mod parametrize;
 pub mod utils;
 
 pub use cache::{default_cache_path, DiscoveryCache};
@@ -34,3 +35,19 @@ pub use markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 pub use executor::{
     run_test, BatchExecutor, ParallelExecutor, ProcessPool, ProgressReporter, TestResult,
 };
+
+// Re-export parametrize module
+pub use parametrize::{expand_parametrized_tests, parse_parametrize_decorator};
+
+// Version from Cargo.toml
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_version() {
+        assert!(!VERSION.is_empty());
+    }
+}

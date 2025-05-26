@@ -1,67 +1,58 @@
 """
-rusttest - A fast Python testing framework powered by Rust
+fastest - A fast Python testing framework powered by Rust
 """
 
-from rusttest._rusttest import discover_tests, run_tests, __version__
+from fastest._fastest import discover_tests, run_tests, __version__
 
 __all__ = ["discover_tests", "run_tests", "__version__", "main"]
 
 def main():
-    """CLI entry point"""
-    import sys
+    """Main entry point for the fastest CLI."""
     import argparse
-    from pathlib import Path
+    import sys
+    import time
     
-    parser = argparse.ArgumentParser(description="rusttest - Fast Python testing")
-    parser.add_argument("path", nargs="?", default=".", help="Path to discover tests")
-    parser.add_argument("--collect-only", action="store_true", help="Only collect tests")
+    start = time.time()
+    
+    parser = argparse.ArgumentParser(description="fastest - Fast Python testing")
+    parser.add_argument("path", nargs="?", default=".", help="Path to discover tests from")
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
     
-    path = Path(args.path).resolve()
-    print(f"\n🦀 rusttest - discovering tests in: {path}")
-    print("=" * 70)
+    path = args.path
     
-    try:
-        if args.collect_only:
-            tests = discover_tests(str(path))
-            print(f"\nFound {len(tests)} tests:\n")
-            for test in tests:
-                print(f"  {test.id}")
-                if args.verbose:
-                    print(f"    File: {test.path}:{test.line_number}")
-                    print(f"    Function: {test.function_name}")
-                    if test.is_async:
-                        print(f"    Async: Yes")
-            return 0
-        else:
-            # Run tests
-            results = run_tests(str(path))
-            
-            passed = sum(1 for r in results if r.passed)
-            failed = sum(1 for r in results if not r.passed)
-            total_duration = sum(r.duration for r in results)
-            
-            print(f"\nRunning {len(results)} tests...\n")
-            
-            for result in results:
-                status = "✓ PASSED" if result.passed else "✗ FAILED"
-                print(f"{status} {result.test_id} ({result.duration:.3f}s)")
-                
-                if not result.passed and result.error:
-                    print(f"\n{result.error}\n")
-                elif args.verbose and result.output:
-                    print(f"Output:\n{result.output}\n")
-            
-            print("=" * 70)
-            print(f"\nResults: {passed} passed, {failed} failed in {total_duration:.2f}s")
-            
-            return 0 if failed == 0 else 1
-            
-    except Exception as e:
-        print(f"\nError: {e}", file=sys.stderr)
-        return 2
+    print(f"\n🦀 fastest - discovering tests in: {path}")
+    tests = discover_tests(path)
+    print(f"Found {len(tests)} tests in {time.time() - start:.2f}s")
+    
+    if args.verbose:
+        for test in tests[:10]:  # Show first 10
+            print(f"  - {test['name']} ({test['path']}:{test['line_number']})")
+        if len(tests) > 10:
+            print(f"  ... and {len(tests) - 10} more")
+    
+    # Run tests
+    print("\n🚀 Running tests...")
+    results = run_tests(tests)
+    
+    # Report results
+    passed = sum(1 for r in results if r["passed"])
+    failed = len(results) - passed
+    
+    print(f"\n{'='*60}")
+    if failed == 0:
+        print(f"✅ All {passed} tests passed in {time.time() - start:.2f}s")
+    else:
+        print(f"❌ {failed} tests failed, {passed} passed in {time.time() - start:.2f}s")
+        print("\nFailures:")
+        for r in results:
+            if not r["passed"]:
+                print(f"  ❌ {r['test_id']}")
+                if r.get("error"):
+                    print(f"     {r['error']}")
+    
+    sys.exit(0 if failed == 0 else 1)
 
 if __name__ == "__main__":
-    exit(main())
+    main()

@@ -2,6 +2,8 @@ pub mod batch;
 pub mod parallel;
 pub mod process_pool;
 pub mod single;
+pub mod optimized;
+pub mod persistent_pool;
 
 use std::time::Duration;
 
@@ -21,3 +23,5 @@ pub use batch::BatchExecutor;
 pub use parallel::{ParallelExecutor, ProgressReporter};
 pub use process_pool::ProcessPool;
 pub use single::run_test;
+pub use optimized::OptimizedExecutor;
+pub use persistent_pool::PersistentWorkerPool;

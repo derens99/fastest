@@ -1,73 +1,138 @@
 # Fastest Roadmap
 
-## Vision
-Make Python testing 10-100x faster while maintaining pytest compatibility for the features developers use most.
+This document outlines the development roadmap for Fastest, with features prioritized based on user needs and adoption requirements.
 
-## Current Status (v0.1.0-alpha)
+## ✅ Completed Features (v0.1.1)
 
-### ✅ Completed
-- **Phase 1 (MVP)**: 100% complete
-- **Phase 2 (Performance)**: 100% complete  
-- **Phase 3 (Compatibility)**: 90% complete
+- **Parametrized Tests** ⭐
+  - Full support for `@pytest.mark.parametrize`
+  - Multiple decorators (cartesian product)
+  - Complex parameter values (tuples, lists)
+  - Proper test ID generation
 
-### 📊 Performance Achieved
-- Test discovery: 88x faster
-- Test execution: 2.1x faster
-- Memory usage: ~50% less
-- Startup time: <100ms
+## Version 0.2.0 - Critical Features (Q1 2024)
 
-## Upcoming Releases
+### 🎯 High Priority
+- **Configuration File Support** ⭐
+  - Read `pytest.ini`, `pyproject.toml`, `setup.cfg`
+  - Support common settings: `testpaths`, `python_files`, `markers`
+  - Custom `fastest.toml` for Fastest-specific options
 
-### v0.2.0 - Config & Compatibility (Q1 2024)
-- [ ] Config file support (pytest.ini, pyproject.toml, setup.cfg)
-- [ ] JUnit XML output for CI integration
-- [ ] Coverage.py integration
-- [ ] Better pytest plugin compatibility layer
-- [ ] Parametrized test support
+- **Coverage Integration** ⭐
+  - Basic coverage measurement
+  - Coverage.py integration
+  - HTML/XML report generation
 
-### v0.3.0 - Developer Experience (Q2 2024)
-- [ ] Watch mode with smart re-running
-- [ ] Enhanced assertion output with diffs
-- [ ] Better error messages and stack traces
-- [ ] Test result caching across runs
-- [ ] HTML test reports
+### 🔧 Medium Priority
+- **Enhanced Fixtures**
+  - More built-in fixtures
+  - Fixture scope support (function, class, module)
+  - Fixture teardown
 
-### v0.4.0 - IDE Integration (Q3 2024)
-- [ ] VS Code extension
-- [ ] PyCharm plugin
-- [ ] LSP server for test discovery
-- [ ] Real-time test status in editors
-- [ ] Debugging support
+- **Better Error Reporting**
+  - Colored diffs for assertion failures
+  - Better traceback formatting
+  - Test result summary improvements
 
-### v0.5.0 - Advanced Features (Q4 2024)
-- [ ] Distributed testing across machines
-- [ ] Test impact analysis (run only affected tests)
-- [ ] Mutation testing support
-- [ ] Performance profiling per test
-- [ ] Cloud test execution
+## Version 0.3.0 - Enhanced Compatibility (Q2 2024)
 
-### v1.0.0 - Production Ready (2025)
-- [ ] 100% stability guarantee
-- [ ] Long-term support (LTS)
-- [ ] Enterprise features
-- [ ] Professional support options
-- [ ] Comprehensive documentation
+### 🔌 Plugin System
+- Basic plugin API
+- Support for common pytest plugins
+- Hook system for test lifecycle
 
-## Community Priorities
+### 📊 Advanced Features
+- **Test Dependencies**
+  - Run tests in dependency order
+  - Skip dependent tests on failure
+  
+- **Test Prioritization**
+  - Run failed tests first
+  - Recently modified tests first
+  - Critical path optimization
 
-We'll adjust this roadmap based on community feedback. High-demand features will be prioritized.
+### 🚀 Performance
+- **Persistent Worker Pool**
+  - Production-ready implementation
+  - 3-5x additional speedup
+  
+- **Incremental Testing**
+  - Only run tests affected by code changes
+  - Git integration for change detection
 
-## How to Influence the Roadmap
+## Version 0.4.0 - Enterprise Features (Q3 2024)
 
-1. **Vote on issues** - 👍 reactions help prioritize
-2. **Submit PRs** - Contributions accelerate development
-3. **Share use cases** - Help us understand your needs
-4. **Sponsor development** - Financial support enables faster progress
+### 🌐 Distributed Testing
+- Multi-machine test execution
+- Cloud provider integration
+- Result aggregation
 
-## Design Principles
+### 📈 Analytics
+- Test performance tracking
+- Flaky test detection
+- Historical trends
 
-1. **Performance First** - Every feature must maintain our speed advantage
-2. **Pytest Compatibility** - Support the 80% of pytest features used by 95% of users
-3. **Zero Dependencies** - The core runner should have no Python dependencies
-4. **Developer Joy** - Make testing feel instant and effortless
-5. **Incremental Adoption** - Work alongside pytest, no big-bang migration needed 
+### 🔐 Enterprise
+- SAML/SSO integration
+- Audit logging
+- Role-based access control
+
+## Version 1.0.0 - Production Ready (Q4 2024)
+
+### ✅ Stability
+- Comprehensive test suite
+- Performance guarantees
+- Backward compatibility promise
+
+### 📚 Documentation
+- Complete API documentation
+- Video tutorials
+- Enterprise deployment guide
+
+### 🌍 Ecosystem
+- IDE plugins (VS Code, PyCharm)
+- CI/CD integrations
+- Docker images
+
+## Future Considerations
+
+### 🔮 Experimental Features
+- **Machine Learning**
+  - Predictive test selection
+  - Automatic test generation
+  - Failure prediction
+
+- **Language Support**
+  - JavaScript/TypeScript tests
+  - Go tests
+  - Multi-language projects
+
+### 🎨 User Experience
+- **TUI (Terminal UI)**
+  - Interactive test runner
+  - Real-time results
+  - Test debugging
+
+- **Web Dashboard**
+  - Test results visualization
+  - Team collaboration
+  - Trend analysis
+
+## Community Input
+
+We prioritize features based on community feedback. Please:
+- 👍 Vote on existing issues
+- 💡 Suggest new features
+- 🐛 Report bugs
+- 🤝 Contribute implementations
+
+## Development Principles
+
+1. **Performance First**: Every feature must maintain our performance advantage
+2. **Compatibility**: Gradual pytest compatibility without sacrificing speed
+3. **Simplicity**: Easy to use, hard to misuse
+4. **Reliability**: Comprehensive testing and gradual rollout
+
+---
+
+📅 This roadmap is updated quarterly based on user feedback and development progress. 

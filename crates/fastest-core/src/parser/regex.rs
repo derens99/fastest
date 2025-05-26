@@ -27,14 +27,46 @@ impl RegexParser {
         let mut current_class: Option<String> = None;
         let mut class_indent = 0;
         let mut pending_decorators = Vec::new();
+        let mut in_decorator = false;
+        let mut current_decorator = String::new();
 
         for (line_num, line) in content.lines().enumerate() {
             let trimmed = line.trim_start();
             let indent = line.len() - trimmed.len();
 
-            // Collect decorators
+            // Handle multi-line decorators
+            if in_decorator {
+                // Continue collecting decorator content
+                current_decorator.push(' ');
+                current_decorator.push_str(trimmed);
+                
+                // Check if decorator ends on this line
+                let open_parens = current_decorator.matches('(').count();
+                let close_parens = current_decorator.matches(')').count();
+                
+                if open_parens > 0 && open_parens == close_parens {
+                    // Decorator is complete
+                    pending_decorators.push(current_decorator.clone());
+                    current_decorator.clear();
+                    in_decorator = false;
+                }
+                continue;
+            }
+
+            // Start of a new decorator
             if trimmed.starts_with('@') {
-                pending_decorators.push(trimmed.to_string());
+                // Check if it's a complete single-line decorator
+                let open_parens = trimmed.matches('(').count();
+                let close_parens = trimmed.matches(')').count();
+                
+                if open_parens == 0 || (open_parens > 0 && open_parens == close_parens) {
+                    // Complete decorator on one line
+                    pending_decorators.push(trimmed.to_string());
+                } else {
+                    // Multi-line decorator starts here
+                    in_decorator = true;
+                    current_decorator = trimmed.to_string();
+                }
                 continue;
             }
 

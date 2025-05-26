@@ -3,6 +3,7 @@ use colored::*;
 use fastest_core::{
     default_cache_path, discover_tests, discover_tests_ast, discover_tests_cached,
     filter_by_markers, BatchExecutor, DiscoveryCache, ParallelExecutor,
+    executor::OptimizedExecutor,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -28,7 +29,7 @@ struct Cli {
     markers: Option<String>,
 
     /// Number of parallel workers (0 = auto-detect CPUs, 1 = sequential)
-    #[arg(short = 'n', long, default_value = "1")]
+    #[arg(short = 'n', long, default_value = "0")]
     workers: usize,
 
     /// Stop on first failure
@@ -50,6 +51,14 @@ struct Cli {
     /// Parser to use for test discovery (regex or ast)
     #[arg(long = "parser", default_value = "regex")]
     parser: String,
+
+    /// Optimization level (standard, optimized, aggressive)
+    #[arg(long = "optimizer", default_value = "optimized")]
+    optimizer: String,
+
+    /// Use persistent worker pool (experimental)
+    #[arg(long = "persistent-workers")]
+    persistent_workers: bool,
 }
 
 #[derive(Subcommand)]
@@ -256,20 +265,34 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
             .progress_chars("#>-"),
     );
 
-    // Run tests using appropriate executor
-    let results = if cli.workers != 1 {
-        // Use parallel executor (0 = auto-detect, >1 = specific count)
-        let num_workers = if cli.workers == 0 {
-            None
-        } else {
-            Some(cli.workers)
-        };
-        let executor = ParallelExecutor::new(num_workers, cli.verbose);
-        executor.execute(filtered_tests)?
-    } else {
-        // Use batch executor (sequential)
-        let executor = BatchExecutor::new();
-        executor.execute_tests(filtered_tests)
+    // Run tests using appropriate executor based on configuration
+    let results = match cli.optimizer.as_str() {
+        "standard" => {
+            if cli.verbose {
+                eprintln!("Using standard batch executor");
+            }
+            if cli.workers == 1 {
+                let executor = BatchExecutor::new();
+                executor.execute_tests(filtered_tests)
+            } else {
+                let num_workers = if cli.workers == 0 { None } else { Some(cli.workers) };
+                let executor = ParallelExecutor::new(num_workers, cli.verbose);
+                executor.execute(filtered_tests)?
+            }
+        }
+        "aggressive" | "optimized" | _ => {
+            if cli.verbose {
+                eprintln!("Using optimized executor with {} workers", 
+                    if cli.workers == 0 { "auto-detected".to_string() } else { cli.workers.to_string() });
+                if cli.persistent_workers {
+                    eprintln!("Persistent worker pool: enabled (experimental)");
+                }
+            }
+            // Default to optimized executor
+            let num_workers = if cli.workers == 0 { None } else { Some(cli.workers) };
+            let executor = OptimizedExecutor::new(num_workers, cli.verbose);
+            executor.execute(filtered_tests)?
+        }
     };
 
     // Process results
