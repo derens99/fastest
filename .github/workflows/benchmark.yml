@@ -59,8 +59,11 @@ jobs:
       run: |
         source venv/bin/activate
         
-        # First run the format benchmark to generate JSON
-        python benchmarks/format_benchmark_json.py > benchmark_results.json || echo '{"error": "Failed to run benchmarks"}' > benchmark_results.json
+        # First run the format benchmark to generate JSON for detailed analysis
+        python benchmarks/format_benchmark_json.py > benchmark_results_detailed.json || echo '{"error": "Failed to run benchmarks"}' > benchmark_results_detailed.json
+        
+        # Generate simplified JSON for GitHub benchmark action
+        python benchmarks/format_benchmark_github.py > benchmark_results.json || echo '[{"name": "Benchmark Status", "unit": "success", "value": 0}]' > benchmark_results.json
         
         # Also create markdown report
         echo "# Benchmark Results 📊" > benchmark_results.md
@@ -68,10 +71,10 @@ jobs:
         echo "## Summary" >> benchmark_results.md
         echo "" >> benchmark_results.md
         
-        # Extract key metrics from JSON
+        # Extract key metrics from detailed JSON
         python -c "
         import json
-        with open('benchmark_results.json') as f:
+        with open('benchmark_results_detailed.json') as f:
             data = json.load(f)
             if 'error' in data:
                 print('**Error:** Failed to run benchmarks')
@@ -116,6 +119,7 @@ jobs:
         name: benchmark-results
         path: |
           benchmark_results.json
+          benchmark_results_detailed.json
           benchmark_results.md
     
     - name: Comment PR with results

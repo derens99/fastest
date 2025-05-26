@@ -73,31 +73,39 @@ def test_function_{i}_{j}():
 def main():
     print("=== Fastest Discovery Cache Benchmark ===\n")
     
+    # Define cache path at function level
+    cache_path = Path.home() / ".cache" / "fastest" / "discovery_cache.json"
+    
     # First, benchmark on the small test project
     print("Small project (10 tests):")
     
     # Check if test_project exists
     if os.path.exists("test_project"):
         # Clear cache first
-        cache_path = Path.home() / ".cache" / "fastest" / "discovery_cache.json"
         if cache_path.exists():
             cache_path.unlink()
         
         # First run (cold cache)
-        time1, count1 = run_discovery("test_project", use_cache=True)
-        print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
+        result = run_discovery("test_project", use_cache=True)
+        if result:
+            time1, count1 = result
+            print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
         
-        # Second run (warm cache)
-        time2, count2 = run_discovery("test_project", use_cache=True)
-        print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
+            # Second run (warm cache)
+            result2 = run_discovery("test_project", use_cache=True)
+            if result2:
+                time2, count2 = result2
+                print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
         
-        # Run without cache
-        time3, count3 = run_discovery("test_project", use_cache=False)
-        print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
+                # Run without cache
+                result3 = run_discovery("test_project", use_cache=False)
+                if result3:
+                    time3, count3 = result3
+                    print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
         
-        if time2 and time1:
-            speedup = time1 / time2
-            print(f"  Cache speedup:           {speedup:.1f}x faster")
+                    if time2 and time1:
+                        speedup = time1 / time2
+                        print(f"  Cache speedup:           {speedup:.1f}x faster")
     else:
         print("  Skipping - test_project directory not found")
     
@@ -110,35 +118,41 @@ def main():
             cache_path.unlink()
         
         # First run (cold cache)
-        time1, count1 = run_discovery(test_path, use_cache=True)
-        print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
+        result = run_discovery(test_path, use_cache=True)
+        if result:
+            time1, count1 = result
+            print(f"  First run (cold cache):  {time1*1000:.1f}ms for {count1} tests")
         
-        # Second run (warm cache)
-        time2, count2 = run_discovery(test_path, use_cache=True)
-        print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
+            # Second run (warm cache)
+            result2 = run_discovery(test_path, use_cache=True)
+            if result2:
+                time2, count2 = result2
+                print(f"  Second run (warm cache): {time2*1000:.1f}ms for {count2} tests")
         
-        # Run without cache
-        time3, count3 = run_discovery(test_path, use_cache=False)
-        print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
+                # Run without cache
+                result3 = run_discovery(test_path, use_cache=False)
+                if result3:
+                    time3, count3 = result3
+                    print(f"  Without cache:           {time3*1000:.1f}ms for {count3} tests")
         
-        if time2 and time1:
-            speedup = time1 / time2
-            print(f"  Cache speedup:           {speedup:.1f}x faster")
+                    if time2 and time1:
+                        speedup = time1 / time2
+                        print(f"  Cache speedup:           {speedup:.1f}x faster")
         
-        # Run pytest for comparison
-        print("\n  Pytest comparison:")
-        start = time.time()
-        result = subprocess.run(
-            ["python", "-m", "pytest", test_path, "--collect-only", "-q"],
-            capture_output=True,
-            text=True
-        )
-        pytest_time = time.time() - start
-        pytest_count = len([line for line in result.stdout.split('\n') if 'test_' in line])
-        print(f"    Pytest discovery:      {pytest_time*1000:.1f}ms for ~{pytest_count} tests")
+                    # Run pytest for comparison
+                    print("\n  Pytest comparison:")
+                    start = time.time()
+                    result = subprocess.run(
+                        ["python", "-m", "pytest", test_path, "--collect-only", "-q"],
+                        capture_output=True,
+                        text=True
+                    )
+                    pytest_time = time.time() - start
+                    pytest_count = len([line for line in result.stdout.split('\n') if 'test_' in line])
+                    print(f"    Pytest discovery:      {pytest_time*1000:.1f}ms for ~{pytest_count} tests")
         
-        if time2 and pytest_time:
-            print(f"    Fastest with cache is {pytest_time/time2:.1f}x faster than pytest")
+                    if time2 and pytest_time:
+                        print(f"    Fastest with cache is {pytest_time/time2:.1f}x faster than pytest")
 
 if __name__ == "__main__":
     main() 
