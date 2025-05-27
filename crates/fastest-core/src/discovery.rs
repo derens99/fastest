@@ -17,6 +17,7 @@ pub struct TestItem {
     pub class_name: Option<String>,
     pub decorators: Vec<String>,
     pub fixture_deps: Vec<String>, // Fixtures required by this test
+    pub is_xfail: bool,            // Whether the test is expected to fail
 }
 
 pub struct DiscoveryResult {
@@ -67,8 +68,15 @@ pub fn discover_tests_and_fixtures(
                         }
 
                         // Expand parametrized tests
-                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
-                        tests.extend(expanded);
+                        let mut expanded_tests_for_func = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        // If not parametrized, expand_parametrized_tests returns the original test item in a vec.
+                        // We need to set its xfail status based on top-level decorators like @pytest.mark.xfail
+                        if expanded_tests_for_func.len() == 1 && test_item.id == expanded_tests_for_func[0].id {
+                            if func.decorators.iter().any(|d| d.contains("xfail")) {
+                                expanded_tests_for_func[0].is_xfail = true;
+                            }
+                        }
+                        tests.extend(expanded_tests_for_func);
                     }
                 }
                 Err(e) => {
@@ -131,8 +139,13 @@ pub fn discover_tests_cached(
                         }
 
                         // Expand parametrized tests
-                        let expanded = expand_parametrized_tests(&test_item, &func.decorators)?;
-                        file_tests.extend(expanded);
+                        let mut expanded_tests_for_func = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        if expanded_tests_for_func.len() == 1 && test_item.id == expanded_tests_for_func[0].id {
+                            if func.decorators.iter().any(|d| d.contains("xfail")) {
+                                expanded_tests_for_func[0].is_xfail = true;
+                            }
+                        }
+                        file_tests.extend(expanded_tests_for_func);
                     }
 
                     // Update cache
@@ -212,6 +225,7 @@ fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>)
         class_name: func.class_name.clone(),
         decorators: func.decorators.clone(),
         fixture_deps,
+        is_xfail: false, // Default to false, will be updated by parametrize or decorator parsing
     }
 }
 

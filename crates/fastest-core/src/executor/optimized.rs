@@ -245,15 +245,16 @@ finally:
             imports.push_str(&format!("import {}\n", import_module));
 
             for test in tests {
-                let is_xfail = BuiltinMarker::is_xfail(&extract_markers(&test.decorators));
-
-                // Extract the function path after the module name
-                let test_id = test.id.trim_start_matches('.');
-                let function_path = if let Some(pos) = test_id.find("::") {
-                    &test_id[pos + 2..]
+                // Extract base function name (without parameter suffix)
+                let method_name = if let Some(bracket_pos) = test.function_name.find('[') {
+                    &test.function_name[..bracket_pos]
                 } else {
                     &test.function_name
                 };
+                let base_function_name = method_name;
+
+                // Check for @pytest.mark.xfail
+                // let is_xfail = BuiltinMarker::is_xfail(&extract_markers(&test.decorators));
 
                 // Check if this is a parametrized test
                 let params_decorator = test
@@ -261,13 +262,6 @@ finally:
                     .iter()
                     .find(|d| d.starts_with("__params__="))
                     .map(|d| d.trim_start_matches("__params__="));
-
-                // Extract base function name (without parameter suffix)
-                let base_function_name = if let Some(bracket_pos) = function_path.find('[') {
-                    &function_path[..bracket_pos]
-                } else {
-                    function_path
-                };
 
                 // For class methods, extract just the method name without class prefix
                 let method_name = if test.class_name.is_some() {
@@ -284,7 +278,7 @@ finally:
                 if let Some(params_json) = params_decorator {
                     // This is a parametrized test
                     test_map.push_str(&format!(
-                        "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': json.loads('{}')}},\n",
+                        "    '{}': {{ 'func': {}.{}, 'async': {}, 'xfail': {}, 'params': json.loads('{}') }},\n",
                         test.id.replace('\\', "\\\\").replace('\'', "\\'"),
                         import_module,
                         if let Some(class) = &test.class_name {
@@ -293,25 +287,22 @@ finally:
                             base_function_name.to_string()
                         },
                         if test.is_async { "True" } else { "False" },
-                        if is_xfail { "True" } else { "False" },
+                        if test.is_xfail { "True" } else { "False" },
                         params_json.replace('\'', "\\'").replace('\\', "\\\\")
                     ));
                 } else {
-                    // Regular test
-                    // For class-based tests, properly reference the method
-                    let func_ref = if let Some(class) = &test.class_name {
-                        format!("{}().{}", class, test.function_name)
-                    } else {
-                        test.function_name.clone()
-                    };
-
+                    // Non-parametrized test
                     test_map.push_str(&format!(
-                        "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': None}},\n",
+                        "    '{}': {{ 'func': {}.{}, 'async': {}, 'xfail': {} }},\n",
                         test.id.replace('\\', "\\\\").replace('\'', "\\'"),
                         import_module,
-                        func_ref,
+                        if let Some(class) = &test.class_name {
+                            format!("{}().{}", class, method_name)
+                        } else {
+                            base_function_name.to_string()
+                        },
                         if test.is_async { "True" } else { "False" },
-                        if is_xfail { "True" } else { "False" }
+                        if test.is_xfail { "True" } else { "False" }
                     ));
                 }
             }
@@ -360,12 +351,26 @@ async def run_all_tests():
         try:
             with redirect_stdout(stdout_buf), redirect_stderr(stderr_buf):
                 # Call test with parameters if provided
-                if test_info.get('params'):
-                    # Convert params dict to function arguments
-                    if test_info['async']:
-                        await test_info['func'](**test_info['params'])
+                if 'params' in test_info:
+                    params_data = test_info['params']
+                    if isinstance(params_data, list):
+                        # Positional arguments (e.g., for single tuple param)
+                        if test_info['async']:
+                            await test_info['func'](*params_data)
+                        else:
+                            test_info['func'](*params_data)
+                    elif isinstance(params_data, dict):
+                        # Keyword arguments
+                        if test_info['async']:
+                            await test_info['func'](**params_data)
+                        else:
+                            test_info['func'](**params_data)
                     else:
-                        test_info['func'](**test_info['params'])
+                        # Should not happen with current Rust code, but fallback
+                        if test_info['async']:
+                            await test_info['func']()
+                        else:
+                            test_info['func']()
                 else:
                     # Regular test without parameters
                     if test_info['async']:

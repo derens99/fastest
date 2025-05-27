@@ -134,31 +134,25 @@ impl BatchExecutor {
 
         let mut test_specs = String::new();
         for test in tests {
-            let markers = extract_markers(&test.decorators);
-            let is_xfail = BuiltinMarker::is_xfail(&markers);
-
-            // Check if this is a parametrized test
-            let params_decorator = test
+            let params_json_str_opt = test
                 .decorators
                 .iter()
                 .find(|d| d.starts_with("__params__="))
-                .map(|d| d.trim_start_matches("__params__="));
+                .map(|s| s.trim_start_matches("__params__="));
 
-            // Extract base function name (without parameter suffix)
-            let base_function_name = if let Some(bracket_pos) = test.function_name.find('[') {
-                &test.function_name[..bracket_pos]
-            } else {
-                &test.function_name
-            };
+            let params_entry = params_json_str_opt
+                .map(|s| format!(", '__params__': json.loads('{}')", s.replace('\\', "\\\\").replace("\'", "\\'")))
+                .unwrap_or_default();
 
             test_specs.push_str(&format!(
-                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}, 'params': {}}},\n",
+                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}{}}},
+",
                 test.id.replace('\\', "\\\\").replace('\'', "\\'"),
-                base_function_name.replace('\\', "\\\\").replace('\'', "\\'"),
+                test.function_name.replace('\\', "\\\\").replace('\'', "\\'"), // Use full function name from TestItem
                 if test.is_async { "True" } else { "False" },
-                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c.replace('\\', "\\\\").replace('\'', "\\'"))),
-                if is_xfail { "True" } else { "False" },
-                params_decorator.map_or("None".to_string(), |p| format!("json.loads('{}')", p.replace('\'', "\\'").replace('\\', "\\\\")))
+                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c.replace('\\', "\\\\").replace("\'", "\\'"))),
+                if test.is_xfail { "True" } else { "False" },
+                params_entry
             ));
         }
 
@@ -172,6 +166,7 @@ import asyncio
 import io
 import importlib
 from contextlib import redirect_stdout, redirect_stderr
+import inspect
 
 # Add parent directories to sys.path to support package imports
 import os
@@ -217,23 +212,43 @@ for test_spec in tests:
     
     start = time.perf_counter()
     try:
-        test_func = test_funcs.get(test_id)
-        if not test_func:
-            raise AttributeError("Test function not found: " + test_spec['name'])
-        
+        # Prepare and run test function
+        func_to_run = getattr(test_module, test_spec['name'])
+        if test_spec.get('class_name'):
+            try:
+                class_instance = getattr(test_module, test_spec['class_name'])()
+                func_to_run = getattr(class_instance, test_spec['name'])
+            except AttributeError:
+                # Handle cases where class might not be found or method not in class
+                # This can happen if test discovery is slightly off for complex class structures
+                # Fallback to module-level function if class/method not found
+                pass # func_to_run remains the module-level function
+
+        is_test_async = inspect.iscoroutinefunction(func_to_run) or inspect.isasyncgenfunction(func_to_run)
+
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            if params:
-                # Parametrized test - pass parameters as keyword arguments
-                if test_spec['is_async']:
-                    asyncio.run(test_func(**params))
+            if '__params__' in test_spec:
+                params_data = test_spec['__params__']
+                if isinstance(params_data, list):
+                    if is_test_async:
+                        await func_to_run(*params_data)
+                    else:
+                        func_to_run(*params_data)
+                elif isinstance(params_data, dict):
+                    if is_test_async:
+                        await func_to_run(**params_data)
+                    else:
+                        func_to_run(**params_data)
                 else:
-                    test_func(**params)
+                    if is_test_async:
+                        await func_to_run()
+                    else:
+                        func_to_run()
             else:
-                # Regular test
-                if test_spec['is_async']:
-                    asyncio.run(test_func())
+                if is_test_async:
+                    await func_to_run()
                 else:
-                    test_func()
+                    func_to_run()
         
         duration = time.perf_counter() - start
         

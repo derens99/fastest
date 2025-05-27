@@ -25,6 +25,8 @@ struct PyTestItem {
     decorators: Vec<String>,
     #[pyo3(get)]
     fixture_deps: Vec<String>,
+    #[pyo3(get)]
+    is_xfail: bool,
 }
 
 #[pyclass]
@@ -62,6 +64,7 @@ fn discover_tests(path: String) -> PyResult<Vec<PyTestItem>> {
             class_name: t.class_name,
             decorators: t.decorators,
             fixture_deps: t.fixture_deps,
+            is_xfail: t.is_xfail,
         })
         .collect())
 }
@@ -78,6 +81,7 @@ fn run_test(test_item: &PyTestItem) -> PyResult<PyTestResult> {
         class_name: test_item.class_name.clone(),
         decorators: test_item.decorators.clone(),
         fixture_deps: test_item.fixture_deps.clone(),
+        is_xfail: test_item.is_xfail,
     };
 
     let result = core_run_test(&item).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
@@ -108,6 +112,7 @@ fn run_tests_batch(test_items: Vec<PyRef<PyTestItem>>) -> PyResult<Vec<PyTestRes
             class_name: test_item.class_name.clone(),
             decorators: test_item.decorators.clone(),
             fixture_deps: test_item.fixture_deps.clone(),
+            is_xfail: test_item.is_xfail,
         })
         .collect();
 
@@ -149,6 +154,7 @@ fn run_tests_parallel(
             class_name: test_item.class_name.clone(),
             decorators: test_item.decorators.clone(),
             fixture_deps: test_item.fixture_deps.clone(),
+            is_xfail: test_item.is_xfail,
         })
         .collect();
 
