@@ -168,6 +168,12 @@ impl PluginManager {
     }
 }
 
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Built-in marker plugin
 struct MarkerPlugin {
     // Plugin state if needed

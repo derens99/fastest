@@ -214,7 +214,7 @@ finally:
 
         for (module, tests) in module_tests {
             // Convert module path to Python import format
-            let import_module = module.replace('/', ".").replace('\\', ".");
+            let import_module = module.replace(['/', '\\'], ".");
             imports.push_str(&format!("import {}\n", import_module));
 
             for test in tests {
@@ -446,15 +446,11 @@ print(json.dumps({{'results': results}}))
                     .filter_map(|r| self.parse_test_result(r))
                     .collect();
                 return Ok(results);
-            } else {
-                if self.verbose {
-                    eprintln!("No results array in JSON");
-                }
+            } else if self.verbose {
+                eprintln!("No results array in JSON");
             }
-        } else {
-            if self.verbose {
-                eprintln!("Failed to parse JSON from stdout");
-            }
+        } else if self.verbose {
+            eprintln!("Failed to parse JSON from stdout");
         }
 
         // Fallback error

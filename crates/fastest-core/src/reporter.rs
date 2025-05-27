@@ -179,6 +179,12 @@ impl JsonReporter {
     }
 }
 
+impl Default for JsonReporter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Reporter for JsonReporter {
     fn on_test_start(&self, _test_id: &str) {}
 
@@ -243,7 +249,7 @@ impl Reporter for JunitReporter {
                 if let Some(error) = &result.error {
                     xml.push_str(&format!(
                         "    <failure message=\"{}\">{}</failure>\n",
-                        escape_xml(&error.lines().next().unwrap_or("Test failed")),
+                        escape_xml(error.lines().next().unwrap_or("Test failed")),
                         escape_xml(error)
                     ));
                 }

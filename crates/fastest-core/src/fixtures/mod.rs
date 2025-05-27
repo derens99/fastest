@@ -275,6 +275,12 @@ impl FixtureManager {
     }
 }
 
+impl Default for FixtureManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Extract fixture dependencies from test function parameters
 pub fn extract_fixture_deps(
     test_function: &crate::parser::TestFunction,

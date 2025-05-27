@@ -29,10 +29,10 @@ impl TestWatcher {
             Config::default().with_poll_interval(Duration::from_millis(100)),
         )
         .map_err(|e| {
-            crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to create watcher: {}", e),
-            ))
+            crate::error::Error::Io(std::io::Error::other(format!(
+                "Failed to create watcher: {}",
+                e
+            )))
         })?;
 
         Ok(Self {
@@ -48,10 +48,10 @@ impl TestWatcher {
         self.watcher
             .watch(path, RecursiveMode::Recursive)
             .map_err(|e| {
-                crate::error::Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to watch path: {}", e),
-                ))
+                crate::error::Error::Io(std::io::Error::other(format!(
+                    "Failed to watch path: {}",
+                    e
+                )))
             })?;
 
         self.watched_paths
@@ -64,10 +64,10 @@ impl TestWatcher {
     /// Stop watching a path
     pub fn unwatch(&mut self, path: &Path) -> Result<()> {
         self.watcher.unwatch(path).map_err(|e| {
-            crate::error::Error::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to unwatch path: {}", e),
-            ))
+            crate::error::Error::Io(std::io::Error::other(format!(
+                "Failed to unwatch path: {}",
+                e
+            )))
         })?;
 
         self.watched_paths.lock().unwrap().remove(path);

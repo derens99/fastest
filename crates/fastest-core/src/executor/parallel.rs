@@ -90,7 +90,7 @@ impl ParallelExecutor {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| ".".to_string());
 
-            grouped.entry(module).or_insert_with(Vec::new).push(test);
+            grouped.entry(module).or_default().push(test);
         }
 
         grouped

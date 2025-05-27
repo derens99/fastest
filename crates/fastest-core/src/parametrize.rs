@@ -231,7 +231,7 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
     // Generate test cases
     let test_cases = generate_test_cases(&param_info);
 
-    for (_idx, case) in test_cases.iter().enumerate() {
+    for case in test_cases.iter() {
         let mut expanded_test = test.clone();
 
         // Create unique ID for this test case

@@ -111,6 +111,12 @@ impl DiscoveryCache {
     }
 }
 
+impl Default for DiscoveryCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug)]
 pub struct CacheStats {
     pub total_entries: usize,

@@ -258,10 +258,13 @@ impl Config {
     /// Parse INI-style config
     fn parse_ini_config(contents: &str) -> Result<Self> {
         let mut config = Config::default();
+        let lines: Vec<&str> = contents.lines().collect();
+        let mut i = 0;
 
-        for line in contents.lines() {
-            let line = line.trim();
+        while i < lines.len() {
+            let line = lines[i].trim();
             if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+                i += 1;
                 continue;
             }
 
@@ -285,11 +288,35 @@ impl Config {
                             value.split_whitespace().map(String::from).collect();
                     }
                     "markers" => {
-                        config.markers = value
-                            .lines()
-                            .map(|s| s.trim().to_string())
-                            .filter(|s| !s.is_empty())
-                            .collect();
+                        // Handle multi-line markers
+                        let mut markers = Vec::new();
+
+                        // Check if there's a marker on the same line
+                        if !value.is_empty() {
+                            markers.push(value.to_string());
+                        }
+
+                        // Look for continuation lines (indented lines after markers =)
+                        let mut j = i + 1;
+                        while j < lines.len() {
+                            let next_line = lines[j];
+                            // If line starts with whitespace, it's a continuation
+                            if next_line.starts_with(' ') || next_line.starts_with('\t') {
+                                let marker_line = next_line.trim();
+                                if !marker_line.is_empty() && !marker_line.starts_with('#') {
+                                    markers.push(marker_line.to_string());
+                                }
+                                j += 1;
+                            } else if next_line.trim().is_empty() {
+                                // Empty lines are allowed in multi-line values
+                                j += 1;
+                            } else {
+                                // Non-indented non-empty line means end of multi-line value
+                                break;
+                            }
+                        }
+                        i = j - 1; // Skip the lines we've already processed
+                        config.markers = markers;
                     }
                     "addopts" => {
                         config.addopts = value.to_string();
@@ -322,6 +349,7 @@ impl Config {
                     _ => {}
                 }
             }
+            i += 1;
         }
 
         Ok(config)
@@ -392,16 +420,19 @@ impl Config {
 
     /// Simple glob pattern matching
     fn matches_pattern(text: &str, pattern: &str) -> bool {
-        if pattern.starts_with('*') && pattern.ends_with('*') {
-            let middle = &pattern[1..pattern.len() - 1];
-            text.contains(middle)
-        } else if pattern.starts_with('*') {
-            let suffix = &pattern[1..];
-            text.ends_with(suffix)
-        } else if pattern.ends_with('*') {
-            let prefix = &pattern[..pattern.len() - 1];
-            text.starts_with(prefix)
+        // Handle patterns with * in the middle (e.g., test_*.py)
+        if let Some(star_pos) = pattern.find('*') {
+            let prefix = &pattern[..star_pos];
+            let suffix = &pattern[star_pos + 1..];
+
+            // Check if text starts with prefix and ends with suffix
+            if text.len() >= prefix.len() + suffix.len() {
+                text.starts_with(prefix) && text.ends_with(suffix)
+            } else {
+                false
+            }
         } else {
+            // No wildcard, exact match
             text == pattern
         }
     }

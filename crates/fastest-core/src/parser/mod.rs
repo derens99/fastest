@@ -31,6 +31,6 @@ pub fn parse_fixtures_and_tests(
         ParserType::Regex => regex::RegexParser::parse_fixtures_and_tests(path)
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         ParserType::Ast => ast::AstParser::parse_fixtures_and_tests(path)
-            .map_err(|e| Box::<dyn std::error::Error>::from(e)),
+            .map_err(Box::<dyn std::error::Error>::from),
     }
 }

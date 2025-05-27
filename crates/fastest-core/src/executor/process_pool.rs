@@ -204,7 +204,7 @@ fn process_worker(
         let start = Instant::now();
 
         // Write test to worker stdin
-        if let Err(e) = writeln!(worker.stdin, "{}", test_json.to_string()) {
+        if let Err(e) = writeln!(worker.stdin, "{}", test_json) {
             let _ = result_tx.send(TestResult {
                 test_id: job.test.id,
                 passed: false,

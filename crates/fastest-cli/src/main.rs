@@ -328,10 +328,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
         if cli.verbose {
             eprintln!("Applying text filter: {}", filter);
         }
-        discovered_tests = discovered_tests
-            .into_iter()
-            .filter(|t| t.name.contains(filter) || t.id.contains(filter))
-            .collect();
+        discovered_tests.retain(|t| t.name.contains(filter) || t.id.contains(filter));
     }
 
     if discovered_tests.is_empty() {
@@ -368,7 +365,38 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
                 executor.execute(discovered_tests)?
             }
         }
-        "aggressive" | "optimized" | _ => {
+        "aggressive" | "optimized" => {
+            if cli.verbose {
+                eprintln!(
+                    "Using optimized executor with {} workers",
+                    if workers == 0 {
+                        "auto-detected".to_string()
+                    } else {
+                        workers.to_string()
+                    }
+                );
+                if cli.persistent_workers {
+                    eprintln!("Persistent worker pool: enabled (experimental)");
+                }
+            }
+            // Default to optimized executor
+            let num_workers = if workers == 0 { None } else { Some(workers) };
+            let mut executor = OptimizedExecutor::new(num_workers, cli.verbose);
+
+            // Enable coverage if requested
+            if cli.coverage {
+                let source_dirs = if cli.coverage_source.is_empty() {
+                    // Default to current directory
+                    vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
+                } else {
+                    cli.coverage_source.clone()
+                };
+                executor = executor.with_coverage(source_dirs);
+            }
+
+            executor.execute(discovered_tests)?
+        }
+        _ => {
             if cli.verbose {
                 eprintln!(
                     "Using optimized executor with {} workers",

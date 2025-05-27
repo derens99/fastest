@@ -112,8 +112,8 @@ impl MarkerExpr {
         let expr = expr.trim();
 
         // Handle "not" expressions
-        if expr.starts_with("not ") {
-            let rest = expr[4..].trim();
+        if let Some(stripped) = expr.strip_prefix("not ") {
+            let rest = stripped.trim();
             return Ok(MarkerExpr::Not(Box::new(Self::parse(rest)?)));
         }
 

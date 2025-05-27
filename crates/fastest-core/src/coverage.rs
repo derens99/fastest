@@ -80,7 +80,7 @@ finally:
     pub fn combine_coverage(&self) -> Result<()> {
         // First check if there are any coverage files to combine
         let coverage_files: Vec<_> = std::fs::read_dir(".")
-            .map_err(|e| crate::error::Error::Io(e))?
+            .map_err(crate::error::Error::Io)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| {
                 entry
@@ -94,7 +94,7 @@ finally:
             return Ok(());
         }
         let output = Command::new(&self.coverage_cmd)
-            .args(&["combine", "--append"])
+            .args(["combine", "--append"])
             .output()
             .map_err(|e| {
                 crate::error::Error::Execution(format!("Failed to combine coverage: {}", e))
@@ -114,7 +114,7 @@ finally:
     pub fn generate_report(&self, format: CoverageFormat) -> Result<CoverageReport> {
         // First, generate JSON report for parsing
         let output = Command::new(&self.coverage_cmd)
-            .args(&["json", "-o", ".coverage.json"])
+            .args(["json", "-o", ".coverage.json"])
             .output()
             .map_err(|e| {
                 crate::error::Error::Execution(format!("Failed to generate coverage report: {}", e))
@@ -129,7 +129,7 @@ finally:
 
         // Parse the JSON report
         let json_content =
-            std::fs::read_to_string(".coverage.json").map_err(|e| crate::error::Error::Io(e))?;
+            std::fs::read_to_string(".coverage.json").map_err(crate::error::Error::Io)?;
 
         let json: serde_json::Value = serde_json::from_str(&json_content)?;
 
@@ -148,7 +148,7 @@ finally:
             }
             CoverageFormat::Html => {
                 Command::new(&self.coverage_cmd)
-                    .args(&["html", "-d", "htmlcov"])
+                    .args(["html", "-d", "htmlcov"])
                     .status()
                     .map_err(|e| {
                         crate::error::Error::Execution(format!(
@@ -160,7 +160,7 @@ finally:
             }
             CoverageFormat::Xml => {
                 Command::new(&self.coverage_cmd)
-                    .args(&["xml", "-o", "coverage.xml"])
+                    .args(["xml", "-o", "coverage.xml"])
                     .status()
                     .map_err(|e| {
                         crate::error::Error::Execution(format!(

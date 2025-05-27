@@ -17,7 +17,15 @@ impl BatchExecutor {
             python_path: "python".to_string(),
         }
     }
+}
 
+impl Default for BatchExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl BatchExecutor {
     /// Execute tests grouped by module for maximum efficiency
     pub fn execute_tests(&self, tests: Vec<TestItem>) -> Vec<TestResult> {
         let mut all_results = Vec::new();
@@ -46,10 +54,7 @@ impl BatchExecutor {
         let mut module_groups: HashMap<String, Vec<TestItem>> = HashMap::new();
         for test in tests_to_run {
             let module_path = test.path.to_string_lossy().to_string();
-            module_groups
-                .entry(module_path)
-                .or_insert_with(Vec::new)
-                .push(test);
+            module_groups.entry(module_path).or_default().push(test);
         }
 
         // Execute each module's tests in a single subprocess
@@ -85,7 +90,7 @@ impl BatchExecutor {
         let start = Instant::now();
 
         // Build optimized runner code that includes xfail handling
-        let runner_code = self.build_optimized_runner(&module_path, &tests);
+        let runner_code = self.build_optimized_runner(module_path, &tests);
 
         // Execute all tests in one process
         let output = Command::new(&self.python_path)

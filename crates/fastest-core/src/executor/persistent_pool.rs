@@ -53,11 +53,9 @@ impl PersistentWorker {
         // Spawn reader thread
         let reader_thread = thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if let Ok(response) = serde_json::from_str::<WorkerResponse>(&line) {
-                        let _ = tx.send(response);
-                    }
+            for line in reader.lines().map_while(Result::ok) {
+                if let Ok(response) = serde_json::from_str::<WorkerResponse>(&line) {
+                    let _ = tx.send(response);
                 }
             }
         });

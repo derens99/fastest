@@ -22,11 +22,9 @@ pub fn detect_python_command() -> Option<String> {
     }
 
     // Check if we're in a conda environment
-    if let Ok(_) = std::env::var("CONDA_DEFAULT_ENV") {
-        if is_python_command_valid("python") {
-            eprintln!("Using conda environment Python");
-            return Some("python".to_string());
-        }
+    if std::env::var("CONDA_DEFAULT_ENV").is_ok() && is_python_command_valid("python") {
+        eprintln!("Using conda environment Python");
+        return Some("python".to_string());
     }
 
     // Try python3 first (most common on modern systems)

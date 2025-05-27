@@ -165,7 +165,7 @@ pub fn discover_tests_cached(
 
 fn is_test_file(path: &Path) -> bool {
     path.is_file()
-        && path.extension().map_or(false, |ext| ext == "py")
+        && path.extension().is_some_and(|ext| ext == "py")
         && (path
             .file_name()
             .unwrap()
@@ -184,8 +184,7 @@ fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>)
     let module_path = path
         .with_extension("")
         .to_string_lossy()
-        .replace('/', ".")
-        .replace('\\', ".");
+        .replace(['/', '\\'], ".");
 
     let test_id = if let Some(class) = &func.class_name {
         format!("{}::{}::{}", module_path, class, func.name)

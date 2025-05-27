@@ -52,11 +52,17 @@ impl DependencyTracker {
         for dep in &dependencies {
             self.file_to_tests
                 .entry(dep.clone())
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(test_id.clone());
         }
 
         self.test_dependencies.insert(test_id, dependencies);
+    }
+}
+
+impl Default for DependencyTracker {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -68,6 +74,10 @@ pub struct IncrementalTestRunner {
     file_timestamps: HashMap<PathBuf, SystemTime>,
     /// Maps file paths to the tests that depend on them
     file_to_tests: HashMap<PathBuf, HashSet<String>>,
+    /// Maps test IDs to the files they depend on
+    last_run_cache: HashMap<String, HashSet<PathBuf>>,
+    /// Maps test IDs to the files they depend on
+    _cache_file: PathBuf,
 }
 
 impl IncrementalTestRunner {
@@ -76,6 +86,8 @@ impl IncrementalTestRunner {
             test_dependencies: HashMap::new(),
             file_timestamps: HashMap::new(),
             file_to_tests: HashMap::new(),
+            last_run_cache: HashMap::new(),
+            _cache_file: PathBuf::from(".fastest_cache"),
         }
     }
 
@@ -88,6 +100,8 @@ impl IncrementalTestRunner {
             test_dependencies: data.test_dependencies,
             file_timestamps: data.file_timestamps,
             file_to_tests: data.file_to_tests,
+            last_run_cache: HashMap::new(),
+            _cache_file: PathBuf::from(".fastest_cache"),
         })
     }
 
@@ -161,7 +175,7 @@ impl IncrementalTestRunner {
         for dep in &dependencies {
             self.file_to_tests
                 .entry(dep.clone())
-                .or_insert_with(HashSet::new)
+                .or_default()
                 .insert(test_id.clone());
 
             // Update timestamp
@@ -180,6 +194,7 @@ impl IncrementalTestRunner {
         self.test_dependencies.clear();
         self.file_timestamps.clear();
         self.file_to_tests.clear();
+        self.last_run_cache.clear();
     }
 
     /// Get statistics about the dependency tracking
@@ -189,6 +204,12 @@ impl IncrementalTestRunner {
             tracked_files: self.file_timestamps.len(),
             total_dependencies: self.test_dependencies.values().map(|deps| deps.len()).sum(),
         }
+    }
+}
+
+impl Default for IncrementalTestRunner {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -234,15 +255,15 @@ pub fn extract_python_dependencies(test_file: &Path) -> Result<HashSet<PathBuf>>
 fn extract_module_name(import_line: &str) -> Option<String> {
     let line = import_line.trim();
 
-    if line.starts_with("import ") {
+    if let Some(stripped) = line.strip_prefix("import ") {
         // import module.submodule as alias
-        let parts: Vec<&str> = line[7..].split_whitespace().collect();
+        let parts: Vec<&str> = stripped.split_whitespace().collect();
         if !parts.is_empty() {
             return Some(parts[0].split(',').next()?.trim().to_string());
         }
-    } else if line.starts_with("from ") {
+    } else if let Some(stripped) = line.strip_prefix("from ") {
         // from module.submodule import something
-        let parts: Vec<&str> = line[5..].split(" import ").collect();
+        let parts: Vec<&str> = stripped.split(" import ").collect();
         if !parts.is_empty() {
             return Some(parts[0].trim().to_string());
         }
@@ -280,6 +301,30 @@ fn module_to_paths(module_name: &str, base_dir: Option<&Path>) -> Vec<PathBuf> {
     }
 
     paths
+}
+
+fn _extract_imports(content: &str) -> HashSet<String> {
+    let mut imports = HashSet::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+
+        if let Some(stripped) = line.strip_prefix("import ") {
+            // import module.submodule as alias
+            let parts: Vec<&str> = stripped.split_whitespace().collect();
+            if let Some(module) = parts.first() {
+                imports.insert(module.split('.').next().unwrap_or(module).to_string());
+            }
+        } else if let Some(stripped) = line.strip_prefix("from ") {
+            // from module.submodule import something
+            let parts: Vec<&str> = stripped.split(" import ").collect();
+            if let Some(module) = parts.first() {
+                imports.insert(module.split('.').next().unwrap_or(module).to_string());
+            }
+        }
+    }
+
+    imports
 }
 
 #[cfg(test)]

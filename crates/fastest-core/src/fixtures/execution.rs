@@ -152,6 +152,12 @@ except Exception as e:
     }
 }
 
+impl Default for FixtureExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Generate Python code that includes fixture injection
 pub fn generate_test_code_with_fixtures(
     test: &crate::discovery::TestItem,

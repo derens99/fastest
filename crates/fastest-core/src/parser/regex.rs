@@ -80,17 +80,8 @@ impl RegexParser {
             }
 
             // Check if we've left the class
-            if current_class.is_some() && !line.trim().is_empty() {
-                if indent <= class_indent
-                    && !trimmed.starts_with("def ")
-                    && !trimmed.starts_with("async def ")
-                {
-                    current_class = None;
-                } else if (trimmed.starts_with("def ") || trimmed.starts_with("async def "))
-                    && indent <= class_indent
-                {
-                    current_class = None;
-                }
+            if current_class.is_some() && !line.trim().is_empty() && indent <= class_indent {
+                current_class = None;
             }
 
             // Function definition
@@ -171,10 +162,10 @@ fn extract_class_name(line: &str) -> Option<String> {
     let class_part = &line[class_start..];
     if let Some(paren_pos) = class_part.find('(') {
         Some(class_part[..paren_pos].trim().to_string())
-    } else if let Some(colon_pos) = class_part.find(':') {
-        Some(class_part[..colon_pos].trim().to_string())
     } else {
-        None
+        class_part
+            .find(':')
+            .map(|colon_pos| class_part[..colon_pos].trim().to_string())
     }
 }
 
@@ -186,9 +177,7 @@ fn extract_function_name(line: &str) -> Option<String> {
     };
 
     let func_part = &line[def_pos..];
-    if let Some(paren_pos) = func_part.find('(') {
-        Some(func_part[..paren_pos].trim().to_string())
-    } else {
-        None
-    }
+    func_part
+        .find('(')
+        .map(|paren_pos| func_part[..paren_pos].trim().to_string())
 }
