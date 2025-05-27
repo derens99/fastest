@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
-    default_cache_path, discover_tests, discover_tests_cached, executor::OptimizedExecutor,
+    default_cache_path, discover_tests, discover_tests_cached, executor::{OptimizedExecutor, SimpleExecutor, UltraFastExecutor, LightningExecutor},
     filter_by_markers, parser::ParserType, BatchExecutor, Config, DiscoveryCache, ParallelExecutor,
 };
 use indicatif::{ProgressBar, ProgressStyle};
@@ -51,7 +51,7 @@ struct Cli {
     #[arg(long = "parser")]
     parser: Option<String>,
 
-    /// Optimization level (standard, optimized, aggressive)
+    /// Optimization level (simple, standard, optimized, ultra, lightning)
     #[arg(long = "optimizer")]
     optimizer: Option<String>,
 
@@ -105,14 +105,15 @@ fn get_parser_type(parser_str: &str, verbose: bool) -> ParserType {
     match parser_str {
         "ast" => ParserType::Ast,
         "regex" => ParserType::Regex,
+        "tree-sitter" | "treesitter" | "ts" => ParserType::TreeSitter,
         _ => {
             if verbose {
                 eprintln!(
-                    "Warning: Unknown parser type '{}' specified. Defaulting to AST parser.",
+                    "Warning: Unknown parser type '{}' specified. Defaulting to tree-sitter parser.",
                     parser_str
                 );
             }
-            ParserType::Ast // Default to AST if unknown
+            ParserType::TreeSitter // Default to tree-sitter as it's most robust
         }
     }
 }
@@ -352,6 +353,27 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
     let workers = cli.workers.unwrap_or(0);
 
     let results = match optimizer {
+        "lightning" => {
+            if cli.verbose {
+                eprintln!("Using lightning executor - the fastest test runner ever created");
+            }
+            let executor = LightningExecutor::new(cli.verbose);
+            executor.execute(discovered_tests)?
+        }
+        "ultra" => {
+            if cli.verbose {
+                eprintln!("Using ultra-fast executor with zero-overhead approach");
+            }
+            let executor = UltraFastExecutor::new(cli.verbose);
+            executor.execute(discovered_tests)?
+        }
+        "simple" => {
+            if cli.verbose {
+                eprintln!("Using simple single-process executor for maximum speed");
+            }
+            let executor = SimpleExecutor::new(cli.verbose);
+            executor.execute(discovered_tests)?
+        }
         "standard" => {
             if cli.verbose {
                 eprintln!("Using standard batch executor");

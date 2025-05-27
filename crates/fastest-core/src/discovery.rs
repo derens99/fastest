@@ -25,8 +25,39 @@ pub struct DiscoveryResult {
     pub fixtures: Vec<Fixture>,
 }
 
+/// Check if a fixture is applicable to a test based on scope
+fn is_fixture_applicable_to_test(fixture: &Fixture, test: &TestItem) -> bool {
+    match fixture.scope {
+        FixtureScope::Session => true, // Session fixtures apply to all tests
+        FixtureScope::Module => {
+            // Module fixtures apply to tests in the same module
+            let fixture_module = fixture.func_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            let test_module = test.path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            fixture_module == test_module
+        }
+        FixtureScope::Class => {
+            // Class fixtures only apply if defined in the same class
+            // For now, we can't determine class membership at this level
+            // So we don't add class autouse fixtures automatically
+            // They need to be handled in the execution phase
+            false
+        }
+        FixtureScope::Function => {
+            // Function-scoped autouse fixtures apply to all tests in the same file
+            fixture.func_path == test.path
+        }
+    }
+}
+
 pub fn discover_tests(path: &Path, parser_type: ParserType) -> Result<Vec<TestItem>> {
     let result = discover_tests_and_fixtures(path, parser_type)?;
+    // The autouse fixtures have already been added to tests in discover_tests_and_fixtures
     Ok(result.tests)
 }
 
@@ -84,6 +115,18 @@ pub fn discover_tests_and_fixtures(
                 }
                 Err(e) => {
                     eprintln!("Warning: Failed to parse {}: {}", path.display(), e);
+                }
+            }
+        }
+    }
+    
+    // Add autouse fixtures to all applicable tests
+    for test in &mut tests {
+        for fixture in &fixtures {
+            if fixture.autouse && is_fixture_applicable_to_test(&fixture, &test) {
+                // Only add if not already present
+                if !test.fixture_deps.contains(&fixture.name) {
+                    test.fixture_deps.push(fixture.name.clone());
                 }
             }
         }

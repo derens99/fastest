@@ -1,9 +1,12 @@
 pub mod batch;
+pub mod lightning;
 pub mod optimized;
 pub mod parallel;
 pub mod persistent_pool;
 pub mod process_pool;
+pub mod simple;
 pub mod single;
+pub mod ultra_fast;
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -21,8 +24,11 @@ pub struct TestResult {
 }
 
 pub use batch::BatchExecutor;
+pub use lightning::LightningExecutor;
 pub use optimized::OptimizedExecutor;
 pub use parallel::{ParallelExecutor, ProgressReporter};
 pub use persistent_pool::PersistentWorkerPool;
 pub use process_pool::ProcessPool;
+pub use simple::SimpleExecutor;
 pub use single::run_test;
+pub use ultra_fast::UltraFastExecutor;
