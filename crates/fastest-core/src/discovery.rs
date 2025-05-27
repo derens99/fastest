@@ -68,10 +68,13 @@ pub fn discover_tests_and_fixtures(
                         }
 
                         // Expand parametrized tests
-                        let mut expanded_tests_for_func = expand_parametrized_tests(&test_item, &func.decorators)?;
+                        let mut expanded_tests_for_func =
+                            expand_parametrized_tests(&test_item, &func.decorators)?;
                         // If not parametrized, expand_parametrized_tests returns the original test item in a vec.
                         // We need to set its xfail status based on top-level decorators like @pytest.mark.xfail
-                        if expanded_tests_for_func.len() == 1 && test_item.id == expanded_tests_for_func[0].id {
+                        if expanded_tests_for_func.len() == 1
+                            && test_item.id == expanded_tests_for_func[0].id
+                        {
                             if func.decorators.iter().any(|d| d.contains("xfail")) {
                                 expanded_tests_for_func[0].is_xfail = true;
                             }
@@ -139,8 +142,11 @@ pub fn discover_tests_cached(
                         }
 
                         // Expand parametrized tests
-                        let mut expanded_tests_for_func = expand_parametrized_tests(&test_item, &func.decorators)?;
-                        if expanded_tests_for_func.len() == 1 && test_item.id == expanded_tests_for_func[0].id {
+                        let mut expanded_tests_for_func =
+                            expand_parametrized_tests(&test_item, &func.decorators)?;
+                        if expanded_tests_for_func.len() == 1
+                            && test_item.id == expanded_tests_for_func[0].id
+                        {
                             if func.decorators.iter().any(|d| d.contains("xfail")) {
                                 expanded_tests_for_func[0].is_xfail = true;
                             }

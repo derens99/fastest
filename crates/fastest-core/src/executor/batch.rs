@@ -141,7 +141,12 @@ impl BatchExecutor {
                 .map(|s| s.trim_start_matches("__params__="));
 
             let params_entry = params_json_str_opt
-                .map(|s| format!(", '__params__': json.loads('{}')", s.replace('\\', "\\\\").replace("\'", "\\'")))
+                .map(|s| {
+                    format!(
+                        ", '__params__': json.loads('{}')",
+                        s.replace('\\', "\\\\").replace("\'", "\\'")
+                    )
+                })
                 .unwrap_or_default();
 
             test_specs.push_str(&format!(
