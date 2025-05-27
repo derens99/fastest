@@ -78,9 +78,29 @@ impl OptimizedExecutor {
 
         pool.install(|| {
             test_batches.into_par_iter().for_each(|batch| {
-                if let Ok(batch_results) = self.execute_batch_optimized(batch) {
-                    for result in batch_results {
-                        results_clone.insert(result.test_id.clone(), result);
+                match self.execute_batch_optimized(batch.clone()) {
+                    Ok(batch_results) => {
+                        for result in batch_results {
+                            results_clone.insert(result.test_id.clone(), result);
+                        }
+                    }
+                    Err(e) => {
+                        // If batch execution fails, mark all tests in the batch as failed
+                        if self.verbose {
+                            eprintln!("Batch execution failed: {}", e);
+                        }
+                        for test in batch {
+                            let result = TestResult {
+                                test_id: test.id.clone(),
+                                passed: false,
+                                duration: Duration::from_secs(0),
+                                output: "FAILED".to_string(),
+                                error: Some(format!("Batch execution failed: {}", e)),
+                                stdout: String::new(),
+                                stderr: String::new(),
+                            };
+                            results_clone.insert(result.test_id.clone(), result);
+                        }
                     }
                 }
             });
@@ -199,6 +219,8 @@ finally:
     fn build_test_runner_code(&self, tests: &[TestItem]) -> String {
         // Group tests by module for single import
         let mut module_tests: HashMap<String, Vec<&TestItem>> = HashMap::new();
+        let mut test_dirs = std::collections::HashSet::new();
+
         for test in tests {
             // Extract module name from test ID, handling leading dots
             let test_id = test.id.trim_start_matches('.');
@@ -207,6 +229,11 @@ finally:
                 .entry(module.to_string())
                 .or_default()
                 .push(test);
+
+            // Collect unique directories containing test files
+            if let Some(parent) = test.path.parent() {
+                test_dirs.insert(parent.to_string_lossy().to_string());
+            }
         }
 
         let mut imports = String::new();
@@ -290,6 +317,12 @@ finally:
             }
         }
 
+        // Build sys.path additions for test directories
+        let mut sys_path_additions = String::new();
+        for dir in test_dirs {
+            sys_path_additions.push_str(&format!("sys.path.insert(0, r'{}')\n", dir));
+        }
+
         format!(
             r#"
 import sys
@@ -303,6 +336,9 @@ from contextlib import redirect_stdout, redirect_stderr
 
 # Add current directory to Python path
 sys.path.insert(0, os.getcwd())
+
+# Add test directories to Python path
+{}
 
 # Pre-import all modules
 {}
@@ -388,7 +424,7 @@ async def run_all_tests():
 results = asyncio.run(run_all_tests())
 print(json.dumps({{'results': results}}))
 "#,
-            imports, test_map
+            sys_path_additions, imports, test_map
         )
     }
 

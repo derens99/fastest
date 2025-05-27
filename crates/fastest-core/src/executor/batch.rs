@@ -2,6 +2,7 @@ use super::TestResult;
 use crate::discovery::TestItem;
 use crate::error::{Error, Result};
 use crate::markers::{extract_markers, BuiltinMarker};
+use crate::utils::PYTHON_CMD;
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ pub struct BatchExecutor {
 impl BatchExecutor {
     pub fn new() -> Self {
         Self {
-            python_path: "python".to_string(),
+            python_path: PYTHON_CMD.to_string(),
         }
     }
 }

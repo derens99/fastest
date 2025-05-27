@@ -63,7 +63,7 @@ jobs:
         run: cargo test --verbose --all-features
       
       - name: Run integration tests
-        run: cargo test --test '*' --verbose
+        run: cargo test --workspace --test integration_test --verbose
       
       - name: Test with Python examples
         run: |

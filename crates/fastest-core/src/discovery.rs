@@ -181,10 +181,12 @@ fn is_test_file(path: &Path) -> bool {
 }
 
 fn create_test_item(path: &Path, func: &TestFunction, fixture_deps: Vec<String>) -> TestItem {
+    // Get just the filename without extension for the module path
     let module_path = path
-        .with_extension("")
+        .file_stem()
+        .unwrap_or_default()
         .to_string_lossy()
-        .replace(['/', '\\'], ".");
+        .to_string();
 
     let test_id = if let Some(class) = &func.class_name {
         format!("{}::{}::{}", module_path, class, func.name)
