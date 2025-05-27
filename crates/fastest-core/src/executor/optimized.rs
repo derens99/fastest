@@ -285,7 +285,7 @@ finally:
                     // This is a parametrized test
                     test_map.push_str(&format!(
                         "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': json.loads('{}')}},\n",
-                        test.id,
+                        test.id.replace('\\', "\\\\").replace('\'', "\\'"),
                         import_module,
                         if let Some(class) = &test.class_name {
                             format!("{}().{}", class, method_name)
@@ -307,7 +307,7 @@ finally:
 
                     test_map.push_str(&format!(
                         "    '{}': {{'func': {}.{}, 'async': {}, 'xfail': {}, 'params': None}},\n",
-                        test.id,
+                        test.id.replace('\\', "\\\\").replace('\'', "\\'"),
                         import_module,
                         func_ref,
                         if test.is_async { "True" } else { "False" },

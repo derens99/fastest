@@ -139,10 +139,10 @@ impl BatchExecutor {
 
             test_specs.push_str(&format!(
                 "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}}},\n",
-                test.id,
-                test.function_name,
+                test.id.replace('\\', "\\\\").replace('\'', "\\'"),
+                test.function_name.replace('\\', "\\\\").replace('\'', "\\'"),
                 if test.is_async { "True" } else { "False" },
-                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c)),
+                test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c.replace('\\', "\\\\").replace('\'', "\\'"))),
                 if is_xfail { "True" } else { "False" }
             ));
         }
@@ -170,7 +170,7 @@ while current_dir and current_dir != '/':
 try:
     test_module = importlib.import_module('{}')
 except Exception as e:
-    print(json.dumps({{'error': f'Failed to import module "{}": {{str(e)}}', 'results': []}}))
+    print(json.dumps({{'error': 'Failed to import module "{}": ' + str(e), 'results': []}}))
     sys.exit(1)
 
 # Pre-compile test list
@@ -203,7 +203,7 @@ for test_spec in tests:
     try:
         test_func = test_funcs.get(test_id)
         if not test_func:
-            raise AttributeError(f"Test function not found: {{test_spec['name']}}")
+            raise AttributeError("Test function not found: " + test_spec['name'])
         
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
             if test_spec['is_async']:
