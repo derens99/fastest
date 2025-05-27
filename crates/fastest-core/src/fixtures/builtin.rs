@@ -216,7 +216,7 @@ pub fn is_builtin_fixture(name: &str) -> bool {
     if !name.chars().all(|c| c.is_alphanumeric() || c == '_') {
         return false;
     }
-    
+
     matches!(
         name,
         names::TMP_PATH

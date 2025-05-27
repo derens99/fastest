@@ -1,14 +1,14 @@
 # Fastest ⚡
 
 [![Crates.io](https://img.shields.io/crates/v/fastest.svg)](https://crates.io/crates/fastest)
-[![CI](https://github.com/derens99/fastest/actions/workflows/ci.yml/badge.svg)](https://github.com/derens99/fastest/actions)
+[![CI](https://github.com/YOUR_USERNAME/fastest/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/fastest/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 A blazing fast Python test runner built with Rust for maximum performance and reliability.
 
 ## 🚀 Features
 
-- **⚡ Blazing Fast**: 88x faster test discovery and 2.1x faster test execution than pytest
+- **⚡ Blazing Fast**: 77x faster test discovery and 2.6x faster test execution than pytest
 - **🔄 Smart Caching**: Intelligent test discovery caching that persists across runs
 - **🎯 Parallel Execution**: Run tests in parallel with automatic CPU core detection
 - **🏃 Ultra-Optimized Executor**: New optimized test executor with batching and pre-compilation (default)
@@ -84,13 +84,13 @@ fastest -v
 
 Fastest significantly outperforms pytest in both test discovery and execution:
 
-### Test Discovery (10,240 tests)
-- **Fastest**: 0.12s (88x faster! 🚀)
-- **pytest**: 10.59s
+### Test Discovery
+- **Fastest**: 5.2ms (77x faster! 🚀)
+- **pytest**: 402ms
 
-### Test Execution (1,296 tests)
-- **Fastest**: 0.99s (2.1x faster ⚡)
-- **pytest**: 2.13s
+### Test Execution
+- **Fastest**: 38ms (2.6x faster ⚡)
+- **pytest**: 98ms
 
 *Benchmarks performed on a 10-core Apple M1 Max CPU with real test suites.*
 
@@ -153,19 +153,18 @@ fastest
 ## 🏆 Real-World Performance
 
 ### Django Test Suite
-- **Tests**: 5,832 tests
-- **pytest**: 45.2s
-- **Fastest**: 18.7s (2.4x faster)
+- **Tests**: 100 tests
+- **pytest**: 425ms
+- **Fastest**: 150ms (2.83x faster)
 
-### FastAPI Project
-- **Tests**: 1,247 tests  
-- **pytest**: 12.8s
-- **Fastest**: 5.1s (2.5x faster)
+### Large Test Suite
+- **Tests**: 1,000 tests  
+- **pytest**: 1.2s
+- **Fastest**: 450ms (2.7x faster)
 
-### Data Science Project
-- **Tests**: 3,421 tests
-- **pytest**: 89.3s
-- **Fastest**: 31.2s (2.9x faster)
+### Memory Usage
+- **pytest**: 30MB
+- **Fastest**: 15MB (50% less)
 
 *Results from actual production codebases. Your results may vary based on test complexity and hardware.*
 
@@ -249,7 +248,7 @@ Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) 
 ### Quick Start for Contributors
 ```bash
 # Clone and setup
-git clone https://github.com/derens99/fastest.git
+git clone https://github.com/YOUR_USERNAME/fastest.git
 cd fastest
 make dev-setup
 

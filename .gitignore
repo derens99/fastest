@@ -60,9 +60,25 @@ benchmark_tests/
 benchmark_v2/
 fastest.*.so
 *.pyd
+django/
+.fastest_cache/
+coverage.xml
+*.prof
 
 # Temporary files
 *.tmp
 *.temp
 *.log
-.cache/ 
+.cache/
+tmp/
+temp/
+
+# JSON files (except config)
+*.json
+!package.json
+!Cargo.toml
+!pyproject.toml
+
+# Test outputs
+test_output/
+test_results/ 

@@ -1,8 +1,11 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
-    default_cache_path, discover_tests, discover_tests_cached, executor::{OptimizedExecutor, SimpleExecutor, UltraFastExecutor, LightningExecutor},
-    filter_by_markers, parser::ParserType, BatchExecutor, Config, DiscoveryCache, ParallelExecutor,
+    default_cache_path, discover_tests, discover_tests_cached,
+    executor::{LightningExecutor, OptimizedExecutor, SimpleExecutor, UltraFastExecutor},
+    filter_by_markers,
+    parser::ParserType,
+    BatchExecutor, Config, DiscoveryCache, ParallelExecutor,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;

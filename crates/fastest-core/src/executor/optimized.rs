@@ -116,14 +116,16 @@ impl OptimizedExecutor {
 
         // Collect results - wait for all parallel tasks to complete
         // Note: We don't drop the pool as it's global and reused
-        
+
         // Convert Arc<DashMap> to owned DashMap
         let results_map = match Arc::try_unwrap(results) {
             Ok(map) => map,
             Err(arc) => {
                 // If we can't unwrap, clone the data
                 if self.verbose {
-                    eprintln!("Warning: Had to clone results map, some threads may still be running");
+                    eprintln!(
+                        "Warning: Had to clone results map, some threads may still be running"
+                    );
                 }
                 (*arc).clone()
             }
@@ -176,7 +178,7 @@ impl OptimizedExecutor {
         // Create batches that balance locality with parallelism
         let mut batches = Vec::new();
         let total_tests: usize = module_groups.values().map(|v| v.len()).sum();
-        
+
         // Optimize batch size based on subprocess overhead
         // Subprocess overhead is ~25-140ms, average test execution is ~1ms
         // So we want large batches to amortize the overhead
@@ -190,13 +192,13 @@ impl OptimizedExecutor {
             // For large counts, balance parallelism with overhead
             100 // Fixed size that amortizes overhead well
         };
-        
+
         // Create a single batch for very small test counts
         if total_tests <= optimal_batch_size {
             batches.push(module_groups.into_values().flatten().collect());
             return batches;
         }
-        
+
         for (_, module_tests) in module_groups {
             // Keep modules together when possible
             if module_tests.len() <= optimal_batch_size {
@@ -267,44 +269,46 @@ finally:
         let has_fixtures = tests.iter().any(|t| !t.fixture_deps.is_empty());
         let has_async = tests.iter().any(|t| t.is_async);
         let has_classes = tests.iter().any(|t| t.class_name.is_some());
-        let has_parametrize = tests.iter().any(|t| t.decorators.iter().any(|d| d.starts_with("__params__=")));
-        
+        let has_parametrize = tests
+            .iter()
+            .any(|t| t.decorators.iter().any(|d| d.starts_with("__params__=")));
+
         // Use fast path for simple tests (much more aggressive)
         if !has_fixtures && !has_async && !has_classes && !has_parametrize {
             return self.build_fast_runner(tests);
         }
-        
+
         // Use full path for complex tests
         self.build_full_runner(tests)
     }
-    
+
     fn build_fast_runner(&self, tests: &[TestItem]) -> String {
         // Ultra-minimal Python code for maximum speed
         let mut modules = std::collections::HashSet::new();
         let mut test_functions = Vec::new();
-        
+
         for test in tests {
             let module = test.id.split("::").next().unwrap_or("test");
             modules.insert(module);
-            
+
             let func_name = test.id.split("::").nth(1).unwrap_or(&test.function_name);
             test_functions.push((module, func_name, &test.id));
         }
-        
+
         // Build minimal code with pre-allocated results
         let mut code = String::with_capacity(1024 + tests.len() * 256);
-        
+
         code.push_str("import sys,json,time\n");
-        
+
         // Import all modules at once
         for module in &modules {
             code.push_str(&format!("import {}\n", module));
         }
-        
+
         // Pre-allocate results list
         code.push_str(&format!("r=[None]*{}\n", tests.len()));
         code.push_str("p=time.perf_counter\n"); // Alias for speed
-        
+
         // Execute tests with minimal overhead
         for (idx, (module, func_name, test_id)) in test_functions.iter().enumerate() {
             code.push_str(&format!(
@@ -312,7 +316,7 @@ finally:
                 module, func_name, idx, test_id, idx, test_id
             ));
         }
-        
+
         code.push_str("print(json.dumps({'results':r}))\n");
         code
     }
@@ -350,26 +354,35 @@ finally:
         // Generate code for fixtures
         let mut user_fixture_setup = String::new();
         let mut fixture_modules = std::collections::HashSet::new();
-        
+
         for fixture_name in &all_fixture_deps {
             // Validate fixture name before checking if built-in
-            if !fixture_name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            if !fixture_name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '_')
+            {
                 if self.verbose {
                     eprintln!("Warning: Invalid fixture name: {}", fixture_name);
                 }
                 continue;
             }
-            
+
             if crate::fixtures::is_builtin_fixture(fixture_name) {
                 // Handle built-in fixtures
                 if fixture_name == "capsys" {
-                    if let Some(code) = crate::fixtures::generate_builtin_fixture_code(fixture_name) {
-                        fixture_setup_code.push_str(&format!("\n# Built-in fixture class: {}\n{}", fixture_name, code));
+                    if let Some(code) = crate::fixtures::generate_builtin_fixture_code(fixture_name)
+                    {
+                        fixture_setup_code.push_str(&format!(
+                            "\n# Built-in fixture class: {}\n{}",
+                            fixture_name, code
+                        ));
                     }
                 } else {
                     // For other built-in fixtures, define and instantiate them globally for now.
-                    if let Some(code) = crate::fixtures::generate_builtin_fixture_code(fixture_name) {
-                        fixture_setup_code.push_str(&format!("\n# Built-in fixture: {}\n{}", fixture_name, code));
+                    if let Some(code) = crate::fixtures::generate_builtin_fixture_code(fixture_name)
+                    {
+                        fixture_setup_code
+                            .push_str(&format!("\n# Built-in fixture: {}\n{}", fixture_name, code));
                         fixture_setup_code.push_str(&format!("\nif '{}' not in fixture_instances: fixture_instances['{}'] = {}_fixture()\n", fixture_name, fixture_name, fixture_name));
                     }
                 }
@@ -381,15 +394,18 @@ finally:
                 }
             }
         }
-        
+
         // Generate code to execute user fixtures
         if !fixture_modules.is_empty() {
             user_fixture_setup.push_str("\n# Find and execute user-defined fixtures\n");
-            user_fixture_setup.push_str("# Track fixture execution to detect circular dependencies\n");
+            user_fixture_setup
+                .push_str("# Track fixture execution to detect circular dependencies\n");
             user_fixture_setup.push_str("_fixture_executing = set()\n\n");
-            
+
             user_fixture_setup.push_str("def get_fixture_value(fixture_name, test_module, test_class=None, test_id=None):\n");
-            user_fixture_setup.push_str("    '''Get fixture value with dependency resolution and scope caching'''\n");
+            user_fixture_setup.push_str(
+                "    '''Get fixture value with dependency resolution and scope caching'''\n",
+            );
             user_fixture_setup.push_str("    # Try to find fixture in different scopes\n");
             user_fixture_setup.push_str("    fixture_obj = None\n");
             user_fixture_setup.push_str("    fixture_scope_info = None\n");
@@ -397,12 +413,15 @@ finally:
             user_fixture_setup.push_str("    fixture_scope = 'function'  # default scope\n");
             user_fixture_setup.push_str("    \n");
             user_fixture_setup.push_str("    # 1. Check class fixtures (if test_class provided)\n");
-            user_fixture_setup.push_str("    if test_class and hasattr(test_class, fixture_name):\n");
-            user_fixture_setup.push_str("        fixture_obj = getattr(test_class, fixture_name)\n");
+            user_fixture_setup
+                .push_str("    if test_class and hasattr(test_class, fixture_name):\n");
+            user_fixture_setup
+                .push_str("        fixture_obj = getattr(test_class, fixture_name)\n");
             user_fixture_setup.push_str("        fixture_scope_info = ('class', test_class)\n");
             user_fixture_setup.push_str("    # 2. Check module fixtures\n");
             user_fixture_setup.push_str("    elif hasattr(test_module, fixture_name):\n");
-            user_fixture_setup.push_str("        fixture_obj = getattr(test_module, fixture_name)\n");
+            user_fixture_setup
+                .push_str("        fixture_obj = getattr(test_module, fixture_name)\n");
             user_fixture_setup.push_str("        fixture_scope_info = ('module', test_module)\n");
             user_fixture_setup.push_str("    \n");
             user_fixture_setup.push_str("    if not fixture_obj:\n");
@@ -410,7 +429,8 @@ finally:
             user_fixture_setup.push_str("    \n");
             user_fixture_setup.push_str("    # Get fixture scope from decorator\n");
             user_fixture_setup.push_str("    if hasattr(fixture_obj, '_pytestfixturefunction'):\n");
-            user_fixture_setup.push_str("        fixture_func = fixture_obj._pytestfixturefunction\n");
+            user_fixture_setup
+                .push_str("        fixture_func = fixture_obj._pytestfixturefunction\n");
             user_fixture_setup.push_str("        if hasattr(fixture_func, 'scope'):\n");
             user_fixture_setup.push_str("            fixture_scope = fixture_func.scope\n");
             user_fixture_setup.push_str("    \n");
@@ -421,7 +441,8 @@ finally:
             user_fixture_setup.push_str("        if cache_key in session_fixture_cache:\n");
             user_fixture_setup.push_str("            return session_fixture_cache[cache_key]\n");
             user_fixture_setup.push_str("    elif fixture_scope == 'module':\n");
-            user_fixture_setup.push_str("        cache_key = (test_module.__name__, fixture_name)\n");
+            user_fixture_setup
+                .push_str("        cache_key = (test_module.__name__, fixture_name)\n");
             user_fixture_setup.push_str("        if cache_key in module_fixture_cache:\n");
             user_fixture_setup.push_str("            return module_fixture_cache[cache_key]\n");
             user_fixture_setup.push_str("    elif fixture_scope == 'class' and test_class:\n");
@@ -439,14 +460,16 @@ finally:
             user_fixture_setup.push_str("    \n");
             user_fixture_setup.push_str("    _fixture_executing.add(fixture_name)\n");
             user_fixture_setup.push_str("    try:\n");
-            user_fixture_setup.push_str("        # Get the actual function from pytest fixture wrapper\n");
+            user_fixture_setup
+                .push_str("        # Get the actual function from pytest fixture wrapper\n");
             user_fixture_setup.push_str("        actual_func = None\n");
             user_fixture_setup.push_str("        fixture_metadata = {}\n");
             user_fixture_setup.push_str("        \n");
             user_fixture_setup.push_str("        if hasattr(fixture_obj, '__wrapped__'):\n");
             user_fixture_setup.push_str("            actual_func = fixture_obj.__wrapped__\n");
             user_fixture_setup.push_str("            # Try to get fixture metadata\n");
-            user_fixture_setup.push_str("            if hasattr(fixture_obj, '_pytestfixturefunction'):\n");
+            user_fixture_setup
+                .push_str("            if hasattr(fixture_obj, '_pytestfixturefunction'):\n");
             user_fixture_setup.push_str("                fixture_metadata = getattr(fixture_obj._pytestfixturefunction, '__dict__', {})\n");
             user_fixture_setup.push_str("        elif hasattr(fixture_obj, 'func'):\n");
             user_fixture_setup.push_str("            actual_func = fixture_obj.func\n");
@@ -454,7 +477,8 @@ finally:
             user_fixture_setup.push_str("            actual_func = fixture_obj\n");
             user_fixture_setup.push_str("        \n");
             user_fixture_setup.push_str("        if actual_func:\n");
-            user_fixture_setup.push_str("            # Get fixture dependencies from function signature\n");
+            user_fixture_setup
+                .push_str("            # Get fixture dependencies from function signature\n");
             user_fixture_setup.push_str("            import inspect\n");
             user_fixture_setup.push_str("            try:\n");
             user_fixture_setup.push_str("                sig = inspect.signature(actual_func)\n");
@@ -463,10 +487,13 @@ finally:
             user_fixture_setup.push_str("                # Recursively resolve dependencies\n");
             user_fixture_setup.push_str("                for param_name in sig.parameters:\n");
             user_fixture_setup.push_str("                    if param_name == 'request':\n");
-            user_fixture_setup.push_str("                        # Skip special 'request' fixture for now\n");
+            user_fixture_setup
+                .push_str("                        # Skip special 'request' fixture for now\n");
             user_fixture_setup.push_str("                        continue\n");
             user_fixture_setup.push_str("                    if param_name == 'self' and fixture_scope_info and fixture_scope_info[0] == 'class':\n");
-            user_fixture_setup.push_str("                        # Skip 'self' for class fixtures, will be handled below\n");
+            user_fixture_setup.push_str(
+                "                        # Skip 'self' for class fixtures, will be handled below\n",
+            );
             user_fixture_setup.push_str("                        continue\n");
             user_fixture_setup.push_str("                    # Recursively get fixture value\n");
             user_fixture_setup.push_str("                    dep_value = get_fixture_value(param_name, test_module, test_class, test_id)\n");
@@ -475,39 +502,62 @@ finally:
             user_fixture_setup.push_str("                \n");
             user_fixture_setup.push_str("                # Execute the fixture\n");
             user_fixture_setup.push_str("                fixture_value = None\n");
-            user_fixture_setup.push_str("                if inspect.isgeneratorfunction(actual_func):\n");
+            user_fixture_setup
+                .push_str("                if inspect.isgeneratorfunction(actual_func):\n");
             user_fixture_setup.push_str("                    # Handle yield fixtures\n");
             user_fixture_setup.push_str("                    gen = actual_func(**kwargs)\n");
             user_fixture_setup.push_str("                    fixture_value = next(gen)\n");
-            user_fixture_setup.push_str("                    # TODO: Store generator for teardown\n");
+            user_fixture_setup
+                .push_str("                    # TODO: Store generator for teardown\n");
             user_fixture_setup.push_str("                else:\n");
-            user_fixture_setup.push_str("                    # Handle class fixtures that need self\n");
-            user_fixture_setup.push_str("                    if fixture_scope_info and fixture_scope_info[0] == 'class':\n");
-            user_fixture_setup.push_str("                        # Create instance and bind method\n");
-            user_fixture_setup.push_str("                        instance = fixture_scope_info[1]()\n");
-            user_fixture_setup.push_str("                        bound_method = getattr(instance, fixture_name)\n");
-            user_fixture_setup.push_str("                        if hasattr(bound_method, '__wrapped__'):\n");
+            user_fixture_setup
+                .push_str("                    # Handle class fixtures that need self\n");
+            user_fixture_setup.push_str(
+                "                    if fixture_scope_info and fixture_scope_info[0] == 'class':\n",
+            );
+            user_fixture_setup
+                .push_str("                        # Create instance and bind method\n");
+            user_fixture_setup
+                .push_str("                        instance = fixture_scope_info[1]()\n");
+            user_fixture_setup.push_str(
+                "                        bound_method = getattr(instance, fixture_name)\n",
+            );
+            user_fixture_setup
+                .push_str("                        if hasattr(bound_method, '__wrapped__'):\n");
             user_fixture_setup.push_str("                            bound_method = bound_method.__wrapped__.__get__(instance, fixture_scope_info[1])\n");
-            user_fixture_setup.push_str("                        fixture_value = bound_method(**kwargs)\n");
+            user_fixture_setup
+                .push_str("                        fixture_value = bound_method(**kwargs)\n");
             user_fixture_setup.push_str("                    else:\n");
-            user_fixture_setup.push_str("                        fixture_value = actual_func(**kwargs)\n");
+            user_fixture_setup
+                .push_str("                        fixture_value = actual_func(**kwargs)\n");
             user_fixture_setup.push_str("                \n");
-            user_fixture_setup.push_str("                # Cache the fixture value based on scope\n");
+            user_fixture_setup
+                .push_str("                # Cache the fixture value based on scope\n");
             user_fixture_setup.push_str("                if fixture_value is not None:\n");
             user_fixture_setup.push_str("                    if fixture_scope == 'session':\n");
-            user_fixture_setup.push_str("                        session_fixture_cache[cache_key] = fixture_value\n");
+            user_fixture_setup.push_str(
+                "                        session_fixture_cache[cache_key] = fixture_value\n",
+            );
             user_fixture_setup.push_str("                    elif fixture_scope == 'module':\n");
-            user_fixture_setup.push_str("                        module_fixture_cache[cache_key] = fixture_value\n");
-            user_fixture_setup.push_str("                    elif fixture_scope == 'class' and cache_key:\n");
-            user_fixture_setup.push_str("                        class_fixture_cache[cache_key] = fixture_value\n");
+            user_fixture_setup.push_str(
+                "                        module_fixture_cache[cache_key] = fixture_value\n",
+            );
+            user_fixture_setup
+                .push_str("                    elif fixture_scope == 'class' and cache_key:\n");
+            user_fixture_setup.push_str(
+                "                        class_fixture_cache[cache_key] = fixture_value\n",
+            );
             user_fixture_setup.push_str("                    elif fixture_scope == 'function':\n");
-            user_fixture_setup.push_str("                        fixture_instances[fixture_name] = fixture_value\n");
+            user_fixture_setup.push_str(
+                "                        fixture_instances[fixture_name] = fixture_value\n",
+            );
             user_fixture_setup.push_str("                \n");
             user_fixture_setup.push_str("                return fixture_value\n");
             user_fixture_setup.push_str("            except Exception as e:\n");
             user_fixture_setup.push_str("                import traceback\n");
             user_fixture_setup.push_str("                print(f'Failed to execute fixture {fixture_name}: {e}', file=sys.stderr)\n");
-            user_fixture_setup.push_str("                print(traceback.format_exc(), file=sys.stderr)\n");
+            user_fixture_setup
+                .push_str("                print(traceback.format_exc(), file=sys.stderr)\n");
             user_fixture_setup.push_str("                return None\n");
             user_fixture_setup.push_str("        return None\n");
             user_fixture_setup.push_str("    finally:\n");
@@ -518,7 +568,10 @@ finally:
             // Convert module path to Python import format, with validation
             let import_module = module.replace(['/', '\\'], ".");
             // Validate module name to prevent code injection
-            if !import_module.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '_') {
+            if !import_module
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '_')
+            {
                 eprintln!("Warning: Skipping invalid module name: {}", import_module);
                 continue;
             }

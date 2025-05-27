@@ -40,18 +40,18 @@ impl DiscoveryCache {
         // Use file locking to prevent concurrent access
         let file = File::open(path)?;
         let reader = BufReader::new(file);
-        
+
         let mut cache: Self = serde_json::from_reader(reader)?;
-        
+
         // Check version compatibility
         if cache.version != Self::CURRENT_VERSION {
             eprintln!("Cache version mismatch, clearing cache");
             cache = Self::new();
         }
-        
+
         // Clean up old entries
         cache.cleanup_expired();
-        
+
         Ok(cache)
     }
 
@@ -60,17 +60,17 @@ impl DiscoveryCache {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // Write to temporary file first
         let temp_path = path.with_extension("tmp");
-        
+
         {
             let file = File::create(&temp_path)?;
             let writer = BufWriter::new(file);
-            
+
             serde_json::to_writer(writer, self)?;
         }
-        
+
         // Atomic rename
         fs::rename(temp_path, path)?;
         Ok(())
@@ -85,13 +85,13 @@ impl DiscoveryCache {
                     return None;
                 }
             }
-            
+
             // Validate file metadata
             match fs::metadata(path) {
                 Ok(metadata) => {
                     let size = metadata.len();
                     let modified = metadata.modified().ok()?;
-                    
+
                     // Check both modification time and file size
                     if self.is_same_time(&modified, &entry.modified) && size == entry.file_size {
                         // Verify content hash for extra safety
@@ -160,11 +160,11 @@ impl DiscoveryCache {
     /// Calculate a content hash using streaming to avoid loading entire file
     fn calculate_content_hash(&self, path: &Path) -> Result<String> {
         use sha2::{Digest, Sha256};
-        
+
         let mut file = File::open(path)?;
         let mut hasher = Sha256::new();
         let mut buffer = [0; 8192];
-        
+
         // Stream file content through hasher
         loop {
             let n = file.read(&mut buffer)?;
@@ -173,13 +173,16 @@ impl DiscoveryCache {
             }
             hasher.update(&buffer[..n]);
         }
-        
+
         Ok(format!("{:x}", hasher.finalize()))
     }
 
     /// Compare SystemTime with tolerance for filesystem precision differences
     fn is_same_time(&self, t1: &SystemTime, t2: &SystemTime) -> bool {
-        match (t1.duration_since(SystemTime::UNIX_EPOCH), t2.duration_since(SystemTime::UNIX_EPOCH)) {
+        match (
+            t1.duration_since(SystemTime::UNIX_EPOCH),
+            t2.duration_since(SystemTime::UNIX_EPOCH),
+        ) {
             (Ok(d1), Ok(d2)) => {
                 // Allow 2 second tolerance for filesystem precision differences
                 let diff = if d1 > d2 { d1 - d2 } else { d2 - d1 };
@@ -194,7 +197,7 @@ impl DiscoveryCache {
         let now = SystemTime::now();
         let mut expired_count = 0;
         let mut total_size = 0;
-        
+
         for entry in self.entries.values() {
             if let Ok(elapsed) = now.duration_since(entry.cached_at) {
                 if elapsed > self.max_age {
@@ -203,7 +206,7 @@ impl DiscoveryCache {
             }
             total_size += entry.tests.len() * std::mem::size_of::<TestItem>();
         }
-        
+
         CacheStats {
             total_entries: self.entries.len(),
             total_tests: self.entries.values().map(|e| e.tests.len()).sum(),
@@ -255,13 +258,13 @@ mod tests {
     fn test_cache_save_load() {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("cache.json");
-        
+
         let mut cache = DiscoveryCache::new();
         cache.update(PathBuf::from("test.py"), vec![]).unwrap();
-        
+
         cache.save(&cache_path).unwrap();
         let loaded = DiscoveryCache::load(&cache_path).unwrap();
-        
+
         assert_eq!(loaded.entries.len(), 1);
     }
 
@@ -269,7 +272,7 @@ mod tests {
     fn test_cache_expiration() {
         let mut cache = DiscoveryCache::new();
         cache.set_max_age(Duration::from_secs(1));
-        
+
         let mut entry = CacheEntry {
             tests: vec![],
             modified: SystemTime::now(),
@@ -277,10 +280,10 @@ mod tests {
             file_size: 100,
             cached_at: SystemTime::now() - Duration::from_secs(2),
         };
-        
+
         cache.entries.insert(PathBuf::from("old.py"), entry);
         cache.cleanup_expired();
-        
+
         assert_eq!(cache.entries.len(), 0);
     }
 }

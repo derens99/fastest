@@ -31,14 +31,12 @@ fn is_fixture_applicable_to_test(fixture: &Fixture, test: &TestItem) -> bool {
         FixtureScope::Session => true, // Session fixtures apply to all tests
         FixtureScope::Module => {
             // Module fixtures apply to tests in the same module
-            let fixture_module = fixture.func_path
+            let fixture_module = fixture
+                .func_path
                 .file_stem()
                 .and_then(|s| s.to_str())
                 .unwrap_or("");
-            let test_module = test.path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
+            let test_module = test.path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
             fixture_module == test_module
         }
         FixtureScope::Class => {
@@ -119,7 +117,7 @@ pub fn discover_tests_and_fixtures(
             }
         }
     }
-    
+
     // Add autouse fixtures to all applicable tests
     for test in &mut tests {
         for fixture in &fixtures {

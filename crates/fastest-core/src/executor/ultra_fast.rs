@@ -17,7 +17,9 @@ const INTERPRETER_POOL_SIZE: usize = 8;
 
 /// Global interpreter pool
 static INTERPRETER_POOL: Lazy<Arc<InterpreterPool>> = Lazy::new(|| {
-    Arc::new(InterpreterPool::new(INTERPRETER_POOL_SIZE).expect("Failed to create interpreter pool"))
+    Arc::new(
+        InterpreterPool::new(INTERPRETER_POOL_SIZE).expect("Failed to create interpreter pool"),
+    )
 });
 
 /// Message to Python worker
@@ -72,15 +74,20 @@ impl FastInterpreter {
             .env("PYTHONUNBUFFERED", "1")
             .env("PYTHONHASHSEED", "0"); // Deterministic
 
-        let mut process = cmd.spawn()
+        let mut process = cmd
+            .spawn()
             .map_err(|e| Error::Execution(format!("Failed to spawn interpreter: {}", e)))?;
 
-        let stdin = process.stdin.take()
+        let stdin = process
+            .stdin
+            .take()
             .ok_or_else(|| Error::Execution("Failed to get stdin".to_string()))?;
-        
-        let stdout = process.stdout.take()
+
+        let stdout = process
+            .stdout
+            .take()
             .ok_or_else(|| Error::Execution("Failed to get stdout".to_string()))?;
-        
+
         let stdout = BufReader::new(stdout);
 
         Ok(Self {
@@ -195,45 +202,57 @@ while True:
     except Exception as e:
         sys.stderr.write(f"Worker error: {e}\n")
         sys.stderr.flush()
-"#.to_string()
+"#
+        .to_string()
     }
 
     fn execute_batch(&self, command_id: usize, tests: &[TestItem]) -> Result<Vec<TestResult>> {
         // Mark as busy
         self.busy.store(true, Ordering::SeqCst);
-        
+
         let result = self.execute_batch_internal(command_id, tests);
-        
+
         // Mark as available
         self.busy.store(false, Ordering::SeqCst);
-        
+
         result
     }
 
-    fn execute_batch_internal(&self, command_id: usize, tests: &[TestItem]) -> Result<Vec<TestResult>> {
+    fn execute_batch_internal(
+        &self,
+        command_id: usize,
+        tests: &[TestItem],
+    ) -> Result<Vec<TestResult>> {
         // Prepare test data
-        let test_data: Vec<TestData> = tests.iter().map(|t| {
-            let module = t.id.split("::").next().unwrap_or("test").to_string();
-            let func = t.id.split("::").nth(1).unwrap_or(&t.function_name).to_string();
-            TestData {
-                id: t.id.clone(),
-                module,
-                func,
-            }
-        }).collect();
+        let test_data: Vec<TestData> = tests
+            .iter()
+            .map(|t| {
+                let module = t.id.split("::").next().unwrap_or("test").to_string();
+                let func =
+                    t.id.split("::")
+                        .nth(1)
+                        .unwrap_or(&t.function_name)
+                        .to_string();
+                TestData {
+                    id: t.id.clone(),
+                    module,
+                    func,
+                }
+            })
+            .collect();
 
         let command = WorkerCommand {
             id: command_id,
             tests: test_data,
         };
-        
+
         // Send command
         {
             let mut stdin = self.stdin.lock();
             writeln!(&mut stdin, "{}", serde_json::to_string(&command)?)?;
             stdin.flush()?;
         }
-        
+
         // Read response
         let response_line = {
             let mut stdout = self.stdout.lock();
@@ -241,25 +260,29 @@ while True:
             stdout.read_line(&mut line)?;
             line
         };
-        
+
         // Parse response
         let response: WorkerResponse = serde_json::from_str(&response_line)
             .map_err(|e| Error::Execution(format!("Failed to parse response: {}", e)))?;
-        
+
         if response.id != command_id {
             return Err(Error::Execution("Response ID mismatch".to_string()));
         }
-        
+
         // Convert to TestResult
-        Ok(response.results.into_iter().map(|r| TestResult {
-            test_id: r.id,
-            passed: r.passed,
-            duration: Duration::from_secs_f64(r.duration),
-            output: if r.passed { "PASSED" } else { "FAILED" }.to_string(),
-            error: r.error,
-            stdout: String::new(),
-            stderr: String::new(),
-        }).collect())
+        Ok(response
+            .results
+            .into_iter()
+            .map(|r| TestResult {
+                test_id: r.id,
+                passed: r.passed,
+                duration: Duration::from_secs_f64(r.duration),
+                output: if r.passed { "PASSED" } else { "FAILED" }.to_string(),
+                error: r.error,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+            .collect())
     }
 
     fn is_busy(&self) -> bool {
@@ -287,11 +310,11 @@ struct InterpreterPool {
 impl InterpreterPool {
     fn new(size: usize) -> Result<Self> {
         let mut interpreters = Vec::with_capacity(size);
-        
+
         // Spawn interpreters
         for i in 0..size {
             let interpreter = FastInterpreter::spawn(i)?;
-            
+
             // Wait for ready signal
             {
                 let mut stdout = interpreter.stdout.lock();
@@ -301,10 +324,10 @@ impl InterpreterPool {
                     return Err(Error::Execution("Interpreter failed to start".to_string()));
                 }
             }
-            
+
             interpreters.push(Arc::new(Mutex::new(interpreter)));
         }
-        
+
         Ok(Self {
             interpreters,
             next_interpreter: AtomicUsize::new(0),
@@ -314,14 +337,15 @@ impl InterpreterPool {
 
     fn execute_batch(&self, tests: &[TestItem]) -> Result<Vec<TestResult>> {
         let command_id = self.command_counter.fetch_add(1, Ordering::Relaxed);
-        
+
         // Find available interpreter
-        let start_idx = self.next_interpreter.fetch_add(1, Ordering::Relaxed) % self.interpreters.len();
-        
+        let start_idx =
+            self.next_interpreter.fetch_add(1, Ordering::Relaxed) % self.interpreters.len();
+
         for i in 0..self.interpreters.len() {
             let idx = (start_idx + i) % self.interpreters.len();
             let interpreter = &self.interpreters[idx];
-            
+
             // Try to lock and check if busy
             if let Some(mut interp) = interpreter.try_lock() {
                 if !interp.is_busy() && interp.is_alive() {
@@ -329,7 +353,7 @@ impl InterpreterPool {
                 }
             }
         }
-        
+
         // All interpreters busy, wait for first one
         let interpreter = &self.interpreters[start_idx];
         let mut interp = interpreter.lock();
@@ -366,11 +390,11 @@ impl UltraFastExecutor {
         // Create optimal batches
         let mut batches = Vec::new();
         let batch_size = 50; // Optimal size for interpreter reuse
-        
+
         for (_, mut tests) in module_tests {
             // Sort by function name for cache locality
             tests.sort_by(|a, b| a.function_name.cmp(&b.function_name));
-            
+
             if tests.len() <= batch_size {
                 batches.push(tests);
             } else {
@@ -381,8 +405,9 @@ impl UltraFastExecutor {
         }
 
         if self.verbose {
-            eprintln!("⚡ Executing {} tests in {} batches using ultra-fast executor", 
-                batches.iter().map(|b| b.len()).sum::<usize>(), 
+            eprintln!(
+                "⚡ Executing {} tests in {} batches using ultra-fast executor",
+                batches.iter().map(|b| b.len()).sum::<usize>(),
                 batches.len()
             );
         }
@@ -396,22 +421,26 @@ impl UltraFastExecutor {
                         eprintln!("Batch execution failed: {}", e);
                     }
                     // Return failed results
-                    batch.into_iter().map(|test| TestResult {
-                        test_id: test.id,
-                        passed: false,
-                        duration: Duration::from_secs(0),
-                        output: "FAILED".to_string(),
-                        error: Some(format!("Execution failed: {}", e)),
-                        stdout: String::new(),
-                        stderr: String::new(),
-                    }).collect()
+                    batch
+                        .into_iter()
+                        .map(|test| TestResult {
+                            test_id: test.id,
+                            passed: false,
+                            duration: Duration::from_secs(0),
+                            output: "FAILED".to_string(),
+                            error: Some(format!("Execution failed: {}", e)),
+                            stdout: String::new(),
+                            stderr: String::new(),
+                        })
+                        .collect()
                 })
             })
             .collect();
 
         if self.verbose {
             let duration = start.elapsed();
-            eprintln!("✅ All tests completed in {:.1}ms ({:.1}ms per test)", 
+            eprintln!(
+                "✅ All tests completed in {:.1}ms ({:.1}ms per test)",
                 duration.as_secs_f64() * 1000.0,
                 (duration.as_secs_f64() * 1000.0) / results.len() as f64
             );

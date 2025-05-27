@@ -1,35 +1,21 @@
-# Installation Guide
+# Installation Guide for Fastest
 
-Fastest can be installed in several ways depending on your needs and platform.
+Fastest is a blazing-fast Python test runner written in Rust. Here are multiple ways to install it on your system.
 
-## Quick Install
+## Quick Install (Recommended)
 
-### One-line Install (Recommended)
+### Option 1: Using the install script (Unix/Linux/macOS)
 
-**macOS and Linux:**
 ```bash
 curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
 ```
 
-**Windows (PowerShell):**
-```powershell
-irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
-```
-
 This will:
-- Download the latest release for your platform
-- Install it to `~/.local/bin` (Unix) or `%LOCALAPPDATA%\fastest\bin` (Windows)
-- Add the installation directory to your PATH
+- Download the latest binary for your platform
+- Install it to `~/.local/bin`
+- Add it to your PATH if needed
 
-### Install via pip
-
-```bash
-pip install fastest-runner
-```
-
-The pip package will automatically download the appropriate binary for your platform on first run.
-
-### Install via Cargo
+### Option 2: Using Cargo (All platforms)
 
 If you have Rust installed:
 
@@ -37,119 +23,75 @@ If you have Rust installed:
 cargo install fastest-cli
 ```
 
-### Install via Homebrew (macOS)
+## Manual Installation
+
+### Step 1: Download the Binary
+
+Download the appropriate binary for your platform from the [releases page](https://github.com/yourusername/fastest/releases):
+
+- **macOS (Apple Silicon)**: `fastest-aarch64-apple-darwin.tar.gz`
+- **macOS (Intel)**: `fastest-x86_64-apple-darwin.tar.gz`
+- **Linux (x64)**: `fastest-x86_64-unknown-linux-gnu.tar.gz`
+- **Linux (ARM64)**: `fastest-aarch64-unknown-linux-gnu.tar.gz`
+- **Windows**: `fastest-x86_64-pc-windows-msvc.zip`
+
+### Step 2: Extract and Install
+
+#### Unix/Linux/macOS:
+```bash
+# Extract the archive
+tar -xzf fastest-*.tar.gz
+
+# Move to a directory in your PATH
+sudo mv fastest /usr/local/bin/
+# OR for user-only installation:
+mkdir -p ~/.local/bin
+mv fastest ~/.local/bin/
+
+# Make it executable
+chmod +x ~/.local/bin/fastest
+
+# Add to PATH if needed (add to ~/.bashrc or ~/.zshrc)
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+#### Windows:
+1. Extract the ZIP file
+2. Move `fastest.exe` to a directory of your choice
+3. Add that directory to your PATH environment variable
+
+## Building from Source
+
+### Prerequisites
+- Rust 1.70 or later
+- Python 3.8+ (for running tests)
+
+### Build Steps
 
 ```bash
-brew tap yourusername/fastest
-brew install fastest
+# Clone the repository
+git clone https://github.com/yourusername/fastest.git
+cd fastest
+
+# Build in release mode
+cargo build --release
+
+# The binary will be at target/release/fastest
+# Copy it to your PATH
+sudo cp target/release/fastest /usr/local/bin/
 ```
 
-## Platform-Specific Instructions
+## Python Package Installation (Optional)
 
-### macOS
-
-1. **Via installer script (recommended):**
-   ```bash
-   curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
-   ```
-
-2. **Via Homebrew:**
-   ```bash
-   brew tap yourusername/fastest
-   brew install fastest
-   ```
-
-3. **Manual installation:**
-   - Download the latest release from [GitHub Releases](https://github.com/yourusername/fastest/releases)
-   - Extract: `tar -xzf fastest-*-apple-darwin.tar.gz`
-   - Move to PATH: `sudo mv fastest /usr/local/bin/`
-
-### Linux
-
-1. **Via installer script (recommended):**
-   ```bash
-   curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
-   ```
-
-2. **Via package managers:**
-   ```bash
-   # Arch Linux (AUR)
-   yay -S fastest-bin
-   
-   # Ubuntu/Debian (via cargo)
-   cargo install fastest-cli
-   ```
-
-3. **Manual installation:**
-   - Download the latest release for your architecture
-   - Extract: `tar -xzf fastest-*-linux-gnu.tar.gz`
-   - Move to PATH: `sudo mv fastest /usr/local/bin/`
-
-### Windows
-
-1. **Via PowerShell installer (recommended):**
-   ```powershell
-   irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
-   ```
-
-2. **Via Scoop:**
-   ```powershell
-   scoop bucket add fastest https://github.com/yourusername/scoop-fastest
-   scoop install fastest
-   ```
-
-3. **Manual installation:**
-   - Download `fastest-*-pc-windows-msvc.zip` from releases
-   - Extract the zip file
-   - Add the directory to your PATH
-
-## Docker
-
-Run fastest in a container:
+For Python integration and fixtures support:
 
 ```bash
-docker run --rm -v $(pwd):/workspace ghcr.io/yourusername/fastest tests/
+pip install fastest-runner
 ```
 
-Or add to your `docker-compose.yml`:
+## Verification
 
-```yaml
-services:
-  test:
-    image: ghcr.io/yourusername/fastest:latest
-    volumes:
-      - .:/workspace
-    command: tests/ -v
-```
-
-## Installer Options
-
-### Shell Installer Options
-
-```bash
-# Install specific version
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh -s -- --version v0.2.0
-
-# Install to custom directory
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh -s -- --install-dir /opt/fastest
-
-# Show help
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh -s -- --help
-```
-
-### PowerShell Installer Options
-
-```powershell
-# Install specific version
-irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex -Version "v0.2.0"
-
-# Install to custom directory
-irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex -InstallDir "C:\tools\fastest"
-```
-
-## Verifying Installation
-
-After installation, verify that fastest is working:
+After installation, verify it works:
 
 ```bash
 # Check version
@@ -158,116 +100,110 @@ fastest --version
 # Run help
 fastest --help
 
-# Run a simple test
-echo "def test_example(): assert True" > test_example.py
+# Run on a test file
 fastest test_example.py
 ```
 
-## Updating
+## Configuration
 
-### Update via installer
+Create a `pytest.ini` or `pyproject.toml` file in your project root:
 
-**Unix:**
-```bash
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+### pytest.ini
+```ini
+[tool:pytest]
+# Fastest-specific settings
+fastest_workers = 4
+fastest_parser = tree-sitter
+fastest_optimizer = lightning
 ```
 
-**Windows:**
-```powershell
-irm https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
+### pyproject.toml
+```toml
+[tool.fastest]
+workers = 4
+parser = "tree-sitter"
+optimizer = "lightning"
 ```
 
-### Update via pip
+## Usage Examples
 
 ```bash
-pip install --upgrade fastest-runner
+# Run all tests in current directory
+fastest
+
+# Run specific test file
+fastest test_math.py
+
+# Run tests in a directory
+fastest tests/
+
+# Use specific optimizer
+fastest tests/ --optimizer simple    # Fastest for simple tests
+fastest tests/ --optimizer lightning # Good balance
+fastest tests/ --optimizer ultra     # For large test suites
+
+# Run with multiple workers
+fastest tests/ -n 8
+
+# Filter tests by name
+fastest tests/ -k "test_addition"
+
+# Verbose output
+fastest tests/ -v
 ```
 
-### Update via cargo
+## Performance Tips
 
+1. **For small test suites (<100 tests)**: Use `--optimizer simple`
+2. **For medium test suites (100-1000 tests)**: Use `--optimizer lightning`
+3. **For large test suites (>1000 tests)**: Use `--optimizer ultra`
+4. **For tests with fixtures**: Use `--optimizer optimized`
+
+## Troubleshooting
+
+### "Command not found" error
+- Ensure the installation directory is in your PATH
+- Try using the full path: `~/.local/bin/fastest`
+
+### Permission denied
+- Make sure the binary is executable: `chmod +x fastest`
+
+### Python module not found errors
+- Ensure you're running from the correct directory
+- Check that your Python environment is activated
+
+### Performance issues
+- Try different optimizers
+- Reduce the number of workers if you have many small tests
+
+## Uninstallation
+
+### If installed via script or manually:
 ```bash
-cargo install --force fastest-cli
-```
-
-## Uninstalling
-
-### Installed via script
-
-**Unix:**
-```bash
+rm /usr/local/bin/fastest
+# or
 rm ~/.local/bin/fastest
-# Remove from PATH in ~/.bashrc, ~/.zshrc, etc.
 ```
 
-**Windows:**
-```powershell
-Remove-Item "$env:LOCALAPPDATA\fastest" -Recurse
-# Remove from PATH via System Properties
-```
-
-### Installed via pip
-
-```bash
-pip uninstall fastest-runner
-```
-
-### Installed via cargo
-
+### If installed via Cargo:
 ```bash
 cargo uninstall fastest-cli
 ```
 
-## Troubleshooting
-
-### Common Issues
-
-1. **"command not found" after installation**
-   - Restart your shell or run `source ~/.bashrc` (or equivalent)
-   - Check that the install directory is in your PATH
-
-2. **Permission denied**
-   - Don't use `sudo` with the installer script
-   - The default install location (`~/.local/bin`) doesn't require root
-
-3. **SSL/TLS errors**
-   - Update your certificates: `update-ca-certificates` (Linux)
-   - Use `--insecure` flag (not recommended)
-
-4. **Wrong architecture downloaded**
-   - Manually specify platform in download URL
-   - Check `uname -m` output
-
-### Getting Help
-
-If you encounter issues:
-
-1. Check the [troubleshooting guide](TROUBLESHOOTING.md)
-2. Search [existing issues](https://github.com/yourusername/fastest/issues)
-3. Open a new issue with:
-   - Your OS and architecture
-   - Installation method used
-   - Complete error message
-   - Output of `fastest --version` (if it runs)
-
-## Building from Source
-
-If you want to build from source:
-
+### If installed via pip:
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/fastest.git
-cd fastest
-
-# Build release binary
-cargo build --release
-
-# Install
-cargo install --path crates/fastest-cli
-
-# Or copy binary manually
-cp target/release/fastest ~/.local/bin/
+pip uninstall fastest-runner
 ```
 
-Requirements:
-- Rust 1.75 or later
-- Git 
+## Support
+
+- GitHub Issues: [github.com/yourusername/fastest/issues](https://github.com/yourusername/fastest/issues)
+- Documentation: [github.com/yourusername/fastest/docs](https://github.com/yourusername/fastest/docs)
+
+## System Requirements
+
+- **OS**: Linux, macOS, Windows
+- **Architecture**: x86_64, aarch64/arm64
+- **Python**: 3.8 or later
+- **Memory**: 512MB minimum
+- **Disk Space**: 50MB for binary

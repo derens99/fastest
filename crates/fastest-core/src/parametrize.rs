@@ -230,27 +230,33 @@ fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<Par
 
         loop {
             found_kwarg_in_iteration = false;
-            
+
             // First, check which kwarg comes last (rightmost) in temp_content
             let id_pos = temp_content.rfind(", id=");
             let marks_pos = temp_content.rfind(", marks=");
-            
+
             // Process the rightmost kwarg first
             match (id_pos, marks_pos) {
                 (Some(id_p), Some(marks_p)) => {
                     if marks_p > id_p {
                         // marks= is rightmost, process it first
                         let potential_marks_val_part = &temp_content[marks_p + 8..];
-                        let (val_str, next_temp_content) =
-                            extract_kwarg_value_and_remaining(potential_marks_val_part, temp_content, marks_p);
+                        let (val_str, next_temp_content) = extract_kwarg_value_and_remaining(
+                            potential_marks_val_part,
+                            temp_content,
+                            marks_p,
+                        );
                         marks_str_opt = Some(val_str);
                         temp_content = next_temp_content;
                         found_kwarg_in_iteration = true;
                     } else {
                         // id= is rightmost, process it first
                         let potential_id_val_part = &temp_content[id_p + 5..];
-                        let (val_str, next_temp_content) =
-                            extract_kwarg_value_and_remaining(potential_id_val_part, temp_content, id_p);
+                        let (val_str, next_temp_content) = extract_kwarg_value_and_remaining(
+                            potential_id_val_part,
+                            temp_content,
+                            id_p,
+                        );
                         id_str_opt = Some(val_str);
                         temp_content = next_temp_content;
                         found_kwarg_in_iteration = true;
@@ -259,8 +265,11 @@ fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<Par
                 (Some(id_p), None) => {
                     // Only id= found
                     let potential_id_val_part = &temp_content[id_p + 5..];
-                    let (val_str, next_temp_content) =
-                        extract_kwarg_value_and_remaining(potential_id_val_part, temp_content, id_p);
+                    let (val_str, next_temp_content) = extract_kwarg_value_and_remaining(
+                        potential_id_val_part,
+                        temp_content,
+                        id_p,
+                    );
                     id_str_opt = Some(val_str);
                     temp_content = next_temp_content;
                     found_kwarg_in_iteration = true;
@@ -268,8 +277,11 @@ fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<Par
                 (None, Some(marks_p)) => {
                     // Only marks= found
                     let potential_marks_val_part = &temp_content[marks_p + 8..];
-                    let (val_str, next_temp_content) =
-                        extract_kwarg_value_and_remaining(potential_marks_val_part, temp_content, marks_p);
+                    let (val_str, next_temp_content) = extract_kwarg_value_and_remaining(
+                        potential_marks_val_part,
+                        temp_content,
+                        marks_p,
+                    );
                     marks_str_opt = Some(val_str);
                     temp_content = next_temp_content;
                     found_kwarg_in_iteration = true;
@@ -388,12 +400,15 @@ fn extract_pytest_param_marks(marks_str: &str) -> (Vec<String>, bool) {
     // Check if marks are in array format [mark1, mark2] or single mark
     let content = if marks_str.starts_with('[') && marks_str.ends_with(']') {
         // Array format: [pytest.mark.xfail, pytest.mark.slow]
-        marks_str.trim_start_matches('[').trim_end_matches(']').trim()
+        marks_str
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .trim()
     } else {
         // Single mark: pytest.mark.xfail
         marks_str.trim()
     };
-    
+
     for mark_item_str in content.split(',') {
         let mark_item = mark_item_str.trim();
         // This is a very simplified check for xfail.

@@ -25,7 +25,7 @@ impl SimpleExecutor {
 
         // For simple tests, run everything in a single subprocess
         let code = self.build_simple_runner(&tests);
-        
+
         if self.verbose {
             eprintln!("⚡ Executing {} tests in single process", tests.len());
         }
@@ -43,28 +43,31 @@ impl SimpleExecutor {
     fn build_simple_runner(&self, tests: &[TestItem]) -> String {
         // Group tests by module for efficient imports
         let mut module_tests: HashMap<&str, Vec<(&str, &str)>> = HashMap::new();
-        
+
         for test in tests {
             let module = test.id.split("::").next().unwrap_or("test");
             let func_name = test.id.split("::").nth(1).unwrap_or(&test.function_name);
-            module_tests.entry(module).or_default().push((func_name, &test.id));
+            module_tests
+                .entry(module)
+                .or_default()
+                .push((func_name, &test.id));
         }
 
         // Build ultra-minimal Python code
         let mut code = String::with_capacity(512 + tests.len() * 128);
-        
+
         // Minimal imports
         code.push_str("import sys,json,time\n");
-        
+
         // Import all test modules
         for module in module_tests.keys() {
             code.push_str(&format!("import {}\n", module));
         }
-        
+
         // Pre-allocate results
         code.push_str(&format!("r=[]\n"));
         code.push_str("p=time.perf_counter\n");
-        
+
         // Execute all tests
         for (module, module_tests) in module_tests {
             for (func_name, test_id) in module_tests {
@@ -74,7 +77,7 @@ impl SimpleExecutor {
                 ));
             }
         }
-        
+
         code.push_str("print(json.dumps({'results':r}))\n");
         code
     }

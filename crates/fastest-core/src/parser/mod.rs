@@ -1,7 +1,7 @@
 pub mod ast;
 pub mod regex;
-pub mod tree_sitter_parser;
 pub mod tree_sitter_impl;
+pub mod tree_sitter_parser;
 
 // Re-export common types
 pub use ast::AstParser;
@@ -36,7 +36,9 @@ pub fn parse_fixtures_and_tests(
             .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
         ParserType::Ast => ast::AstParser::parse_fixtures_and_tests(path)
             .map_err(Box::<dyn std::error::Error>::from),
-        ParserType::TreeSitter => tree_sitter_parser::TreeSitterParser::parse_fixtures_and_tests(path)
-            .map_err(Box::<dyn std::error::Error>::from),
+        ParserType::TreeSitter => {
+            tree_sitter_parser::TreeSitterParser::parse_fixtures_and_tests(path)
+                .map_err(Box::<dyn std::error::Error>::from)
+        }
     }
 }
