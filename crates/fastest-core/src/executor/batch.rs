@@ -137,13 +137,28 @@ impl BatchExecutor {
             let markers = extract_markers(&test.decorators);
             let is_xfail = BuiltinMarker::is_xfail(&markers);
 
+            // Check if this is a parametrized test
+            let params_decorator = test
+                .decorators
+                .iter()
+                .find(|d| d.starts_with("__params__="))
+                .map(|d| d.trim_start_matches("__params__="));
+
+            // Extract base function name (without parameter suffix)
+            let base_function_name = if let Some(bracket_pos) = test.function_name.find('[') {
+                &test.function_name[..bracket_pos]
+            } else {
+                &test.function_name
+            };
+
             test_specs.push_str(&format!(
-                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}}},\n",
+                "    {{'id': '{}', 'name': '{}', 'is_async': {}, 'class_name': {}, 'is_xfail': {}, 'params': {}}},\n",
                 test.id.replace('\\', "\\\\").replace('\'', "\\'"),
-                test.function_name.replace('\\', "\\\\").replace('\'', "\\'"),
+                base_function_name.replace('\\', "\\\\").replace('\'', "\\'"),
                 if test.is_async { "True" } else { "False" },
                 test.class_name.as_ref().map_or("None".to_string(), |c| format!("'{}'", c.replace('\\', "\\\\").replace('\'', "\\'"))),
-                if is_xfail { "True" } else { "False" }
+                if is_xfail { "True" } else { "False" },
+                params_decorator.map_or("None".to_string(), |p| format!("json.loads('{}')", p.replace('\'', "\\'").replace('\\', "\\\\")))
             ));
         }
 
@@ -196,6 +211,7 @@ results = []
 for test_spec in tests:
     test_id = test_spec['id']
     is_xfail = test_spec.get('is_xfail', False)
+    params = test_spec.get('params')
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     
@@ -206,10 +222,18 @@ for test_spec in tests:
             raise AttributeError("Test function not found: " + test_spec['name'])
         
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            if test_spec['is_async']:
-                asyncio.run(test_func())
+            if params:
+                # Parametrized test - pass parameters as keyword arguments
+                if test_spec['is_async']:
+                    asyncio.run(test_func(**params))
+                else:
+                    test_func(**params)
             else:
-                test_func()
+                # Regular test
+                if test_spec['is_async']:
+                    asyncio.run(test_func())
+                else:
+                    test_func()
         
         duration = time.perf_counter() - start
         

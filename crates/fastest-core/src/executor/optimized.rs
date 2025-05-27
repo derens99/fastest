@@ -294,7 +294,7 @@ finally:
                         },
                         if test.is_async { "True" } else { "False" },
                         if is_xfail { "True" } else { "False" },
-                        params_json.replace('\'', "\\'")
+                        params_json.replace('\'', "\\'").replace('\\', "\\\\")
                     ));
                 } else {
                     // Regular test
