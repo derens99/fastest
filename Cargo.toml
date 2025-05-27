@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/fastest-core",
-    "crates/fastest-python",
     "crates/fastest-cli",
 ]
 resolver = "2"

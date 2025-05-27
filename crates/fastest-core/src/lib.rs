@@ -38,9 +38,7 @@ pub use fixtures::{
 pub use markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 
 // Re-export from executor module
-pub use executor::{
-    run_test, BatchExecutor, ParallelExecutor, ProcessPool, ProgressReporter, TestResult,
-};
+pub use executor::{BatchExecutor, ParallelExecutor, ProgressReporter, TestResult};
 
 // Re-export parametrize module
 pub use parametrize::{expand_parametrized_tests, parse_parametrize_decorator};
