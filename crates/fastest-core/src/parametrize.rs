@@ -230,24 +230,53 @@ fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<Par
 
         loop {
             found_kwarg_in_iteration = false;
-            // Try to find id=
-            if let Some(pos) = temp_content.rfind(", id=") {
-                // Check if this id= is inside a string or deeper parentheses (naive check)
-                let potential_id_val_part = &temp_content[pos + 5..];
-                let (val_str, next_temp_content) =
-                    extract_kwarg_value_and_remaining(potential_id_val_part, temp_content, pos);
-                id_str_opt = Some(val_str);
-                temp_content = next_temp_content;
-                found_kwarg_in_iteration = true;
-            }
-            // Try to find marks=
-            if let Some(pos) = temp_content.rfind(", marks=") {
-                let potential_marks_val_part = &temp_content[pos + 8..];
-                let (val_str, next_temp_content) =
-                    extract_kwarg_value_and_remaining(potential_marks_val_part, temp_content, pos);
-                marks_str_opt = Some(val_str);
-                temp_content = next_temp_content;
-                found_kwarg_in_iteration = true;
+            
+            // First, check which kwarg comes last (rightmost) in temp_content
+            let id_pos = temp_content.rfind(", id=");
+            let marks_pos = temp_content.rfind(", marks=");
+            
+            // Process the rightmost kwarg first
+            match (id_pos, marks_pos) {
+                (Some(id_p), Some(marks_p)) => {
+                    if marks_p > id_p {
+                        // marks= is rightmost, process it first
+                        let potential_marks_val_part = &temp_content[marks_p + 8..];
+                        let (val_str, next_temp_content) =
+                            extract_kwarg_value_and_remaining(potential_marks_val_part, temp_content, marks_p);
+                        marks_str_opt = Some(val_str);
+                        temp_content = next_temp_content;
+                        found_kwarg_in_iteration = true;
+                    } else {
+                        // id= is rightmost, process it first
+                        let potential_id_val_part = &temp_content[id_p + 5..];
+                        let (val_str, next_temp_content) =
+                            extract_kwarg_value_and_remaining(potential_id_val_part, temp_content, id_p);
+                        id_str_opt = Some(val_str);
+                        temp_content = next_temp_content;
+                        found_kwarg_in_iteration = true;
+                    }
+                }
+                (Some(id_p), None) => {
+                    // Only id= found
+                    let potential_id_val_part = &temp_content[id_p + 5..];
+                    let (val_str, next_temp_content) =
+                        extract_kwarg_value_and_remaining(potential_id_val_part, temp_content, id_p);
+                    id_str_opt = Some(val_str);
+                    temp_content = next_temp_content;
+                    found_kwarg_in_iteration = true;
+                }
+                (None, Some(marks_p)) => {
+                    // Only marks= found
+                    let potential_marks_val_part = &temp_content[marks_p + 8..];
+                    let (val_str, next_temp_content) =
+                        extract_kwarg_value_and_remaining(potential_marks_val_part, temp_content, marks_p);
+                    marks_str_opt = Some(val_str);
+                    temp_content = next_temp_content;
+                    found_kwarg_in_iteration = true;
+                }
+                (None, None) => {
+                    // No more kwargs found
+                }
             }
 
             if !found_kwarg_in_iteration {
@@ -269,9 +298,9 @@ fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<Par
             if vp_trimmed.starts_with('(') && vp_trimmed.ends_with(')') {
                 parse_comma_separated_values(&vp_trimmed[1..vp_trimmed.len() - 1])?
             } else {
-                // If not a tuple, but multiple params expected, this is likely an error
-                // unless it's a single value meant for the first param and others are defaulted (not handled)
-                return None;
+                // If not wrapped in parentheses, parse as comma-separated values directly
+                // This handles cases like pytest.param(1, "a", id="...", marks=...)
+                parse_comma_separated_values(vp_trimmed)?
             }
         };
         if parsed_values.len() != num_params {
@@ -356,10 +385,15 @@ fn extract_pytest_param_marks(marks_str: &str) -> (Vec<String>, bool) {
         return (marks, is_xfail);
     }
 
-    let content = marks_str
-        .trim_start_matches('[')
-        .trim_end_matches(']')
-        .trim();
+    // Check if marks are in array format [mark1, mark2] or single mark
+    let content = if marks_str.starts_with('[') && marks_str.ends_with(']') {
+        // Array format: [pytest.mark.xfail, pytest.mark.slow]
+        marks_str.trim_start_matches('[').trim_end_matches(']').trim()
+    } else {
+        // Single mark: pytest.mark.xfail
+        marks_str.trim()
+    };
+    
     for mark_item_str in content.split(',') {
         let mark_item = mark_item_str.trim();
         // This is a very simplified check for xfail.
