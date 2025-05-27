@@ -162,8 +162,45 @@ impl AstParser {
             let mut cursor = node.walk();
             for child in node.children(&mut cursor) {
                 if child.kind() == "decorator" {
-                    let text = &source[child.byte_range()];
-                    let cleaned = text.trim_start_matches('@').to_string();
+                    // Get the full decorator text including multi-line content
+                    let start_byte = child.start_byte();
+                    let mut end_byte = child.end_byte();
+
+                    // For multi-line decorators, we need to capture the entire decorator
+                    // including any arguments that span multiple lines
+                    let text = &source[start_byte..end_byte];
+
+                    // If the decorator doesn't end with a closing parenthesis,
+                    // it might be incomplete (tree-sitter might have parsed it incorrectly)
+                    // Let's try to find the actual end
+                    if text.contains("parametrize") && !text.trim().ends_with(')') {
+                        // Look for the matching closing parenthesis
+                        let mut paren_count = 0;
+                        let mut found_start = false;
+                        let bytes = source.as_bytes();
+
+                        for i in start_byte..source.len().min(start_byte + 2000) {
+                            match bytes[i] {
+                                b'(' => {
+                                    found_start = true;
+                                    paren_count += 1;
+                                }
+                                b')' => {
+                                    if found_start {
+                                        paren_count -= 1;
+                                        if paren_count == 0 {
+                                            end_byte = i + 1;
+                                            break;
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    let full_text = &source[start_byte..end_byte];
+                    let cleaned = full_text.trim_start_matches('@').to_string();
                     decorators.push(cleaned);
                 }
             }

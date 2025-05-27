@@ -69,6 +69,15 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
         vec![param_names_str.to_string()]
     };
 
+    // Check if there's an ids parameter and remove it
+    let values_str = if let Some(ids_pos) = values_str.rfind(", ids=") {
+        &values_str[..ids_pos]
+    } else if let Some(ids_pos) = values_str.rfind(",ids=") {
+        &values_str[..ids_pos]
+    } else {
+        values_str
+    };
+
     // Parse parameter values
     let param_values = parse_param_values(values_str)?;
 
@@ -81,6 +90,7 @@ fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
     // In the future, we might want to use a proper Python AST parser
 
     let values_str = values_str.trim();
+
     if !values_str.starts_with('[') || !values_str.ends_with(']') {
         return None;
     }
@@ -88,14 +98,136 @@ fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
     let inner = &values_str[1..values_str.len() - 1];
     let mut param_sets = Vec::new();
 
-    // Simple parsing for tuples and single values
-    let mut in_tuple = false;
-    let mut current_value = String::new();
+    // Track parentheses and brackets to handle nested structures
+    let mut current_item = String::new();
     let mut paren_depth = 0;
+    let mut bracket_depth = 0;
     let mut in_string = false;
     let mut string_char = ' ';
 
     for ch in inner.chars() {
+        match ch {
+            '"' | '\'' if !in_string => {
+                in_string = true;
+                string_char = ch;
+                current_item.push(ch);
+            }
+            '"' | '\'' if in_string && ch == string_char => {
+                in_string = false;
+                current_item.push(ch);
+            }
+            '(' if !in_string => {
+                paren_depth += 1;
+                current_item.push(ch);
+            }
+            ')' if !in_string => {
+                paren_depth -= 1;
+                current_item.push(ch);
+            }
+            '[' if !in_string => {
+                bracket_depth += 1;
+                current_item.push(ch);
+            }
+            ']' if !in_string => {
+                bracket_depth -= 1;
+                current_item.push(ch);
+            }
+            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 => {
+                if !current_item.trim().is_empty() {
+                    // Handle pytest.param() specially
+                    let trimmed = current_item.trim();
+                    if trimmed.starts_with("pytest.param(") && trimmed.ends_with(')') {
+                        // Extract the values from pytest.param()
+                        let param_content = &trimmed[13..trimmed.len() - 1];
+
+                        // Find where the actual params end (before marks= or id=)
+                        let mut param_end = param_content.len();
+                        if let Some(marks_pos) = param_content.find(", marks=") {
+                            param_end = marks_pos;
+                        }
+                        if let Some(id_pos) = param_content.find(", id=") {
+                            param_end = param_end.min(id_pos);
+                        }
+
+                        let values_part = &param_content[..param_end];
+                        if let Some(values) = parse_tuple_values(values_part) {
+                            param_sets.push(values);
+                        }
+                    } else {
+                        // Parse the complete item normally
+                        if let Some(values) = parse_param_item(&current_item) {
+                            param_sets.push(values);
+                        }
+                    }
+                    current_item.clear();
+                }
+            }
+            _ => {
+                current_item.push(ch);
+            }
+        }
+    }
+
+    // Handle last item
+    if !current_item.trim().is_empty() {
+        let trimmed = current_item.trim();
+        if trimmed.starts_with("pytest.param(") && trimmed.ends_with(')') {
+            // Extract the values from pytest.param()
+            let param_content = &trimmed[13..trimmed.len() - 1];
+
+            // Find where the actual params end (before marks= or id=)
+            let mut param_end = param_content.len();
+            if let Some(marks_pos) = param_content.find(", marks=") {
+                param_end = marks_pos;
+            }
+            if let Some(id_pos) = param_content.find(", id=") {
+                param_end = param_end.min(id_pos);
+            }
+
+            let values_part = &param_content[..param_end];
+            if let Some(values) = parse_tuple_values(values_part) {
+                param_sets.push(values);
+            }
+        } else {
+            // Parse the complete item normally
+            if let Some(values) = parse_param_item(&current_item) {
+                param_sets.push(values);
+            }
+        }
+    }
+
+    if param_sets.is_empty() {
+        None
+    } else {
+        Some(param_sets)
+    }
+}
+
+/// Parse a single parameter item (which could be a tuple or a single value)
+fn parse_param_item(item_str: &str) -> Option<Vec<Value>> {
+    let trimmed = item_str.trim();
+
+    // Check if it's a tuple
+    if trimmed.starts_with('(') && trimmed.ends_with(')') {
+        // Parse as tuple
+        let inner = &trimmed[1..trimmed.len() - 1];
+        parse_tuple_values(inner)
+    } else {
+        // Parse as single value
+        parse_single_value(trimmed).map(|v| vec![v])
+    }
+}
+
+/// Parse values from a tuple string
+fn parse_tuple_values(tuple_str: &str) -> Option<Vec<Value>> {
+    let mut values = Vec::new();
+    let mut current_value = String::new();
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut in_string = false;
+    let mut string_char = ' ';
+
+    for ch in tuple_str.chars() {
         match ch {
             '"' | '\'' if !in_string => {
                 in_string = true;
@@ -107,34 +239,27 @@ fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
                 current_value.push(ch);
             }
             '(' if !in_string => {
-                if paren_depth == 0 {
-                    in_tuple = true;
-                } else {
-                    current_value.push(ch);
-                }
                 paren_depth += 1;
+                current_value.push(ch);
             }
             ')' if !in_string => {
                 paren_depth -= 1;
-                if paren_depth == 0 && in_tuple {
-                    in_tuple = false;
-                    // Parse the accumulated values
-                    if let Some(values) = parse_tuple_values(&current_value) {
-                        param_sets.push(values);
-                    }
-                    current_value.clear();
-                } else {
-                    current_value.push(ch);
-                }
+                current_value.push(ch);
             }
-            ',' if !in_string && paren_depth == 0 => {
-                if !current_value.trim().is_empty() {
-                    // Single value, not in a tuple
-                    if let Some(value) = parse_single_value(&current_value) {
-                        param_sets.push(vec![value]);
-                    }
-                    current_value.clear();
+            '[' if !in_string => {
+                bracket_depth += 1;
+                current_value.push(ch);
+            }
+            ']' if !in_string => {
+                bracket_depth -= 1;
+                current_value.push(ch);
+            }
+            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 => {
+                // Found a separator at the top level
+                if let Some(value) = parse_single_value(current_value.trim()) {
+                    values.push(value);
                 }
+                current_value.clear();
             }
             _ => {
                 current_value.push(ch);
@@ -142,26 +267,12 @@ fn parse_param_values(values_str: &str) -> Option<Vec<Vec<Value>>> {
         }
     }
 
-    // Handle last value
+    // Don't forget the last value
     if !current_value.trim().is_empty() {
-        if let Some(value) = parse_single_value(&current_value) {
-            param_sets.push(vec![value]);
+        if let Some(value) = parse_single_value(current_value.trim()) {
+            values.push(value);
         }
     }
-
-    if param_sets.is_empty() {
-        None
-    } else {
-        Some(param_sets)
-    }
-}
-
-/// Parse values from a tuple string
-fn parse_tuple_values(tuple_str: &str) -> Option<Vec<Value>> {
-    let values: Vec<Value> = tuple_str
-        .split(',')
-        .filter_map(|s| parse_single_value(s.trim()))
-        .collect();
 
     if values.is_empty() {
         None
@@ -212,13 +323,15 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
 /// Expand a test function with parametrize decorators into multiple test items
 pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Result<Vec<TestItem>> {
     let mut expanded_tests = Vec::new();
-    let mut param_info: Vec<(Vec<String>, Vec<Vec<Value>>)> = Vec::new();
+    let mut param_info: Vec<(Vec<String>, Vec<Vec<Value>>, Option<Vec<String>>)> = Vec::new();
 
     // Collect all parametrize decorators
     for decorator in decorators {
         if decorator.contains("parametrize") {
-            if let Some(info) = parse_parametrize_decorator(decorator) {
-                param_info.push(info);
+            if let Some((names, values)) = parse_parametrize_decorator(decorator) {
+                // Extract custom IDs if present
+                let ids = extract_ids_from_decorator(decorator);
+                param_info.push((names, values, ids));
             }
         }
     }
@@ -231,11 +344,24 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
     // Generate test cases
     let test_cases = generate_test_cases(&param_info);
 
-    for case in test_cases.iter() {
+    for (idx, case) in test_cases.iter().enumerate() {
         let mut expanded_test = test.clone();
 
         // Create unique ID for this test case
-        let param_id = format_param_id(&case.params);
+        // Check if we have custom IDs for this test
+        let param_id = if param_info.len() == 1 && param_info[0].2.is_some() {
+            // Use custom ID if available
+            param_info[0]
+                .2
+                .as_ref()
+                .unwrap()
+                .get(idx)
+                .cloned()
+                .unwrap_or_else(|| format_param_id(&case.params))
+        } else {
+            format_param_id(&case.params)
+        };
+
         expanded_test.id = format!("{}[{}]", test.id, param_id);
         expanded_test.name = format!("{}[{}]", test.function_name, param_id);
 
@@ -252,19 +378,47 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
     Ok(expanded_tests)
 }
 
+/// Extract custom IDs from a parametrize decorator
+fn extract_ids_from_decorator(decorator: &str) -> Option<Vec<String>> {
+    // Look for ids parameter
+    if let Some(ids_start) = decorator.find("ids=") {
+        let ids_part = &decorator[ids_start + 4..];
+
+        // Find the opening bracket
+        if let Some(bracket_start) = ids_part.find('[') {
+            // Find the closing bracket
+            if let Some(bracket_end) = ids_part.find(']') {
+                let ids_content = &ids_part[bracket_start + 1..bracket_end];
+
+                // Parse the IDs
+                let ids: Vec<String> = ids_content
+                    .split(',')
+                    .map(|s| s.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .collect();
+
+                return Some(ids);
+            }
+        }
+    }
+
+    None
+}
+
 #[derive(Debug)]
 struct TestCase {
     params: HashMap<String, Value>,
 }
 
 /// Generate all test cases from multiple parametrize decorators
-fn generate_test_cases(param_info: &[(Vec<String>, Vec<Vec<Value>>)]) -> Vec<TestCase> {
+fn generate_test_cases(
+    param_info: &[(Vec<String>, Vec<Vec<Value>>, Option<Vec<String>>)],
+) -> Vec<TestCase> {
     if param_info.is_empty() {
         return vec![];
     }
 
     // Start with the first parametrize decorator
-    let (first_names, first_values) = &param_info[0];
+    let (first_names, first_values, _) = &param_info[0];
     let mut cases: Vec<TestCase> = first_values
         .iter()
         .map(|values| {
@@ -279,7 +433,7 @@ fn generate_test_cases(param_info: &[(Vec<String>, Vec<Vec<Value>>)]) -> Vec<Tes
         .collect();
 
     // Apply remaining parametrize decorators (cartesian product)
-    for (names, value_sets) in param_info.iter().skip(1) {
+    for (names, value_sets, _) in param_info.iter().skip(1) {
         let mut new_cases = Vec::new();
 
         for existing_case in &cases {
