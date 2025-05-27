@@ -160,6 +160,7 @@ mod tests {
             class_name: None,
             decorators: vec![],
             fixture_deps: vec![],
+            is_xfail: false,
         }
     }
 
