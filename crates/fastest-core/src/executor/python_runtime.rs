@@ -17,11 +17,10 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::TestResult;
 use crate::discovery::TestItem;
-use crate::error::Error;
 use crate::fixtures::{Fixture, FixtureManager, FixtureScope};
 use crate::utils::PYTHON_CMD;
 
@@ -895,10 +894,10 @@ impl PythonRuntime {
     fn setup_batch_fixtures(
         &self,
         worker: &EnhancedPythonWorker,
-        fixture_names: &[String],
+        _fixture_names: &[String],
     ) -> Result<()> {
         let fixture_manager = self.fixture_manager.lock();
-        let mut fixtures_to_setup = Vec::new();
+        let fixtures_to_setup = Vec::new();
 
         // Note: This would need to access fixtures through a public method
         // For now, we'll skip the fixture setup in this implementation

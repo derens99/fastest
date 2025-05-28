@@ -11,7 +11,6 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use super::{Fixture, FixtureScope};
@@ -245,7 +244,7 @@ impl FixtureExecutor {
     /// Create a new fixture instance
     fn create_fixture_instance(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
         // Generate fixture execution code
-        let execution_code = self.generate_fixture_execution_code(fixture)?;
+        let _execution_code = self.generate_fixture_execution_code(fixture)?;
 
         // For now, create a placeholder value
         // In the full implementation, this would execute Python code via the runtime

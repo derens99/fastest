@@ -11,7 +11,6 @@ pub mod registry;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 

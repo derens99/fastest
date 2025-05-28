@@ -4,10 +4,9 @@
 
 use anyhow::Result;
 use serde_json::json;
-use std::collections::HashMap;
 
 use super::Plugin;
-use crate::plugin::hooks::{HookData, HookRegistry, HookResult};
+use crate::plugin::hooks::{HookRegistry, HookResult};
 use crate::register_plugin;
 
 /// Markers plugin for pytest compatibility
@@ -20,7 +19,7 @@ impl Plugin for MarkersPlugin {
 
     fn register_hooks(&self, registry: &mut HookRegistry) -> Result<()> {
         // Register marker processing hooks
-        registry.add_hook("pytest_configure", |data| {
+        registry.add_hook("pytest_configure", |_data| {
             // Initialize marker configuration
             Ok(HookResult::Value(json!({
                 "markers_configured": true,
@@ -35,7 +34,7 @@ impl Plugin for MarkersPlugin {
                     let processed_items: Vec<_> = items_array
                         .iter()
                         .map(|item| {
-                            let mut modified_item = item.clone();
+                            let modified_item = item.clone();
                             // Add marker processing logic here
                             modified_item
                         })
@@ -109,7 +108,7 @@ impl Plugin for CapturePlugin {
     }
 
     fn register_hooks(&self, registry: &mut HookRegistry) -> Result<()> {
-        registry.add_hook("pytest_runtest_setup", |data| {
+        registry.add_hook("pytest_runtest_setup", |_data| {
             // Setup capture for test
             Ok(HookResult::Value(json!({
                 "capture_setup": true,
@@ -118,7 +117,7 @@ impl Plugin for CapturePlugin {
             })))
         })?;
 
-        registry.add_hook("pytest_runtest_teardown", |data| {
+        registry.add_hook("pytest_runtest_teardown", |_data| {
             // Cleanup capture after test
             Ok(HookResult::Value(json!({
                 "capture_cleanup": true
@@ -204,7 +203,7 @@ fn expand_parametrized_item(item: &serde_json::Value) -> Vec<serde_json::Value> 
             if marker.get("name").and_then(|n| n.as_str()) == Some("parametrize") {
                 if let Some(args) = marker.get("args").and_then(|a| a.as_array()) {
                     if args.len() >= 2 {
-                        let param_names = &args[0];
+                        let _param_names = &args[0];
                         let param_values = &args[1];
 
                         if let Some(values_array) = param_values.as_array() {

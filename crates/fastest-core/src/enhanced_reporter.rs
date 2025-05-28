@@ -299,7 +299,7 @@ impl EnhancedReporter {
         // Traceback
         if !report.traceback.is_empty() {
             println!("\n{}", "📚 Traceback:".bright_magenta().bold());
-            for (i, line) in report.traceback.iter().enumerate() {
+            for (_i, line) in report.traceback.iter().enumerate() {
                 if line.trim().starts_with("File ") {
                     println!("  {}", line.bright_blue());
                 } else if line.trim().starts_with("    ") {

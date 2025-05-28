@@ -194,7 +194,7 @@ impl CaptureManager {
         let stderr = self.read_output(&mut capture.stderr_reader)?;
 
         // Wait for process to complete
-        let exit_status = capture
+        let _exit_status = capture
             .python_process
             .wait()
             .map_err(|e| anyhow!("Failed to wait for test process: {}", e))?;
@@ -506,7 +506,7 @@ print("FASTEST_CAPTURE_END")
     fn parse_captured_output(
         &self,
         stdout: &str,
-        stderr: &str,
+        _stderr: &str,
     ) -> Result<(String, Vec<String>, Vec<LogEntry>, Option<ExceptionInfo>)> {
         // Look for our JSON output markers
         if let Some(start) = stdout.find("FASTEST_CAPTURE_START") {

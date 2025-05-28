@@ -3,12 +3,9 @@
 //! Fast, minimal hook system compatible with pytest using external libraries
 
 use anyhow::Result;
-use async_trait::async_trait;
 use dashmap::DashMap;
 use linkme::distributed_slice;
-use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::time::{timeout, Duration};

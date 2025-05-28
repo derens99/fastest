@@ -359,7 +359,7 @@ impl AsyncExecutionContext {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    fn get_execution_info(&self, total_time: Duration) -> AsyncExecutionInfo {
+    fn get_execution_info(&self, _total_time: Duration) -> AsyncExecutionInfo {
         AsyncExecutionInfo {
             is_async: true,
             awaited_operations: self

@@ -2,17 +2,15 @@
 //!
 //! Fast, minimal conftest.py handling using external libraries for performance
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use dashmap::DashMap;
 use ignore::WalkBuilder;
-use once_cell::sync::Lazy;
-use parking_lot::RwLock;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use super::{Plugin, PluginConfig};
+use super::Plugin;
 use crate::plugin::hooks::{HookData, HookRegistry, HookResult};
 
 /// Fast conftest.py loader using ignore crate for performance
@@ -251,9 +249,9 @@ impl Plugin for ConftestPluginWrapper {
             let hook_name_clone = hook_name.clone();
             let file_path_clone = file_path.clone();
 
-            registry.add_hook(&hook_name, move |data: &HookData| -> Result<HookResult> {
+            registry.add_hook(&hook_name, move |_data: &HookData| -> Result<HookResult> {
                 // Execute the Python hook function
-                Python::with_gil(|py| -> Result<HookResult> {
+                Python::with_gil(|_py| -> Result<HookResult> {
                     // This is a simplified implementation
                     // In practice, we'd need to call the actual Python function
                     Ok(HookResult::Value(serde_json::json!({

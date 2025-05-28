@@ -211,10 +211,8 @@ mod tests {
         // Note: No builtin hooks are currently registered in BUILTIN_HOOKS
         // This assertion would fail until actual hooks are implemented
         // assert!(stats.registered_hooks > 0, "No hooks were registered during initialization");
-        assert!(
-            stats.registered_hooks >= 0,
-            "Hook count should be non-negative"
-        );
+        // Hook count is always non-negative (usize)
+        assert!(stats.registered_hooks == 0, "Expected no hooks registered initially");
     }
 
     #[tokio::test]
