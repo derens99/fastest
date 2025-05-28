@@ -9,6 +9,7 @@ pub struct TestFunction {
     pub is_async: bool,
     pub class_name: Option<String>,
     pub decorators: Vec<String>,
+    pub parameters: Vec<String>,
 }
 
 pub struct RegexParser;
@@ -116,6 +117,7 @@ impl RegexParser {
                             is_async,
                             class_name: current_class.clone(),
                             decorators: pending_decorators.clone(),
+                            parameters: Vec::new(),
                         });
                     }
                 }

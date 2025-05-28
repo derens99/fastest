@@ -87,6 +87,7 @@ impl AstParser {
                             is_async: is_async || self.has_async_decorator(&decorators),
                             class_name: current_class.map(String::from),
                             decorators,
+                            parameters: Vec::new(),
                         });
                     }
                 }
@@ -116,6 +117,7 @@ impl AstParser {
                                     is_async: is_async || self.has_async_decorator(&decorators),
                                     class_name: current_class.map(String::from),
                                     decorators,
+                                    parameters: Vec::new(),
                                 });
                             }
                         }
@@ -268,6 +270,7 @@ impl AstParser {
                             is_async: is_async || self.has_async_decorator(&decorators),
                             class_name: current_class.map(String::from),
                             decorators,
+                            parameters: Vec::new(),
                         });
                     }
                 }
@@ -315,6 +318,7 @@ impl AstParser {
                                     is_async: is_async || self.has_async_decorator(&decorators),
                                     class_name: current_class.map(String::from),
                                     decorators,
+                                    parameters: Vec::new(),
                                 });
                             }
                         }

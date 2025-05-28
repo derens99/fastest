@@ -2,6 +2,7 @@ use crate::discovery::TestItem;
 use crate::error::Result;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use rustpython_parser::ast;
 
 /// Represents a parametrized test case
 #[derive(Debug, Clone)]
@@ -17,6 +18,241 @@ pub struct ParamSet {
     pub values: Vec<Value>, // Parameter values
     pub marks: Vec<String>, // Additional marks for this param set (e.g. "xfail")
     pub is_xfail: bool,     // Whether this specific parameter set is expected to fail
+}
+
+/// Parse parametrize decorator using rustpython AST
+pub fn parse_parametrize_decorator_ast(decorator_expr: &ast::Expr) -> Option<(Vec<String>, Vec<ParamSet>)> {
+    // Check if this is a parametrize call
+    if let ast::Expr::Call(call) = decorator_expr {
+        let func_name = expr_to_string(&call.func);
+        if !func_name.contains("parametrize") {
+            return None;
+        }
+
+        // Extract parameter names (first argument)
+        let param_names: Vec<String> = if let Some(ast::Expr::Constant(c)) = call.args.get(0) {
+            if let ast::Constant::Str(s) = &c.value {
+                s.split(',').map(|s| s.trim().to_string()).collect()
+            } else {
+                return None;
+            }
+        } else {
+            return None;
+        };
+
+        // Extract parameter values (second argument)
+        let param_sets = if let Some(ast::Expr::List(list)) = call.args.get(1) {
+            parse_param_list(&list.elts, &param_names, &call.keywords)
+        } else {
+            return None;
+        };
+
+        Some((param_names, param_sets))
+    } else {
+        None
+    }
+}
+
+fn parse_param_list(elts: &[ast::Expr], param_names: &[String], keywords: &[ast::Keyword]) -> Vec<ParamSet> {
+    let mut param_sets = Vec::new();
+    
+    // Check for ids= keyword
+    let ids = keywords.iter().find_map(|kw| {
+        if kw.arg.as_deref() == Some("ids") {
+            if let ast::Expr::List(list) = &kw.value {
+                Some(list.elts.iter().filter_map(|e| {
+                    if let ast::Expr::Constant(c) = e {
+                        if let ast::Constant::Str(s) = &c.value {
+                            return Some(s.clone());
+                        }
+                    }
+                    None
+                }).collect::<Vec<_>>())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    for (idx, elt) in elts.iter().enumerate() {
+        if let ast::Expr::Call(call) = elt {
+            // Check if it's pytest.param()
+            let func_name = expr_to_string(&call.func);
+            if func_name.contains("param") {
+                let param_set = parse_pytest_param(call, param_names.len());
+                if let Some(mut ps) = param_set {
+                    // Apply overall id if no specific id
+                    if ps.id.is_none() {
+                        if let Some(ref id_list) = ids {
+                            if let Some(id) = id_list.get(idx) {
+                                ps.id = Some(id.clone());
+                            }
+                        }
+                    }
+                    param_sets.push(ps);
+                }
+            } else {
+                // Regular tuple/list
+                if let Some(ps) = parse_value_as_param_set(elt, param_names.len()) {
+                    param_sets.push(ps);
+                }
+            }
+        } else {
+            // Regular value or tuple
+            if let Some(mut ps) = parse_value_as_param_set(elt, param_names.len()) {
+                // Apply overall id
+                if let Some(ref id_list) = ids {
+                    if let Some(id) = id_list.get(idx) {
+                        ps.id = Some(id.clone());
+                    }
+                }
+                param_sets.push(ps);
+            }
+        }
+    }
+
+    param_sets
+}
+
+fn parse_pytest_param(call: &ast::ExprCall, expected_params: usize) -> Option<ParamSet> {
+    let mut values = Vec::new();
+    let mut id = None;
+    let mut marks = Vec::new();
+    let mut is_xfail = false;
+
+    // Parse positional arguments as parameter values
+    for (i, arg) in call.args.iter().enumerate() {
+        if i < expected_params {
+            values.push(ast_expr_to_json_value(arg));
+        }
+    }
+
+    // Parse keyword arguments
+    for kw in &call.keywords {
+        match kw.arg.as_deref() {
+            Some("id") => {
+                if let ast::Expr::Constant(c) = &kw.value {
+                    if let ast::Constant::Str(s) = &c.value {
+                        id = Some(s.clone());
+                    }
+                }
+            }
+            Some("marks") => {
+                if let ast::Expr::List(list) = &kw.value {
+                    for mark_expr in &list.elts {
+                        let mark_str = expr_to_string(mark_expr);
+                        if mark_str.contains("xfail") {
+                            is_xfail = true;
+                            marks.push("xfail".to_string());
+                        }
+                    }
+                } else {
+                    let mark_str = expr_to_string(&kw.value);
+                    if mark_str.contains("xfail") {
+                        is_xfail = true;
+                        marks.push("xfail".to_string());
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if values.len() == expected_params {
+        Some(ParamSet { id, values, marks, is_xfail })
+    } else {
+        None
+    }
+}
+
+fn parse_value_as_param_set(expr: &ast::Expr, expected_params: usize) -> Option<ParamSet> {
+    let values = if expected_params == 1 {
+        vec![ast_expr_to_json_value(expr)]
+    } else if let ast::Expr::Tuple(tuple) = expr {
+        tuple.elts.iter().map(ast_expr_to_json_value).collect()
+    } else {
+        return None;
+    };
+
+    if values.len() == expected_params {
+        Some(ParamSet {
+            id: None,
+            values,
+            marks: Vec::new(),
+            is_xfail: false,
+        })
+    } else {
+        None
+    }
+}
+
+fn ast_expr_to_json_value(expr: &ast::Expr) -> Value {
+    match expr {
+        ast::Expr::Constant(c) => match &c.value {
+            ast::Constant::Str(s) => Value::String(s.clone()),
+            ast::Constant::Int(i) => {
+                // Convert BigInt to i64 if possible
+                if let Ok(num) = i.to_string().parse::<i64>() {
+                    Value::Number(serde_json::Number::from(num))
+                } else {
+                    // Fallback to string representation for very large numbers
+                    Value::String(i.to_string())
+                }
+            }
+            ast::Constant::Float(f) => {
+                serde_json::Number::from_f64(*f).map(Value::Number).unwrap_or(Value::Null)
+            }
+            ast::Constant::Bool(b) => Value::Bool(*b),
+            ast::Constant::None => Value::Null,
+            _ => Value::Null,
+        },
+        ast::Expr::List(list) => {
+            Value::Array(list.elts.iter().map(ast_expr_to_json_value).collect())
+        }
+        ast::Expr::Tuple(tuple) => {
+            Value::Array(tuple.elts.iter().map(ast_expr_to_json_value).collect())
+        }
+        ast::Expr::UnaryOp(unop) => {
+            if let ast::UnaryOp::USub = unop.op {
+                if let ast::Expr::Constant(c) = unop.operand.as_ref() {
+                    match &c.value {
+                        ast::Constant::Int(i) => {
+                            // Convert negative BigInt to i64 if possible
+                            if let Ok(num) = format!("-{}", i).parse::<i64>() {
+                                Value::Number(serde_json::Number::from(num))
+                            } else {
+                                Value::String(format!("-{}", i))
+                            }
+                        }
+                        ast::Constant::Float(f) => {
+                            serde_json::Number::from_f64(-f).map(Value::Number).unwrap_or(Value::Null)
+                        }
+                        _ => Value::Null,
+                    }
+                } else {
+                    Value::Null
+                }
+            } else {
+                Value::Null
+            }
+        }
+        _ => Value::Null,
+    }
+}
+
+fn expr_to_string(expr: &ast::Expr) -> String {
+    match expr {
+        ast::Expr::Name(name) => name.id.to_string(),
+        ast::Expr::Attribute(attr) => {
+            format!("{}.{}", expr_to_string(&attr.value), attr.attr)
+        }
+        ast::Expr::Call(call) => {
+            format!("{}(...)", expr_to_string(&call.func))
+        }
+        _ => "...".to_string(),
+    }
 }
 
 /// Parse parametrize decorator and extract parameter information
@@ -55,6 +291,7 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
         .trim_matches('\'');
     let mut values_and_ids_str = content_in_paren[first_comma_pos + 1..].trim();
 
+
     let param_names: Vec<String> = param_names_str
         .split(',')
         .map(|s| s.trim().to_string())
@@ -77,12 +314,21 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
     }
 
     let values_list_str = values_and_ids_str.trim();
+    // Handle trailing comma after the list
+    let values_list_str = if values_list_str.ends_with("],") || values_list_str.ends_with("] ,") {
+        values_list_str.trim_end_matches(',').trim()
+    } else {
+        values_list_str
+    };
+    
     if !values_list_str.starts_with('[') || !values_list_str.ends_with(']') {
         return None;
     }
     let values_list_content = &values_list_str[1..values_list_str.len() - 1];
 
+
     let item_strings = split_param_list_into_item_strings(values_list_content)?;
+    
 
     let mut parsed_param_sets = Vec::new();
     for (idx, item_str) in item_strings.iter().enumerate() {
@@ -102,10 +348,12 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 }
 
 fn split_param_list_into_item_strings(list_content_str: &str) -> Option<Vec<String>> {
+    
     let mut items = Vec::new();
     let mut current_item_str = String::new();
     let mut paren_depth = 0;
     let mut bracket_depth = 0;
+    let mut brace_depth = 0;
     let mut in_string = false;
     let mut string_char = ' ';
 
@@ -136,16 +384,24 @@ fn split_param_list_into_item_strings(list_content_str: &str) -> Option<Vec<Stri
                 bracket_depth -= 1;
                 current_item_str.push(ch);
             }
-            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 => {
-                let trimmed = current_item_str.trim();
-                // Strip inline comments
-                let cleaned = if trimmed.contains('#') && !in_string {
-                    strip_inline_comment(trimmed)
+            '{' if !in_string => {
+                brace_depth += 1;
+                current_item_str.push(ch);
+            }
+            '}' if !in_string => {
+                brace_depth -= 1;
+                current_item_str.push(ch);
+            }
+            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                // Process the current value, stripping any inline comment
+                let part_to_parse = current_item_str.trim();
+                let cleaned_part = if !in_string && part_to_parse.contains('#') {
+                    strip_inline_comment(part_to_parse)
                 } else {
-                    trimmed.to_string()
+                    part_to_parse.to_string()
                 };
-                if !cleaned.is_empty() {
-                    items.push(cleaned);
+                if !cleaned_part.is_empty() {
+                    items.push(cleaned_part);
                 }
                 current_item_str.clear();
             }
@@ -165,6 +421,7 @@ fn split_param_list_into_item_strings(list_content_str: &str) -> Option<Vec<Stri
             items.push(cleaned);
         }
     }
+    
     Some(items)
 }
 
@@ -215,6 +472,7 @@ fn strip_inline_comment(s: &str) -> String {
 }
 
 fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<ParamSet> {
+    
     let num_params = param_names.len();
     let trimmed_item = item_str.trim();
 
@@ -423,10 +681,12 @@ fn extract_pytest_param_marks(marks_str: &str) -> (Vec<String>, bool) {
 
 // Renamed from parse_tuple_values for clarity
 fn parse_comma_separated_values(cs_str: &str) -> Option<Vec<Value>> {
+    
     let mut values = Vec::new();
     let mut current_value_str = String::new();
     let mut paren_depth = 0;
     let mut bracket_depth = 0;
+    let mut brace_depth = 0;
     let mut in_string = false;
     let mut string_char = ' ';
 
@@ -457,7 +717,15 @@ fn parse_comma_separated_values(cs_str: &str) -> Option<Vec<Value>> {
                 bracket_depth -= 1;
                 current_value_str.push(ch);
             }
-            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 => {
+            '{' if !in_string => {
+                brace_depth += 1;
+                current_value_str.push(ch);
+            }
+            '}' if !in_string => {
+                brace_depth -= 1;
+                current_value_str.push(ch);
+            }
+            ',' if !in_string && paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
                 // Process the current value, stripping any inline comment
                 let part_to_parse = current_value_str.trim();
                 let cleaned_part = if !in_string && part_to_parse.contains('#') {
@@ -567,6 +835,7 @@ fn parse_comma_separated_values(cs_str: &str) -> Option<Vec<Value>> {
 }
 
 fn parse_single_value(value_str: &str) -> Option<Value> {
+    
     let trimmed = value_str.trim();
     if trimmed.is_empty() {
         return None;
@@ -602,6 +871,97 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
         return Some(Value::Array(elements));
     }
 
+    // Handle dictionaries
+    if trimmed.starts_with('{') && trimmed.ends_with('}') {
+        let inner_content = &trimmed[1..trimmed.len() - 1];
+        if inner_content.trim().is_empty() {
+            // Empty dict
+            return Some(Value::Object(serde_json::Map::new()));
+        }
+        
+        
+        // Parse key-value pairs
+        let mut map = serde_json::Map::new();
+        
+        // Split by comma but respect nesting
+        let mut current_pair = String::new();
+        let mut depth = 0;
+        let mut in_string = false;
+        let mut string_char = ' ';
+        
+        for ch in inner_content.chars() {
+            match ch {
+                '\'' | '"' => {
+                    if in_string && ch == string_char {
+                        in_string = false;
+                    } else if !in_string {
+                        in_string = true;
+                        string_char = ch;
+                    }
+                    current_pair.push(ch);
+                }
+                '{' | '[' | '(' if !in_string => {
+                    depth += 1;
+                    current_pair.push(ch);
+                }
+                '}' | ']' | ')' if !in_string => {
+                    depth -= 1;
+                    current_pair.push(ch);
+                }
+                ',' if !in_string && depth == 0 => {
+                    // Process the current pair
+                    let pair_str = current_pair.trim();
+                    if let Some(colon_pos) = pair_str.find(':') {
+                        let key_part = pair_str[..colon_pos].trim();
+                        let value_part = pair_str[colon_pos + 1..].trim();
+                        
+                        // Parse the key (remove quotes if present)
+                        let key = if (key_part.starts_with('"') && key_part.ends_with('"'))
+                            || (key_part.starts_with('\'') && key_part.ends_with('\''))
+                        {
+                            key_part[1..key_part.len() - 1].to_string()
+                        } else {
+                            key_part.to_string()
+                        };
+                        
+                        // Parse the value
+                        if let Some(value) = parse_single_value(value_part) {
+                            map.insert(key, value);
+                        }
+                    }
+                    current_pair.clear();
+                }
+                _ => current_pair.push(ch),
+            }
+        }
+        
+        // Process the last pair
+        let pair_str = current_pair.trim();
+        if !pair_str.is_empty() {
+            if let Some(colon_pos) = pair_str.find(':') {
+                let key_part = pair_str[..colon_pos].trim();
+                let value_part = pair_str[colon_pos + 1..].trim();
+                
+                // Parse the key (remove quotes if present)
+                let key = if (key_part.starts_with('"') && key_part.ends_with('"'))
+                    || (key_part.starts_with('\'') && key_part.ends_with('\''))
+                {
+                    key_part[1..key_part.len() - 1].to_string()
+                } else {
+                    key_part.to_string()
+                };
+                
+                // Parse the value
+                if let Some(value) = parse_single_value(value_part) {
+                    map.insert(key, value);
+                }
+            }
+        }
+        
+        
+        return Some(Value::Object(map));
+    }
+
     if let Ok(num) = trimmed.parse::<i64>() {
         return Some(Value::Number(serde_json::Number::from(num)));
     }
@@ -635,6 +995,7 @@ fn extract_ids_from_list_str(ids_list_str: &str) -> Option<Vec<String>> {
 
 /// Expand a test function with parametrize decorators into multiple test items
 pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Result<Vec<TestItem>> {
+    
     let mut expanded_tests = Vec::new();
     let mut param_info_list: Vec<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> = Vec::new();
 
@@ -651,6 +1012,7 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
                     names, param_sets,
                     None, /* TODO: Revisit overall_ids if needed distinctly here */
                 ));
+            } else {
             }
         }
     }

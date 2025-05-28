@@ -414,6 +414,7 @@ impl From<FunctionInfo> for TestFunction {
                 .iter()
                 .map(|d| d.full_text.clone())
                 .collect(),
+            parameters: func.params,
         }
     }
 }

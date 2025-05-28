@@ -356,7 +356,7 @@ impl InterpreterPool {
 
         // All interpreters busy, wait for first one
         let interpreter = &self.interpreters[start_idx];
-        let mut interp = interpreter.lock();
+        let interp = interpreter.lock();
         interp.execute_batch(command_id, tests)
     }
 }

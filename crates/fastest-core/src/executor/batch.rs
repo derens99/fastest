@@ -196,12 +196,15 @@ tests = [
 test_funcs = {{}}
 for test_spec in tests:
     try:
+        # Extract base function name (without parameter suffix)
+        base_name = test_spec['name'].split('[')[0] if '[' in test_spec['name'] else test_spec['name']
+        
         if test_spec['class_name']:
             cls = getattr(test_module, test_spec['class_name'])
             instance = cls()
-            test_funcs[test_spec['id']] = getattr(instance, test_spec['name'])
+            test_funcs[test_spec['id']] = getattr(instance, base_name)
         else:
-            test_funcs[test_spec['id']] = getattr(test_module, test_spec['name'])
+            test_funcs[test_spec['id']] = getattr(test_module, base_name)
     except AttributeError:
         pass
 
@@ -217,12 +220,15 @@ for test_spec in tests:
     
     start = time.perf_counter()
     try:
+        # Extract base function name (without parameter suffix)
+        base_name = test_spec['name'].split('[')[0] if '[' in test_spec['name'] else test_spec['name']
+        
         # Prepare and run test function
-        func_to_run = getattr(test_module, test_spec['name'])
+        func_to_run = getattr(test_module, base_name)
         if test_spec.get('class_name'):
             try:
                 class_instance = getattr(test_module, test_spec['class_name'])()
-                func_to_run = getattr(class_instance, test_spec['name'])
+                func_to_run = getattr(class_instance, base_name)
             except AttributeError:
                 # Handle cases where class might not be found or method not in class
                 # This can happen if test discovery is slightly off for complex class structures

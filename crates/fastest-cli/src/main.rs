@@ -109,6 +109,7 @@ fn get_parser_type(parser_str: &str, verbose: bool) -> ParserType {
         "ast" => ParserType::Ast,
         "regex" => ParserType::Regex,
         "tree-sitter" | "treesitter" | "ts" => ParserType::TreeSitter,
+        "rustpython" | "rp" => ParserType::RustPython,
         _ => {
             if verbose {
                 eprintln!(

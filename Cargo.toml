@@ -10,10 +10,10 @@ version = "0.1.0"
 authors = ["Fastest Contributors"]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/YOUR_USERNAME/fastest"
-homepage = "https://github.com/YOUR_USERNAME/fastest"
+repository = "https://github.com/derens99/fastest"
+homepage = "https://github.com/derens99/fastest"
 description = "A blazing fast Python test runner built with Rust"
-keywords = ["testing", "pytest", "test-runner", "python", "performance"]
+keywords = ["testing", "fastest", "pytest", "test-runner", "python", "performance"]
 categories = ["development-tools::testing", "command-line-utilities"]
 
 [workspace.dependencies]
