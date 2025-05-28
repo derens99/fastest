@@ -2,7 +2,7 @@ use crate::cache::DiscoveryCache;
 use crate::error::Result;
 use crate::fixtures::{Fixture, FixtureScope};
 use crate::parametrize::expand_parametrized_tests;
-use crate::parser::{parse_fixtures_and_tests, FixtureDefinition, ParserType, TestFunction};
+use crate::parser::{Parser, FixtureDefinition, TestFunction};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -53,26 +53,62 @@ fn is_fixture_applicable_to_test(fixture: &Fixture, test: &TestItem) -> bool {
     }
 }
 
-pub fn discover_tests(path: &Path, parser_type: ParserType) -> Result<Vec<TestItem>> {
-    let result = discover_tests_and_fixtures(path, parser_type)?;
+pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
+    let result = discover_tests_and_fixtures(path)?;
     // The autouse fixtures have already been added to tests in discover_tests_and_fixtures
     Ok(result.tests)
 }
 
 pub fn discover_tests_and_fixtures(
     path: &Path,
-    parser_type: ParserType,
 ) -> Result<DiscoveryResult> {
     let mut tests = Vec::new();
     let mut fixtures = Vec::new();
 
-    for entry in WalkDir::new(path) {
+    // Skip common virtual environment and build directories
+    let excluded_dirs = vec![
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "virtualenv",
+        ".virtualenv",
+        "__pycache__",
+        ".git",
+        ".tox",
+        "site-packages",
+        "dist",
+        "build",
+        ".eggs",
+        "*.egg-info",
+        "node_modules",
+    ];
+
+    for entry in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            // Skip excluded directories
+            if e.file_type().is_dir() {
+                let dir_name = e.file_name().to_string_lossy();
+                // Check if it's an excluded directory
+                if excluded_dirs.iter().any(|&excluded| dir_name == excluded) {
+                    return false;
+                }
+                // Also skip if the path contains site-packages anywhere
+                if e.path().to_string_lossy().contains("site-packages") {
+                    return false;
+                }
+            }
+            true
+        })
+    {
         let entry = entry?;
         let path = entry.path();
 
         if is_test_file(path) {
             let content = std::fs::read_to_string(path)?;
-            match parse_fixtures_and_tests(path, parser_type) {
+            match Parser::parse_fixtures_and_tests(path) {
                 Ok((file_fixtures, test_functions)) => {
                     // Convert fixtures
                     for fixture_def in file_fixtures {
@@ -133,22 +169,58 @@ pub fn discover_tests_and_fixtures(
     Ok(DiscoveryResult { tests, fixtures })
 }
 
-/// Discover tests using the AST parser (now uses discover_tests_and_fixtures)
+/// Discover tests using the AST parser (for backward compatibility)
 pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
-    discover_tests(path, ParserType::Ast) // Calls the main discover_tests with Ast parser
+    discover_tests(path)
 }
 
 /// Discover tests with caching support
 pub fn discover_tests_cached(
     path: &Path,
     cache: &mut DiscoveryCache,
-    parser_type: ParserType,
 ) -> Result<Vec<TestItem>> {
     let mut tests = Vec::new();
     let mut cache_hits = 0;
     let mut cache_misses = 0;
 
-    for entry in WalkDir::new(path) {
+    // Skip common virtual environment and build directories
+    let excluded_dirs = vec![
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "virtualenv",
+        ".virtualenv",
+        "__pycache__",
+        ".git",
+        ".tox",
+        "site-packages",
+        "dist",
+        "build",
+        ".eggs",
+        "*.egg-info",
+        "node_modules",
+    ];
+
+    for entry in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            // Skip excluded directories
+            if e.file_type().is_dir() {
+                let dir_name = e.file_name().to_string_lossy();
+                // Check if it's an excluded directory
+                if excluded_dirs.iter().any(|&excluded| dir_name == excluded) {
+                    return false;
+                }
+                // Also skip if the path contains site-packages anywhere
+                if e.path().to_string_lossy().contains("site-packages") {
+                    return false;
+                }
+            }
+            true
+        })
+    {
         let entry = entry?;
         let path = entry.path();
 
@@ -167,8 +239,7 @@ pub fn discover_tests_cached(
             // If full fixture discovery is needed with caching, this function needs to be refactored
             // similar to discover_tests_and_fixtures and cache DiscoveryResult or (Vec<FixtureDefinition>, Vec<TestFunction>).
             // For now, it uses the provided parser_type to parse tests.
-            match parse_fixtures_and_tests(path, parser_type) {
-                // Pass parser_type here
+            match Parser::parse_fixtures_and_tests(path) {
                 Ok((_file_fixtures, test_functions)) => {
                     // Ignoring fixtures for now in cached version
                     let mut file_tests = Vec::new();

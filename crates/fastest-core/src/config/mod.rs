@@ -58,12 +58,6 @@ pub struct FastestConfig {
     #[serde(default)]
     pub workers: Option<usize>,
 
-    #[serde(default = "default_parser")]
-    pub parser: String,
-
-    #[serde(default = "default_optimizer")]
-    pub optimizer: String,
-
     #[serde(default)]
     pub batch_size: Option<usize>,
 
@@ -77,14 +71,6 @@ pub struct FastestConfig {
     pub verbose: bool,
 }
 
-fn default_parser() -> String {
-    "ast".to_string()
-}
-
-fn default_optimizer() -> String {
-    "optimized".to_string()
-}
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -92,15 +78,15 @@ impl Default for Config {
             python_files: vec!["test_*.py".to_string(), "*_test.py".to_string()],
             python_classes: vec!["Test*".to_string()],
             python_functions: vec!["test_*".to_string()],
-            markers: vec![],
+            markers: Vec::new(),
             addopts: String::new(),
             minversion: None,
-            required_plugins: vec![],
+            required_plugins: Vec::new(),
             cache_dir: None,
             junit_family: "xunit2".to_string(),
             junit_logging: "no".to_string(),
             junit_log_passing_tests: true,
-            junit_duration_report: "call".to_string(),
+            junit_duration_report: "total".to_string(),
             junit_suite_name: "pytest".to_string(),
             fastest: FastestConfig::default(),
         }
@@ -339,12 +325,6 @@ impl Config {
                         if let Ok(n) = value.parse() {
                             config.fastest.workers = Some(n);
                         }
-                    }
-                    "fastest_parser" => {
-                        config.fastest.parser = value.to_string();
-                    }
-                    "fastest_optimizer" => {
-                        config.fastest.optimizer = value.to_string();
                     }
                     _ => {}
                 }

@@ -1,7 +1,6 @@
 use crate::discovery::{discover_tests, TestItem};
 use crate::error::Result;
 use crate::incremental::DependencyTracker;
-use crate::parser::ParserType;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -168,7 +167,6 @@ impl TestWatcher {
 /// Watch mode controller
 pub struct WatchMode {
     watcher: TestWatcher,
-    parser_type: ParserType,
     _filter: Option<String>,
     _markers: Option<String>,
 }
@@ -176,13 +174,11 @@ pub struct WatchMode {
 impl WatchMode {
     /// Create a new watch mode controller
     pub fn new(
-        parser_type: ParserType,
         filter: Option<String>,
         markers: Option<String>,
     ) -> Result<Self> {
         Ok(Self {
             watcher: TestWatcher::new()?,
-            parser_type,
             _filter: filter,
             _markers: markers,
         })
@@ -206,7 +202,7 @@ impl WatchMode {
         // Initial test discovery and run
         let mut all_tests = Vec::new();
         for path in self.watcher.watched_paths.lock().unwrap().iter() {
-            let tests = discover_tests(path, self.parser_type)?;
+            let tests = discover_tests(path)?;
             all_tests.extend(tests);
         }
 
@@ -228,7 +224,7 @@ impl WatchMode {
                 let mut updated_tests = Vec::new();
                 for file in &changed_files {
                     if TestWatcher::is_test_file(file) {
-                        if let Ok(tests) = discover_tests(file, self.parser_type) {
+                        if let Ok(tests) = discover_tests(file) {
                             updated_tests.extend(tests);
                         }
                     }

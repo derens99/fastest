@@ -22,7 +22,7 @@ pub use discovery::{
 };
 pub use error::{Error, Result};
 pub use parser::{
-    parse_fixtures_and_tests, parse_test_file, AstParser, FixtureDefinition, TestFunction,
+    Parser, FixtureDefinition, TestFunction,
 };
 
 // Re-export config types
@@ -38,7 +38,7 @@ pub use fixtures::{
 pub use markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 
 // Re-export from executor module
-pub use executor::{BatchExecutor, ParallelExecutor, ProgressReporter, TestResult};
+pub use executor::{OptimizedExecutor, SimpleExecutor, TestResult, UltraFastExecutor};
 
 // Re-export parametrize module
 pub use parametrize::{expand_parametrized_tests, parse_parametrize_decorator};
