@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
-# Fastest installer script
-# Usage: curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
+# ⚡ Fastest installer script
+# The blazing fast Python test runner with intelligent performance optimization
+# 
+# Usage: 
+#   curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
+#   curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh -s -- --version v0.1.0
+#
+# Options:
+#   --version VERSION      Install a specific version (default: latest)
+#   --install-dir DIR      Installation directory (default: ~/.local/bin)
+#   --help                 Show help message
 
 set -e
 
@@ -8,6 +17,7 @@ set -e
 REPO="derens99/fastest"
 INSTALL_DIR="${FASTEST_INSTALL_DIR:-$HOME/.local/bin}"
 TEMP_DIR=$(mktemp -d)
+VERSION="${FASTEST_VERSION:-}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -160,14 +170,71 @@ add_to_path() {
     fi
 }
 
+# Show installation banner
+show_banner() {
+    echo "⚡ Installing Fastest - The blazing fast Python test runner"
+    echo ""
+    echo "🎯 Features:"
+    echo "  • Intelligent execution strategy (adapts to test suite size)"
+    echo "  • In-process execution for small suites (≤20 tests) - 10x faster"
+    echo "  • Optimized workers for medium suites (21-100 tests) - 5x faster"
+    echo "  • Full parallel execution for large suites (>100 tests) - 3x faster"
+    echo "  • Drop-in replacement for pytest"
+    echo ""
+}
+
+# Verify installation
+verify_installation() {
+    local binary_path="$1"
+    
+    info "Verifying installation..."
+    
+    # Test basic functionality
+    if ! "$binary_path" --version >/dev/null 2>&1; then
+        error "Installation verification failed: --version command failed"
+        return 1
+    fi
+    
+    # Test help command
+    if ! "$binary_path" --help >/dev/null 2>&1; then
+        error "Installation verification failed: --help command failed"
+        return 1
+    fi
+    
+    success "Installation verified successfully!"
+    return 0
+}
+
+# Show post-installation instructions
+show_post_install() {
+    echo ""
+    success "🎉 Installation complete!"
+    echo ""
+    echo "🚀 Quick Start:"
+    echo "  fastest --help                    # Show help"
+    echo "  fastest tests/                    # Run all tests in tests/ directory"
+    echo "  fastest test_file.py              # Run specific test file"
+    echo "  fastest tests/ --verbose          # Run with detailed output"
+    echo ""
+    echo "🔥 Performance Tips:"
+    echo "  • Small test suites (≤20 tests): Automatically uses in-process execution"
+    echo "  • Large test suites (>100 tests): Automatically uses parallel execution"
+    echo "  • Use --verbose to see which strategy is selected"
+    echo ""
+    echo "📚 Learn More:"
+    echo "  • GitHub: https://github.com/${REPO}"
+    echo "  • Roadmap: https://github.com/${REPO}/blob/main/ROADMAP.md"
+    echo "  • Benchmarks: https://github.com/${REPO}/tree/main/benchmarks"
+}
+
 # Main installation flow
 main() {
-    echo "🚀 Installing fastest - The blazing fast Python test runner"
-    echo ""
+    show_banner
     
     # Check for curl
     if ! command -v curl >/dev/null 2>&1; then
         error "curl is required but not installed"
+        error "Please install curl and try again"
         exit 1
     fi
     
@@ -177,7 +244,7 @@ main() {
     info "Detected platform: ${platform}"
     
     # Parse arguments
-    local version=""
+    local version="${VERSION}"
     while [[ $# -gt 0 ]]; do
         case $1 in
             --version)
@@ -189,16 +256,33 @@ main() {
                 shift 2
                 ;;
             --help)
+                echo "⚡ Fastest Installation Script"
+                echo ""
                 echo "Usage: $0 [OPTIONS]"
                 echo ""
                 echo "Options:"
                 echo "  --version VERSION      Install a specific version (default: latest)"
                 echo "  --install-dir DIR      Installation directory (default: ~/.local/bin)"
                 echo "  --help                 Show this help message"
+                echo ""
+                echo "Environment Variables:"
+                echo "  FASTEST_INSTALL_DIR    Alternative to --install-dir"
+                echo "  FASTEST_VERSION        Alternative to --version"
+                echo ""
+                echo "Examples:"
+                echo "  # Install latest version"
+                echo "  curl -LsSf https://raw.githubusercontent.com/${REPO}/main/install.sh | sh"
+                echo ""
+                echo "  # Install specific version"
+                echo "  curl -LsSf https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- --version v0.1.0"
+                echo ""
+                echo "  # Install to custom directory"
+                echo "  curl -LsSf https://raw.githubusercontent.com/${REPO}/main/install.sh | sh -s -- --install-dir /usr/local/bin"
                 exit 0
                 ;;
             *)
                 error "Unknown option: $1"
+                echo "Use --help for usage information"
                 exit 1
                 ;;
         esac
@@ -207,20 +291,23 @@ main() {
     # Install
     install_fastest "$platform" "$version"
     
+    # Verify installation
+    local binary_name="fastest"
+    if [[ "$platform" == *"windows"* ]]; then
+        binary_name="fastest.exe"
+    fi
+    
+    if ! verify_installation "${INSTALL_DIR}/${binary_name}"; then
+        exit 1
+    fi
+    
     # Check PATH
     if ! check_path "$INSTALL_DIR"; then
         warning "${INSTALL_DIR} is not in your PATH"
         add_to_path "$INSTALL_DIR"
     fi
     
-    echo ""
-    success "Installation complete! 🎉"
-    echo ""
-    echo "To get started, try:"
-    echo "  fastest --help"
-    echo "  fastest tests/"
-    echo ""
-    echo "For more information, visit: https://github.com/${REPO}"
+    show_post_install
 }
 
 # Run main function

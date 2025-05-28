@@ -7,14 +7,24 @@ resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
-authors = ["Fastest Contributors"]
+authors = ["Fastest Team <hello@fastest.dev>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/derens99/fastest"
 homepage = "https://github.com/derens99/fastest"
-description = "A blazing fast Python test runner built with Rust"
-keywords = ["testing", "fastest", "pytest", "test-runner", "python", "performance"]
+documentation = "https://github.com/derens99/fastest/tree/main/docs"
+description = "⚡ The blazing fast Python test runner with intelligent performance optimization"
+readme = "README.md"
+keywords = ["testing", "fastest", "pytest", "test-runner", "python", "performance", "rust", "parallel"]
 categories = ["development-tools::testing", "command-line-utilities"]
+exclude = [
+    ".github/*",
+    "target/*",
+    "test_repos/*",
+    "benchmarks/results/*",
+    "*.log",
+    ".DS_Store",
+]
 
 [workspace.dependencies]
 pyo3 = "0.25"

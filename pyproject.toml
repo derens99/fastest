@@ -1,14 +1,14 @@
 [build-system]
-requires = ["setuptools>=45", "wheel", "setuptools-rust>=1.5.2"]
+requires = ["setuptools>=45", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastest-runner"
 version = "0.1.0"
-description = "A blazing fast Python test runner built with Rust"
+description = "⚡ The blazing fast Python test runner with intelligent performance optimization"
 readme = "README.md"
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Fastest Team", email = "hello@fastest.dev"}
 ]
 license = {text = "MIT"}
 classifiers = [
@@ -24,16 +24,46 @@ classifiers = [
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Testing :: Unit",
+    "Topic :: Software Development :: Quality Assurance",
+    "Environment :: Console",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
 ]
 requires-python = ">=3.8"
-keywords = ["testing", "test-runner", "pytest", "performance", "rust"]
+keywords = [
+    "testing", 
+    "test-runner", 
+    "pytest", 
+    "performance", 
+    "rust", 
+    "parallel", 
+    "fast", 
+    "python",
+    "benchmark",
+    "optimization"
+]
+dependencies = [
+    "requests>=2.32.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=6.0.0",
+    "pytest-benchmark>=3.4.0",
+    "black>=22.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/fastest"
-Documentation = "https://github.com/yourusername/fastest/tree/main/docs"
-Repository = "https://github.com/yourusername/fastest"
-Issues = "https://github.com/yourusername/fastest/issues"
-Changelog = "https://github.com/yourusername/fastest/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/derens99/fastest"
+Documentation = "https://github.com/derens99/fastest/tree/main/docs"
+Repository = "https://github.com/derens99/fastest"
+Issues = "https://github.com/derens99/fastest/issues"
+Changelog = "https://github.com/derens99/fastest/blob/main/CHANGELOG.md"
+Roadmap = "https://github.com/derens99/fastest/blob/main/ROADMAP.md"
+Benchmarks = "https://github.com/derens99/fastest/tree/main/benchmarks"
 
 [project.scripts]
 fastest = "fastest_runner:main"
