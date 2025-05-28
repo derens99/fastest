@@ -44,5 +44,30 @@ similar = "2.4"
 sha2 = "0.10"
 toml = "0.8"
 
+# Plugin system dependencies
+inventory = "0.3"         # Plugin discovery and registration
+linkme = "0.3"           # Static plugin linking
+libloading = "0.8"       # Dynamic plugin loading
+async-trait = "0.1"      # Async trait support
+sysinfo = "0.30"         # System information
+uuid = { version = "1.0", features = ["v4"] }  # UUID generation
+pyo3 = { version = "0.19", features = ["auto-initialize"] }  # Python integration
+
+# Phase 3: Advanced Features dependencies
+git2 = "0.18"                     # Git integration for incremental testing
+petgraph = "0.6"                  # Dependency graph management
+priority-queue = "2.0"            # Test prioritization
+blake3 = "1.5"                    # Fast hashing for change detection
+memmap2 = "0.9"                   # Memory-mapped file access
+flate2 = "1.0"                    # Compression for caches
+lru = "0.12"                      # LRU cache for test results
+
+# Phase 4: Developer Experience dependencies
+serde_repr = "0.1"               # Enum serialization for LSP
+# tower = "0.4"                    # Service abstractions for LSP
+# tower-lsp = "0.20"               # Language Server Protocol implementation
+# tokio-util = "0.7"               # Tokio utilities for LSP
+# ropey = "1.6"                    # Rope data structure for text editing
+
 [dev-dependencies]
 tempfile = "3.8" 

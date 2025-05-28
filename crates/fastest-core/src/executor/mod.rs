@@ -1,4 +1,6 @@
 pub mod ultra_fast;
+pub mod python_runtime;
+pub mod capture;
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -19,6 +21,8 @@ pub struct TestResult {
 }
 
 pub use ultra_fast::UltraFastExecutor;
+pub use python_runtime::{PythonRuntime, RuntimeConfig};
+pub use capture::{CaptureManager, CaptureConfig, CaptureResult, ExceptionInfo};
 
 // Legacy compatibility wrappers
 

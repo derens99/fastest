@@ -5,6 +5,8 @@ use fastest_core::{
     executor::UltraFastExecutor,
     filter_by_markers,
     Config, DiscoveryCache,
+    parse_plugin_args, PluginCompatibilityConfig,
+    parse_dev_args, DevExperienceConfig,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -72,6 +74,22 @@ struct Cli {
     /// Source directories for coverage
     #[arg(long = "cov-source")]
     coverage_source: Vec<PathBuf>,
+
+    /// Enable debugging with pdb
+    #[arg(long = "pdb")]
+    pdb: bool,
+
+    /// Enhanced error reporting
+    #[arg(long = "enhanced-errors")]
+    enhanced_errors: bool,
+
+    /// Enable mock support (pytest-mock compatibility)
+    #[arg(long = "mock")]
+    mock: bool,
+
+    /// Asyncio mode for async tests (auto, strict)
+    #[arg(long = "asyncio-mode")]
+    asyncio_mode: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -317,8 +335,59 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
     // Use the optimized executor wrapper for compatibility
     let mut executor = UltraFastExecutor::new_with_workers(num_workers, cli.verbose);
 
-    // Enable coverage if requested
+    // Configure developer experience features
+    let mut dev_config = DevExperienceConfig::default();
+    if cli.pdb {
+        dev_config.debug_enabled = true;
+    }
+    if cli.enhanced_errors {
+        dev_config.enhanced_reporting = true;
+    }
+    if dev_config.debug_enabled || dev_config.enhanced_reporting {
+        executor = executor.with_dev_experience(dev_config);
+    }
+
+    // Configure plugin compatibility
+    let mut plugin_config = PluginCompatibilityConfig::default();
+    
+    // Check for xdist (distributed testing) - workers specified means xdist
+    if cli.workers.is_some() && cli.workers.unwrap() > 1 {
+        plugin_config.xdist_enabled = true;
+        plugin_config.xdist_workers = cli.workers.unwrap();
+    }
+    
+    // Coverage support
     if cli.coverage {
+        plugin_config.coverage_enabled = true;
+        plugin_config.coverage_source = if cli.coverage_source.is_empty() {
+            vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
+        } else {
+            cli.coverage_source.clone()
+        };
+    }
+    
+    // Mock support
+    if cli.mock {
+        plugin_config.mock_enabled = true;
+    }
+    
+    // Asyncio support
+    if let Some(asyncio_mode) = &cli.asyncio_mode {
+        plugin_config.asyncio_enabled = true;
+        plugin_config.asyncio_mode = asyncio_mode.clone();
+    }
+    
+    // Check for conflicting options before moving plugin_config
+    let coverage_warning = cli.coverage && !plugin_config.coverage_enabled;
+    
+    // Enable plugin compatibility if any plugins are enabled
+    if plugin_config.xdist_enabled || plugin_config.coverage_enabled || 
+       plugin_config.mock_enabled || plugin_config.asyncio_enabled {
+        executor = executor.with_plugin_compatibility(plugin_config);
+    }
+
+    // Enable coverage if requested (legacy support for non-plugin coverage)
+    if coverage_warning {
         let source_dirs = if cli.coverage_source.is_empty() {
             vec![std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))]
         } else {

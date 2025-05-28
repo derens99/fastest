@@ -22,7 +22,7 @@ pub struct Fixture {
     pub dependencies: Vec<String>, // Other fixtures this depends on
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum FixtureScope {
     Function, // New instance for each test
     Class,    // Shared within test class
