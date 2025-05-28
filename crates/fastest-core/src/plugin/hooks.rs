@@ -116,6 +116,11 @@ impl HookRegistry {
         Ok(results)
     }
 
+    /// Get the total number of registered hooks
+    pub fn hook_count(&self) -> usize {
+        self.hooks.iter().map(|entry| entry.value().len()).sum()
+    }
+
     /// Synchronous hook call for performance-critical paths
     pub fn call_hook_sync(&self, name: &str, data: HookData) -> Result<Vec<HookResult>> {
         let hooks = match self.hooks.get(name) {

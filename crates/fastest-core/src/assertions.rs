@@ -11,11 +11,10 @@
 //! - Integration with pytest assertion introspection
 //! - Custom assertion helpers
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use colored::*;
 use serde::{Deserialize, Serialize};
 use similar::{ChangeTag, TextDiff};
-use std::collections::HashMap;
 use std::fmt::Write;
 
 /// Configuration for assertion rewriting

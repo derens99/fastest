@@ -804,10 +804,15 @@ mod tests {
     fn test_fixture_cache_key() {
         let test = TestItem {
             id: "test_module::TestClass::test_method".to_string(),
-            function_name: "test_method".to_string(),
             path: PathBuf::from("test_module.py"),
-            decorators: vec![],
+            name: "test_method".to_string(),
+            function_name: "test_method".to_string(),
             line_number: 10,
+            is_async: false,
+            class_name: Some("TestClass".to_string()),
+            decorators: vec![],
+            fixture_deps: vec![],
+            is_xfail: false,
         };
 
         let key = FixtureCacheKey::for_test("my_fixture", &test, FixtureScope::Class);

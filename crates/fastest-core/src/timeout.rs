@@ -468,12 +468,15 @@ mod tests {
 
         let test = TestItem {
             id: "test_example".to_string(),
-            module: "test_module".to_string(),
-            func: "test_example".to_string(),
-            file_path: "test_file.py".to_string(),
-            line: Some(10),
-            markers: vec![],
-            params: None,
+            path: std::path::PathBuf::from("test_file.py"),
+            name: "test_example".to_string(),
+            function_name: "test_example".to_string(),
+            line_number: 10,
+            is_async: false,
+            class_name: None,
+            decorators: vec![],
+            fixture_deps: vec![],
+            is_xfail: false,
         };
 
         // Test successful execution within timeout

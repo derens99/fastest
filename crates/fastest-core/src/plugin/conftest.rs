@@ -83,29 +83,38 @@ impl ConftestLoader {
         let content = std::fs::read_to_string(path)?;
         let mtime = std::fs::metadata(path)?.modified()?;
 
-        // Fast parsing using tree-sitter
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_python::language())
-            .unwrap();
-
-        let tree = parser
-            .parse(&content, None)
-            .ok_or_else(|| anyhow!("Failed to parse conftest.py: {}", path.display()))?;
-
         let mut fixtures = Vec::new();
         let mut hooks = Vec::new();
         let mut plugins = Vec::new();
 
-        // Walk the AST efficiently
-        let mut cursor = tree.walk();
-        self.extract_conftest_components(
-            &content,
-            &mut cursor,
-            &mut fixtures,
-            &mut hooks,
-            &mut plugins,
-        );
+        // Parse fixtures
+        let fixture_re = regex::Regex::new(r"@pytest\.fixture\s*\n\s*def\s+(\w+)").unwrap();
+        for cap in fixture_re.captures_iter(&content) {
+            if let Some(fixture_name) = cap.get(1) {
+                fixtures.push(fixture_name.as_str().to_string());
+            }
+        }
+
+        // Parse hooks
+        let hook_re = regex::Regex::new(r"def\s+pytest_(\w+)").unwrap();
+        for cap in hook_re.captures_iter(&content) {
+            if let Some(hook_name) = cap.get(1) {
+                hooks.push(format!("pytest_{}", hook_name.as_str()));
+            }
+        }
+
+        // Parse plugins
+        let plugin_re = regex::Regex::new(r"pytest_plugins\s*=\s*\[(.*?)\]").unwrap();
+        if let Some(cap) = plugin_re.captures(&content) {
+            if let Some(plugins_str) = cap.get(1) {
+                let plugin_names: Vec<&str> = plugins_str
+                    .as_str()
+                    .split(',')
+                    .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\''))
+                    .collect();
+                plugins.extend(plugin_names.into_iter().map(String::from));
+            }
+        }
 
         Ok(ConftestFile {
             path: path.to_path_buf(),
@@ -115,83 +124,6 @@ impl ConftestLoader {
             hooks,
             plugins,
         })
-    }
-
-    /// Extract fixtures, hooks, and plugins from AST
-    fn extract_conftest_components(
-        &self,
-        content: &str,
-        cursor: &mut tree_sitter::TreeCursor,
-        fixtures: &mut Vec<String>,
-        hooks: &mut Vec<String>,
-        plugins: &mut Vec<String>,
-    ) {
-        loop {
-            let node = cursor.node();
-
-            // Check for function definitions
-            if node.kind() == "function_definition" {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = &content[name_node.start_byte()..name_node.end_byte()];
-
-                    // Check for pytest decorators
-                    if let Some(decorators) = node.child_by_field_name("decorators") {
-                        let decorator_text =
-                            &content[decorators.start_byte()..decorators.end_byte()];
-
-                        if decorator_text.contains("@pytest.fixture") {
-                            fixtures.push(name.to_string());
-                        }
-
-                        if decorator_text.contains("@pytest.hookimpl")
-                            || name.starts_with("pytest_")
-                        {
-                            hooks.push(name.to_string());
-                        }
-                    } else if name.starts_with("pytest_") {
-                        hooks.push(name.to_string());
-                    }
-                }
-            }
-
-            // Check for pytest_plugins variable
-            if node.kind() == "assignment" {
-                let assignment_text = &content[node.start_byte()..node.end_byte()];
-                if assignment_text.contains("pytest_plugins") {
-                    // Extract plugin names (simplified)
-                    plugins.extend(self.extract_plugin_names(assignment_text));
-                }
-            }
-
-            // Traverse the tree
-            if cursor.goto_first_child() {
-                continue;
-            }
-
-            loop {
-                if cursor.goto_next_sibling() {
-                    break;
-                }
-                if !cursor.goto_parent() {
-                    return;
-                }
-            }
-        }
-    }
-
-    fn extract_plugin_names(&self, assignment: &str) -> Vec<String> {
-        // Simplified plugin name extraction
-        let mut plugins = Vec::new();
-
-        // Look for strings in the assignment
-        let re = regex::Regex::new(r#"["']([^"']+)["']"#).unwrap();
-        for cap in re.captures_iter(assignment) {
-            if let Some(plugin_name) = cap.get(1) {
-                plugins.push(plugin_name.as_str().to_string());
-            }
-        }
-
-        plugins
     }
 
     /// Load conftest.py files into Python runtime
@@ -376,11 +308,31 @@ pytest_plugins = ["pytest_html", "pytest_cov"]
             .unwrap();
 
         assert_eq!(conftest_files.len(), 1);
-        assert_eq!(conftest_files[0].fixtures.len(), 1);
-        assert_eq!(conftest_files[0].fixtures[0], "sample_fixture");
-        assert_eq!(conftest_files[0].hooks.len(), 1);
-        assert_eq!(conftest_files[0].hooks[0], "pytest_configure");
-        assert_eq!(conftest_files[0].plugins.len(), 2);
+
+        // Parse the conftest file content to extract fixtures and hooks
+        let content = std::fs::read_to_string(&conftest_path).unwrap();
+        let mut fixtures = Vec::new();
+        let mut hooks = Vec::new();
+        let mut plugins = Vec::new();
+
+        // Extract fixtures
+        if content.contains("@pytest.fixture") {
+            fixtures.push("sample_fixture".to_string());
+        }
+
+        // Extract hooks
+        if content.contains("pytest_configure") {
+            hooks.push("pytest_configure".to_string());
+        }
+
+        // Extract plugins
+        if content.contains("pytest_plugins") {
+            plugins.extend(vec!["pytest_html".to_string(), "pytest_cov".to_string()]);
+        }
+
+        assert_eq!(conftest_files[0].fixtures, fixtures);
+        assert_eq!(conftest_files[0].hooks, hooks);
+        assert_eq!(conftest_files[0].plugins, plugins);
     }
 
     #[test]
