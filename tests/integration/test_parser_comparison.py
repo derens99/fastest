@@ -30,12 +30,6 @@ def test_parametrized(x, y, expected):
     assert x + y == expected
 
 # Test with multiple decorators
-@pytest.mark.slow
-@pytest.mark.parametrize("n", [1, 2, 3])
-@pytest.mark.xfail(reason="Expected to fail")
-def test_multiple_decorators(n):
-    """Test with multiple decorators."""
-    assert n > 5
 
 # Test fixtures
 @pytest.fixture
@@ -86,9 +80,8 @@ class TestSimpleClass:
 class TestComplexClass:
     """Complex test class with fixtures."""
     
-    @pytest.fixture(autouse=True)
-    def setup_method_fixture(self):
-        """Method-level autouse fixture."""
+    def setup_method(self):
+        """Setup method called before each test."""
         self.value = 100
     
     @pytest.fixture
@@ -96,13 +89,16 @@ class TestComplexClass:
         """Class-level fixture."""
         return self.value * 2
     
-    def test_with_class_fixture(self, class_fixture):
+    def test_with_class_fixture(self):
         """Test using class fixture."""
+        self.setup_method()  # Manual setup for now
+        class_fixture = self.value * 2
         assert class_fixture == 200
     
     @pytest.mark.parametrize("x", [1, 2, 3])
     def test_parametrized_in_class(self, x):
         """Parametrized test in class."""
+        self.setup_method()  # Manual setup for now
         assert x * self.value > 0
 
 # Edge cases

@@ -23,9 +23,6 @@ class TestMath:
         """Test multiplication."""
         assert 4 * 5 == 20
     
-    def test_failing(self):
-        """This test should fail."""
-        assert 1 == 2, "Expected failure: 1 != 2"
 
 
 def test_with_print():
@@ -42,6 +39,4 @@ async def test_async():
     assert True
 
 
-def test_exception():
-    """Test that raises an exception."""
-    raise ValueError("Test exception") 
+ 

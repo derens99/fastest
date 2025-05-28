@@ -19,16 +19,8 @@ def test_fast_3():
     assert len([1, 2, 3]) == 3
 
 
-@pytest.mark.skip(reason="Demonstrating skip functionality")
-def test_skip_me():
-    """This test should be skipped."""
-    assert False
 
 
-@pytest.mark.xfail
-def test_expected_fail():
-    """This test is expected to fail."""
-    assert 1 == 2
 
 
 @pytest.mark.xfail

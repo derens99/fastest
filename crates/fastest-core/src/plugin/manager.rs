@@ -212,7 +212,10 @@ mod tests {
         // This assertion would fail until actual hooks are implemented
         // assert!(stats.registered_hooks > 0, "No hooks were registered during initialization");
         // Hook count is always non-negative (usize)
-        assert!(stats.registered_hooks == 0, "Expected no hooks registered initially");
+        assert!(
+            stats.registered_hooks == 0,
+            "Expected no hooks registered initially"
+        );
     }
 
     #[tokio::test]

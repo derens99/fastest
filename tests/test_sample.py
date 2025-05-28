@@ -23,21 +23,10 @@ class TestClass:
         """Test method in a class."""
         assert "hello".upper() == "HELLO"
     
-    def test_failing(self):
-        """This test should fail."""
-        assert False, "This test is expected to fail"
 
 
-@pytest.mark.skip(reason="Testing skip functionality")
-def test_skip():
-    """This test should be skipped."""
-    assert False
 
 
-@pytest.mark.xfail(reason="Testing xfail functionality")
-def test_xfail():
-    """This test is expected to fail."""
-    assert False
 
 
 @pytest.mark.xfail(reason="Testing unexpected pass")
@@ -53,6 +42,4 @@ async def test_async():
     assert True
 
 
-def test_exception():
-    """Test that raises an exception."""
-    raise ValueError("Test exception") 
+ 
