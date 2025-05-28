@@ -415,9 +415,33 @@ finally:
             }
         }
 
+        // Always generate code for test instance management (needed for class-based tests)
+        user_fixture_setup.push_str("\n# Store test instances to reuse for class fixtures\n");
+        user_fixture_setup.push_str("_test_instances = {}\n\n");
+
+        user_fixture_setup.push_str("def get_or_create_test_instance(test_class, test_id):\n");
+        user_fixture_setup.push_str("    '''Get or create test instance with autouse fixtures run'''\n");
+        user_fixture_setup.push_str("    cache_key = (test_class, test_id)\n");
+        user_fixture_setup.push_str("    if cache_key in _test_instances:\n");
+        user_fixture_setup.push_str("        return _test_instances[cache_key]\n");
+        user_fixture_setup.push_str("    \n");
+        user_fixture_setup.push_str("    instance = test_class()\n");
+        user_fixture_setup.push_str("    \n");
+        user_fixture_setup.push_str("    # Run autouse fixtures\n");
+        user_fixture_setup.push_str("    for attr_name in dir(test_class):\n");
+        user_fixture_setup.push_str("        attr = getattr(test_class, attr_name)\n");
+        user_fixture_setup.push_str("        if hasattr(attr, '_pytestfixturefunction') and hasattr(attr._pytestfixturefunction, 'autouse') and attr._pytestfixturefunction.autouse:\n");
+        user_fixture_setup.push_str("            bound_method = getattr(instance, attr_name)\n");
+        user_fixture_setup.push_str("            if hasattr(bound_method, '__wrapped__'):\n");
+        user_fixture_setup.push_str("                bound_method = bound_method.__wrapped__.__get__(instance, test_class)\n");
+        user_fixture_setup.push_str("            bound_method()\n");
+        user_fixture_setup.push_str("    \n");
+        user_fixture_setup.push_str("    _test_instances[cache_key] = instance\n");
+        user_fixture_setup.push_str("    return instance\n\n");
+
         // Generate code to execute user fixtures
         if !fixture_modules.is_empty() {
-            user_fixture_setup.push_str("\n# Find and execute user-defined fixtures\n");
+            user_fixture_setup.push_str("# Find and execute user-defined fixtures\n");
             user_fixture_setup
                 .push_str("# Track fixture execution to detect circular dependencies\n");
             user_fixture_setup.push_str("_fixture_executing = set()\n\n");
@@ -508,7 +532,17 @@ finally:
             user_fixture_setup.push_str("                for param_name in sig.parameters:\n");
             user_fixture_setup.push_str("                    if param_name == 'request':\n");
             user_fixture_setup
-                .push_str("                        # Skip special 'request' fixture for now\n");
+                .push_str("                        # Create a simple request object for parametrized fixtures\n");
+            user_fixture_setup.push_str("                        class SimpleRequest:\n");
+            user_fixture_setup.push_str("                            def __init__(self, param):\n");
+            user_fixture_setup.push_str("                                self.param = param\n");
+            user_fixture_setup.push_str("                        \n");
+            user_fixture_setup.push_str("                        # Check if this is a parametrized fixture\n");
+            user_fixture_setup.push_str("                        if hasattr(fixture_obj, 'params') or (hasattr(fixture_obj, '_pytestfixturefunction') and hasattr(fixture_obj._pytestfixturefunction, 'params')):\n");
+            user_fixture_setup.push_str("                            # For now, use the first param value\n");
+            user_fixture_setup.push_str("                            params = getattr(fixture_obj, 'params', None) or getattr(fixture_obj._pytestfixturefunction, 'params', [1])\n");
+            user_fixture_setup.push_str("                            if params:\n");
+            user_fixture_setup.push_str("                                kwargs['request'] = SimpleRequest(params[0])\n");
             user_fixture_setup.push_str("                        continue\n");
             user_fixture_setup.push_str("                    if param_name == 'self' and fixture_scope_info and fixture_scope_info[0] == 'class':\n");
             user_fixture_setup.push_str(
@@ -536,12 +570,9 @@ finally:
                 "                    if fixture_scope_info and fixture_scope_info[0] == 'class':\n",
             );
             user_fixture_setup
-                .push_str("                        # Create instance and bind method\n");
-            user_fixture_setup
-                .push_str("                        instance = fixture_scope_info[1]()\n");
-            user_fixture_setup.push_str(
-                "                        bound_method = getattr(instance, fixture_name)\n",
-            );
+                .push_str("                        # Use cached instance with autouse fixtures already run\n");
+            user_fixture_setup.push_str("                        instance = get_or_create_test_instance(fixture_scope_info[1], test_id)\n");
+            user_fixture_setup.push_str("                        bound_method = getattr(instance, fixture_name)\n");
             user_fixture_setup
                 .push_str("                        if hasattr(bound_method, '__wrapped__'):\n");
             user_fixture_setup.push_str("                            bound_method = bound_method.__wrapped__.__get__(instance, fixture_scope_info[1])\n");
@@ -684,6 +715,13 @@ finally:
             sys_path_additions.push_str(&format!("sys.path.insert(0, \"{}\")\n", escaped_dir));
         }
 
+        // Format imports with proper indentation for the with block
+        let indented_imports = imports
+            .lines()
+            .map(|line| format!("    {}", line))
+            .collect::<Vec<_>>()
+            .join("\n");
+
         format!(
             r#"
 import sys
@@ -701,8 +739,15 @@ sys.path.insert(0, os.getcwd())
 # Add test directories to Python path
 {}
 
-# Pre-import all modules
+# Pre-import all modules with output capture
+import_stdout = StringIO()
+import_stderr = StringIO()
+with redirect_stdout(import_stdout), redirect_stderr(import_stderr):
 {}
+
+# Discard any output from imports/autouse fixtures
+import_stdout.close()
+import_stderr.close()
 
 # Fixture instances with scope caching
 fixture_instances = {{}}  # Function-scoped fixtures (recreated each test)
@@ -722,9 +767,11 @@ test_map = {{
 
 # Run tests synchronously for now to avoid async complexity
 results = []
+
 for test_id, test_info in test_map.items():
     # Clear function-scoped fixtures for each test
     fixture_instances.clear()
+    _test_instances.clear()  # Clear test instances for each test
     
     stdout_buf = StringIO()
     stderr_buf = StringIO()
@@ -774,7 +821,7 @@ for test_id, test_info in test_map.items():
                 test_module = sys.modules.get(test_id.split('::')[0])
                 if test_module and hasattr(test_module, test_info['class_name']):
                     test_class = getattr(test_module, test_info['class_name'])
-                    test_instance = test_class()
+                    test_instance = get_or_create_test_instance(test_class, test_id)
                     test_method = getattr(test_instance, test_info['func'].__name__)
                     test_method(**kwargs)
                 else:
@@ -827,7 +874,7 @@ for test_id, test_info in test_map.items():
 
 print(json.dumps({{'results': results}}))
 "#,
-            sys_path_additions, imports, fixture_setup_code, user_fixture_setup, test_map
+            sys_path_additions, indented_imports, fixture_setup_code, user_fixture_setup, test_map
         )
     }
 
@@ -888,8 +935,44 @@ print(json.dumps({{'results': results}}))
             } else if self.verbose {
                 eprintln!("No results array in JSON");
             }
-        } else if self.verbose {
-            eprintln!("Failed to parse JSON from stdout");
+        } else {
+            // Try to find JSON in output (in case there's extra output)
+            if let Some(json_start) = stdout.find("{\"results\":") {
+                if let Some(json_end) = stdout[json_start..].find("\n").map(|i| i + json_start) {
+                    let json_str = &stdout[json_start..json_end];
+                    if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                        if let Some(results_array) = json_data["results"].as_array() {
+                            if self.verbose {
+                                eprintln!("Found {} results in extracted JSON", results_array.len());
+                            }
+                            let results = results_array
+                                .iter()
+                                .filter_map(|r| self.parse_test_result(r))
+                                .collect();
+                            return Ok(results);
+                        }
+                    }
+                } else {
+                    // Try without newline limitation
+                    let json_str = &stdout[json_start..];
+                    if let Ok(json_data) = serde_json::from_str::<serde_json::Value>(json_str) {
+                        if let Some(results_array) = json_data["results"].as_array() {
+                            if self.verbose {
+                                eprintln!("Found {} results in extracted JSON (no newline)", results_array.len());
+                            }
+                            let results = results_array
+                                .iter()
+                                .filter_map(|r| self.parse_test_result(r))
+                                .collect();
+                            return Ok(results);
+                        }
+                    }
+                }
+            }
+            
+            if self.verbose {
+                eprintln!("Failed to parse JSON from stdout");
+            }
         }
 
         // Fallback error
