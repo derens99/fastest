@@ -286,19 +286,34 @@ finally:
         // Ultra-minimal Python code for maximum speed
         let mut modules = std::collections::HashSet::new();
         let mut test_functions = Vec::new();
+        let mut test_dirs = std::collections::HashSet::new();
 
         for test in tests {
-            let module = test.id.split("::").next().unwrap_or("test");
-            modules.insert(module);
+            let module = test.id.split("::").next().unwrap_or("test").to_string();
+            modules.insert(module.clone());
 
-            let func_name = test.id.split("::").nth(1).unwrap_or(&test.function_name);
-            test_functions.push((module, func_name, &test.id));
+            let func_name = test.id.split("::").nth(1).unwrap_or(&test.function_name).to_string();
+            test_functions.push((module, func_name, test.id.clone()));
+            
+            // Collect test directories
+            if let Some(parent) = test.path.parent() {
+                test_dirs.insert(parent.to_string_lossy().to_string());
+            }
         }
 
         // Build minimal code with pre-allocated results
         let mut code = String::with_capacity(1024 + tests.len() * 256);
 
-        code.push_str("import sys,json,time\n");
+        code.push_str("import sys,json,time,io\n");
+        code.push_str("from contextlib import redirect_stdout,redirect_stderr\n");
+        
+        // Add test directories to sys.path
+        code.push_str("import os\n");
+        code.push_str("sys.path.insert(0,os.getcwd())\n");
+        for dir in &test_dirs {
+            let escaped_dir = dir.replace("\\", "\\\\").replace("'", "\\'");
+            code.push_str(&format!("sys.path.insert(0,'{}')\n", escaped_dir));
+        }
 
         // Import all modules at once
         for module in &modules {
@@ -312,12 +327,17 @@ finally:
         // Execute tests with minimal overhead
         for (idx, (module, func_name, test_id)) in test_functions.iter().enumerate() {
             code.push_str(&format!(
-                "s=p();try:{}.{}();r[{}]={{'id':'{}','passed':True,'duration':p()-s,'stdout':'','stderr':''}}\nexcept Exception as e:r[{}]={{'id':'{}','passed':False,'duration':p()-s,'stdout':'','stderr':'','error':str(e)}}\n",
+                "stdout_buf=io.StringIO();stderr_buf=io.StringIO()\ntry:\n    s=p()\n    with redirect_stdout(stdout_buf),redirect_stderr(stderr_buf):\n        {}.{}()\n    r[{}]={{'id':'{}','passed':True,'duration':p()-s,'stdout':stdout_buf.getvalue(),'stderr':stderr_buf.getvalue()}}\nexcept Exception as e:\n    r[{}]={{'id':'{}','passed':False,'duration':p()-s,'stdout':stdout_buf.getvalue(),'stderr':stderr_buf.getvalue(),'error':str(e)}}\n",
                 module, func_name, idx, test_id, idx, test_id
             ));
         }
 
         code.push_str("print(json.dumps({'results':r}))\n");
+        
+        if self.verbose {
+            eprintln!("Generated fast runner code:\n{}", code);
+        }
+        
         code
     }
 
