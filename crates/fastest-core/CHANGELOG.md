@@ -1,0 +1,61 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.2.0](https://github.com/derens99/fastest/releases/tag/fastest-core-v0.2.0) - 2025-05-28
+
+### Added
+
+- release workflow and self update system
+- coverage and plugins
+- parametrize added
+- install
+- big changes
+
+### Fixed
+
+- install sh ([#4](https://github.com/derens99/fastest/pull/4))
+- ptize fix
+- parametrize fixes
+- parametrized fix
+- escaping fix
+- executor fix
+- fmt
+- added stuff
+
+### Other
+
+- fix
+- fmt
+- fix
+- update
+- update
+- fix
+- fix
+- update
+- fast testing
+- updates
+- fixed
+- fix
+- tests fixed
+- fix
+- fmt
+- fixes
+- refinement
+- update
+- test
+- fix
+- fmt
+- fix
+- fix
+- fmt
+- Fix linting errors: unused imports and variables
+- format
+- use ast default regex currently bugged
+- fix
+- format
