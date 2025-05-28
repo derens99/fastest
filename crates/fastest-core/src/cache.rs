@@ -258,9 +258,13 @@ mod tests {
     fn test_cache_save_load() {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("cache.json");
+        let test_file = temp_dir.path().join("test.py");
+
+        // Create a test file
+        fs::write(&test_file, "def test_example(): pass").unwrap();
 
         let mut cache = DiscoveryCache::new();
-        cache.update(PathBuf::from("test.py"), vec![]).unwrap();
+        cache.update(test_file, vec![]).unwrap();
 
         cache.save(&cache_path).unwrap();
         let loaded = DiscoveryCache::load(&cache_path).unwrap();
@@ -273,7 +277,7 @@ mod tests {
         let mut cache = DiscoveryCache::new();
         cache.set_max_age(Duration::from_secs(1));
 
-        let mut entry = CacheEntry {
+        let entry = CacheEntry {
             tests: vec![],
             modified: SystemTime::now(),
             content_hash: "test".to_string(),

@@ -36,20 +36,20 @@ impl RustPythonParser {
         &self,
         stmt: &ast::Stmt,
         class_name: Option<&str>,
-        fixtures: &mut Vec<FixtureDefinition>,
+        _fixtures: &mut Vec<FixtureDefinition>,
         tests: &mut Vec<TestFunction>,
     ) {
         match stmt {
             ast::Stmt::FunctionDef(func_def) => {
-                self.handle_function(func_def, class_name, fixtures, tests);
+                self.handle_function(func_def, class_name, _fixtures, tests);
             }
             ast::Stmt::AsyncFunctionDef(async_func_def) => {
-                self.handle_async_function(async_func_def, class_name, fixtures, tests);
+                self.handle_async_function(async_func_def, class_name, _fixtures, tests);
             }
             ast::Stmt::ClassDef(class_def) => {
                 // Visit methods inside the class
                 for stmt in &class_def.body {
-                    self.visit_stmt(stmt, Some(&class_def.name.to_string()), fixtures, tests);
+                    self.visit_stmt(stmt, Some(&class_def.name.to_string()), _fixtures, tests);
                 }
             }
             _ => {}
@@ -60,7 +60,7 @@ impl RustPythonParser {
         &self,
         func_def: &ast::StmtFunctionDef,
         class_name: Option<&str>,
-        fixtures: &mut Vec<FixtureDefinition>,
+        _fixtures: &mut Vec<FixtureDefinition>,
         tests: &mut Vec<TestFunction>,
     ) {
         let decorators = self.extract_decorators_from_stmt(func_def);
@@ -69,7 +69,7 @@ impl RustPythonParser {
         if decorators.iter().any(|d| d.contains("fixture")) {
             let fixture = self.parse_fixture(func_def, &decorators);
             if let Some(fixture) = fixture {
-                fixtures.push(fixture);
+                _fixtures.push(fixture);
             }
         }
 
@@ -91,7 +91,7 @@ impl RustPythonParser {
         &self,
         async_func_def: &ast::StmtAsyncFunctionDef,
         class_name: Option<&str>,
-        fixtures: &mut Vec<FixtureDefinition>,
+        _fixtures: &mut Vec<FixtureDefinition>,
         tests: &mut Vec<TestFunction>,
     ) {
         let decorators = self.extract_decorators_from_async_stmt(async_func_def);
@@ -258,7 +258,7 @@ impl RustPythonParser {
                     scope = "class".to_string();
                 }
 
-                if decorator.contains("autouse=True") {
+                if decorator.contains("autouse=True") || decorator.contains("autouse=true") {
                     autouse = true;
                 }
             }
@@ -287,7 +287,7 @@ mod tests {
 def test_simple():
     assert True
 "#;
-        let (fixtures, tests) = parser.parse_content(content).unwrap();
+        let (_fixtures, tests) = parser.parse_content(content).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_simple");
         assert!(!tests[0].is_async);
