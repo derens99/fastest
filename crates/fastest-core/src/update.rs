@@ -18,7 +18,8 @@ pub struct ReleaseInfo {
     pub checksums: std::collections::HashMap<String, String>,
 }
 
-const VERSION_MANIFEST_URL: &str = "https://raw.githubusercontent.com/derens99/fastest/main/.github/version.json";
+const VERSION_MANIFEST_URL: &str =
+    "https://raw.githubusercontent.com/derens99/fastest/main/.github/version.json";
 
 pub struct UpdateChecker {
     current_version: String,
@@ -34,7 +35,7 @@ impl UpdateChecker {
     /// Check if an update is available
     pub fn check_update(&self) -> Result<Option<String>> {
         let manifest = self.fetch_version_manifest()?;
-        
+
         if self.is_newer_version(&manifest.latest, &self.current_version) {
             Ok(Some(manifest.latest))
         } else {
@@ -45,9 +46,12 @@ impl UpdateChecker {
     /// Perform the update
     pub fn update(&self, verbose: bool) -> Result<()> {
         let manifest = self.fetch_version_manifest()?;
-        
+
         if !self.is_newer_version(&manifest.latest, &self.current_version) {
-            println!("You are already running the latest version (v{})!", self.current_version);
+            println!(
+                "You are already running the latest version (v{})!",
+                self.current_version
+            );
             return Ok(());
         }
 
@@ -62,13 +66,19 @@ impl UpdateChecker {
         }
 
         // Get download URL
-        let release_info = manifest.versions.get(&manifest.latest)
+        let release_info = manifest
+            .versions
+            .get(&manifest.latest)
             .ok_or_else(|| anyhow!("Release info not found for version {}", manifest.latest))?;
-        
-        let download_url = release_info.downloads.get(&platform)
+
+        let download_url = release_info
+            .downloads
+            .get(&platform)
             .ok_or_else(|| anyhow!("No download available for platform {}", platform))?;
-        
-        let checksum_url = release_info.checksums.get(&platform)
+
+        let checksum_url = release_info
+            .checksums
+            .get(&platform)
             .ok_or_else(|| anyhow!("No checksum available for platform {}", platform))?;
 
         if verbose {
@@ -83,7 +93,7 @@ impl UpdateChecker {
         // Download the binary
         println!("Downloading fastest v{}...", manifest.latest);
         let archive_path = self.download_file(download_url, &temp_dir, verbose)?;
-        
+
         // Download and verify checksum
         println!("Verifying checksum...");
         let checksum_path = self.download_file(checksum_url, &temp_dir, verbose)?;
@@ -102,7 +112,7 @@ impl UpdateChecker {
 
         println!("\n✅ Successfully updated to fastest v{}!", manifest.latest);
         println!("Run 'fastest --version' to verify the update.");
-        
+
         Ok(())
     }
 
@@ -112,7 +122,8 @@ impl UpdateChecker {
             .call()
             .context("Failed to fetch version manifest")?;
 
-        let manifest: VersionInfo = response.into_json()
+        let manifest: VersionInfo = response
+            .into_json()
             .context("Failed to parse version manifest")?;
 
         Ok(manifest)
@@ -120,7 +131,7 @@ impl UpdateChecker {
 
     fn is_newer_version(&self, new_version: &str, current_version: &str) -> bool {
         use semver::Version;
-        
+
         match (Version::parse(new_version), Version::parse(current_version)) {
             (Ok(new), Ok(current)) => new > current,
             _ => false,
@@ -144,7 +155,9 @@ impl UpdateChecker {
     }
 
     fn download_file(&self, url: &str, temp_dir: &Path, verbose: bool) -> Result<PathBuf> {
-        let filename = url.split('/').last()
+        let filename = url
+            .split('/')
+            .last()
             .ok_or_else(|| anyhow!("Invalid URL: {}", url))?;
         let output_path = temp_dir.join(filename);
 
@@ -165,11 +178,12 @@ impl UpdateChecker {
     }
 
     fn verify_checksum(&self, file_path: &Path, checksum_path: &Path) -> Result<()> {
-        use sha2::{Sha256, Digest};
-        
+        use sha2::{Digest, Sha256};
+
         // Read expected checksum
         let checksum_content = fs::read_to_string(checksum_path)?;
-        let expected_checksum = checksum_content.split_whitespace()
+        let expected_checksum = checksum_content
+            .split_whitespace()
             .next()
             .ok_or_else(|| anyhow!("Invalid checksum file format"))?
             .to_lowercase();
@@ -183,15 +197,25 @@ impl UpdateChecker {
         if expected_checksum != actual_checksum {
             return Err(anyhow!(
                 "Checksum verification failed!\nExpected: {}\nActual: {}",
-                expected_checksum, actual_checksum
+                expected_checksum,
+                actual_checksum
             ));
         }
 
         Ok(())
     }
 
-    fn extract_binary(&self, archive_path: &Path, temp_dir: &Path, platform: &str) -> Result<PathBuf> {
-        let binary_name = if platform.contains("windows") { "fastest.exe" } else { "fastest" };
+    fn extract_binary(
+        &self,
+        archive_path: &Path,
+        temp_dir: &Path,
+        platform: &str,
+    ) -> Result<PathBuf> {
+        let binary_name = if platform.contains("windows") {
+            "fastest.exe"
+        } else {
+            "fastest"
+        };
         let extracted_path = temp_dir.join(binary_name);
 
         if platform.contains("windows") {
@@ -199,7 +223,7 @@ impl UpdateChecker {
             use zip::ZipArchive;
             let file = fs::File::open(archive_path)?;
             let mut archive = ZipArchive::new(file)?;
-            
+
             for i in 0..archive.len() {
                 let mut file = archive.by_index(i)?;
                 if file.name() == binary_name {
@@ -212,11 +236,11 @@ impl UpdateChecker {
             // Extract from tar.gz
             use flate2::read::GzDecoder;
             use tar::Archive;
-            
+
             let file = fs::File::open(archive_path)?;
             let gz = GzDecoder::new(file);
             let mut archive = Archive::new(gz);
-            
+
             for entry in archive.entries()? {
                 let mut entry = entry?;
                 if entry.path()?.file_name() == Some(std::ffi::OsStr::new(binary_name)) {
@@ -244,7 +268,7 @@ impl UpdateChecker {
 
     fn replace_binary(&self, new_binary: &Path) -> Result<()> {
         let current_exe = env::current_exe()?;
-        
+
         // On Windows, we need to rename the old binary first
         #[cfg(windows)]
         {
@@ -253,8 +277,9 @@ impl UpdateChecker {
         }
 
         // Copy new binary to current location
-        fs::copy(new_binary, &current_exe)
-            .context("Failed to replace binary. You may need to run with sudo/administrator privileges.")?;
+        fs::copy(new_binary, &current_exe).context(
+            "Failed to replace binary. You may need to run with sudo/administrator privileges.",
+        )?;
 
         // Clean up old binary on Windows
         #[cfg(windows)]
@@ -270,12 +295,18 @@ impl UpdateChecker {
 /// Check for updates and print a message if available
 pub fn check_for_updates() -> Result<()> {
     let checker = UpdateChecker::new();
-    
+
     match checker.check_update() {
         Ok(Some(new_version)) => {
-            eprintln!("\n🎉 A new version of fastest is available: v{}", new_version);
-            eprintln!("   Run 'fastest update' to upgrade from v{} to v{}", 
-                     env!("CARGO_PKG_VERSION"), new_version);
+            eprintln!(
+                "\n🎉 A new version of fastest is available: v{}",
+                new_version
+            );
+            eprintln!(
+                "   Run 'fastest update' to upgrade from v{} to v{}",
+                env!("CARGO_PKG_VERSION"),
+                new_version
+            );
         }
         Ok(None) => {
             // No update available, don't print anything
@@ -284,6 +315,6 @@ pub fn check_for_updates() -> Result<()> {
             // Failed to check for updates, silently ignore
         }
     }
-    
+
     Ok(())
 }

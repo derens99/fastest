@@ -85,7 +85,7 @@ pub use plugin_compatibility::{
 };
 
 // Re-export update types
-pub use update::{UpdateChecker, check_for_updates};
+pub use update::{check_for_updates, UpdateChecker};
 
 // Version from Cargo.toml
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

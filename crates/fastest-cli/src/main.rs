@@ -1,8 +1,8 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
-    default_cache_path, discover_tests, discover_tests_cached, executor::UltraFastExecutor,
-    filter_by_markers, check_for_updates, Config, DevExperienceConfig, DiscoveryCache, 
+    check_for_updates, default_cache_path, discover_tests, discover_tests_cached,
+    executor::UltraFastExecutor, filter_by_markers, Config, DevExperienceConfig, DiscoveryCache,
     PluginCompatibilityConfig, UpdateChecker,
 };
 use indicatif::{ProgressBar, ProgressStyle};
@@ -515,7 +515,7 @@ fn version_command() -> anyhow::Result<()> {
 
 fn update_command(cli: &Cli, check_only: bool) -> anyhow::Result<()> {
     let checker = UpdateChecker::new();
-    
+
     if check_only {
         match checker.check_update()? {
             Some(new_version) => {
@@ -524,12 +524,15 @@ fn update_command(cli: &Cli, check_only: bool) -> anyhow::Result<()> {
                 println!("\nAn update is available! Run 'fastest update' to install it.");
             }
             None => {
-                println!("You are running the latest version (v{})!", env!("CARGO_PKG_VERSION"));
+                println!(
+                    "You are running the latest version (v{})!",
+                    env!("CARGO_PKG_VERSION")
+                );
             }
         }
     } else {
         checker.update(cli.verbose)?;
     }
-    
+
     Ok(())
 }
