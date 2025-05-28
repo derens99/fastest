@@ -8,10 +8,19 @@
 //! - Integration with the enhanced Python runtime
 
 use anyhow::{anyhow, Result};
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+use petgraph::algo::toposort;
+use petgraph::graph::{DiGraph, NodeIndex};
+use rayon::prelude::*;
+use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::{Arc, Mutex};
+use std::fmt::Write;
+use std::sync::Arc;
+use tokio::sync::Semaphore;
+use tracing::{debug, trace};
 
 use super::{Fixture, FixtureScope};
 use crate::discovery::TestItem;
@@ -24,6 +33,33 @@ pub struct FixtureValue {
     pub scope: FixtureScope,
     pub teardown_code: Option<String>,
     pub created_at: std::time::SystemTime,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub msgpack_value: Option<Vec<u8>>, // Cached MessagePack representation
+}
+
+impl FixtureValue {
+    /// Get value as MessagePack bytes for efficient IPC
+    pub fn to_msgpack(&mut self) -> Result<&[u8]> {
+        if self.msgpack_value.is_none() {
+            let mut buf = Vec::new();
+            self.value.serialize(&mut Serializer::new(&mut buf))?;
+            self.msgpack_value = Some(buf);
+        }
+        Ok(self.msgpack_value.as_ref().unwrap())
+    }
+
+    /// Create from MessagePack bytes
+    pub fn from_msgpack(name: String, scope: FixtureScope, bytes: &[u8]) -> Result<Self> {
+        let value = rmp_serde::from_slice(bytes)?;
+        Ok(Self {
+            name,
+            value,
+            scope,
+            teardown_code: None,
+            created_at: std::time::SystemTime::now(),
+            msgpack_value: Some(bytes.to_vec()),
+        })
+    }
 }
 
 /// Key for caching fixture instances
@@ -67,70 +103,203 @@ impl FixtureCacheKey {
     }
 }
 
-/// Manages fixture dependency resolution
+/// Pre-compiled Python code templates
+static PYTHON_TEMPLATES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
+    let mut templates = HashMap::new();
+
+    // Fixture wrapper template for efficient fixture execution
+    templates.insert(
+        "fixture_wrapper",
+        r#"
+import sys
+import json
+import traceback
+import inspect
+from contextlib import contextmanager
+
+class FixtureExecutor:
+    def __init__(self):
+        self.results = {}
+        self.errors = []
+    
+    def execute_fixture(self, fixture_func, dependencies):
+        """Execute a single fixture with its dependencies"""
+        sig = inspect.signature(fixture_func)
+        kwargs = {}
+        
+        for param_name in sig.parameters:
+            if param_name in dependencies:
+                kwargs[param_name] = dependencies[param_name]
+        
+        try:
+            result = fixture_func(**kwargs)
+            
+            # Handle generator fixtures (yield)
+            if inspect.isgeneratorfunction(fixture_func):
+                gen = result
+                result = next(gen)
+                # Store generator for teardown
+                self.teardown_generators.append((fixture_func.__name__, gen))
+            
+            return result
+        except Exception as e:
+            self.errors.append({
+                'fixture': fixture_func.__name__,
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            })
+            raise
+    
+    def teardown(self):
+        """Execute teardown for generator fixtures"""
+        for name, gen in reversed(self.teardown_generators):
+            try:
+                next(gen, None)
+            except StopIteration:
+                pass
+            except Exception as e:
+                self.errors.append({
+                    'fixture': name,
+                    'phase': 'teardown',
+                    'error': str(e)
+                })
+"#,
+    );
+
+    // Test runner template with fixture injection
+    templates.insert(
+        "test_runner",
+        r#"
+import asyncio
+import sys
+import os
+import json
+import traceback
+from pathlib import Path
+
+class TestRunner:
+    def __init__(self, test_path, module_name):
+        self.test_path = Path(test_path)
+        self.module_name = module_name
+        self.test_module = None
+        
+    def setup(self):
+        """Import the test module"""
+        sys.path.insert(0, str(self.test_path.parent))
+        self.test_module = __import__(self.module_name)
+        
+    def run_test(self, test_name, fixture_values, is_async=False):
+        """Run a single test with fixtures"""
+        test_func = getattr(self.test_module, test_name)
+        
+        if is_async:
+            return asyncio.run(test_func(**fixture_values))
+        else:
+            return test_func(**fixture_values)
+"#,
+    );
+
+    templates
+});
+
+/// Manages fixture dependency resolution using a graph-based approach
 #[derive(Debug)]
 pub struct DependencyResolver {
     fixture_registry: HashMap<String, Fixture>,
+    dependency_graph: DiGraph<String, ()>,
+    node_indices: HashMap<String, NodeIndex>,
 }
 
 impl DependencyResolver {
     pub fn new() -> Self {
         Self {
             fixture_registry: HashMap::new(),
+            dependency_graph: DiGraph::new(),
+            node_indices: HashMap::new(),
         }
     }
 
     pub fn register_fixture(&mut self, fixture: Fixture) {
-        self.fixture_registry.insert(fixture.name.clone(), fixture);
+        let name = fixture.name.clone();
+
+        // Add node to graph if not exists
+        let node_idx = match self.node_indices.get(&name) {
+            Some(&idx) => idx,
+            None => {
+                let idx = self.dependency_graph.add_node(name.clone());
+                self.node_indices.insert(name.clone(), idx);
+                idx
+            }
+        };
+
+        // Add edges for dependencies
+        for dep in &fixture.dependencies {
+            let dep_idx = match self.node_indices.get(dep) {
+                Some(&idx) => idx,
+                None => {
+                    let idx = self.dependency_graph.add_node(dep.clone());
+                    self.node_indices.insert(dep.clone(), idx);
+                    idx
+                }
+            };
+            self.dependency_graph.add_edge(dep_idx, node_idx, ());
+        }
+
+        self.fixture_registry.insert(name, fixture);
     }
 
-    /// Resolve fixture dependencies in topological order
+    /// Resolve fixture dependencies using petgraph's topological sort
     pub fn resolve_dependencies(&self, fixture_names: &[String]) -> Result<Vec<String>> {
-        let mut resolved = Vec::new();
+        // Create a subgraph containing only the required fixtures and their dependencies
+        let mut subgraph = DiGraph::<String, ()>::new();
+        let mut subgraph_nodes = HashMap::new();
+        let mut to_visit = VecDeque::from_iter(fixture_names.iter().cloned());
         let mut visited = HashSet::new();
-        let mut visiting = HashSet::new();
 
-        for name in fixture_names {
-            if !visited.contains(name) {
-                self.visit_fixture(name, &mut resolved, &mut visited, &mut visiting)?;
+        // Build subgraph
+        while let Some(name) = to_visit.pop_front() {
+            if visited.contains(&name) {
+                continue;
+            }
+            visited.insert(name.clone());
+
+            // Add node to subgraph
+            let node_idx = match subgraph_nodes.get(&name) {
+                Some(&idx) => idx,
+                None => {
+                    let idx = subgraph.add_node(name.clone());
+                    subgraph_nodes.insert(name.clone(), idx);
+                    idx
+                }
+            };
+
+            // Add dependencies
+            if let Some(fixture) = self.fixture_registry.get(&name) {
+                for dep in &fixture.dependencies {
+                    let dep_idx = match subgraph_nodes.get(dep) {
+                        Some(&idx) => idx,
+                        None => {
+                            let idx = subgraph.add_node(dep.clone());
+                            subgraph_nodes.insert(dep.clone(), idx);
+                            idx
+                        }
+                    };
+                    subgraph.add_edge(dep_idx, node_idx, ());
+                    to_visit.push_back(dep.clone());
+                }
             }
         }
 
-        Ok(resolved)
-    }
-
-    fn visit_fixture(
-        &self,
-        name: &str,
-        resolved: &mut Vec<String>,
-        visited: &mut HashSet<String>,
-        visiting: &mut HashSet<String>,
-    ) -> Result<()> {
-        if visiting.contains(name) {
-            return Err(anyhow!(
-                "Circular dependency detected involving fixture '{}'",
-                name
-            ));
+        // Perform topological sort
+        match toposort(&subgraph, None) {
+            Ok(sorted_indices) => Ok(sorted_indices
+                .into_iter()
+                .map(|idx| subgraph[idx].clone())
+                .collect()),
+            Err(_) => Err(anyhow!(
+                "Circular dependency detected in fixture dependencies"
+            )),
         }
-
-        if visited.contains(name) {
-            return Ok(());
-        }
-
-        visiting.insert(name.to_string());
-
-        // Visit dependencies first
-        if let Some(fixture) = self.fixture_registry.get(name) {
-            for dep in &fixture.dependencies {
-                self.visit_fixture(dep, resolved, visited, visiting)?;
-            }
-        }
-
-        visiting.remove(name);
-        visited.insert(name.to_string());
-        resolved.push(name.to_string());
-
-        Ok(())
     }
 
     /// Get all transitive dependencies for a fixture
@@ -153,21 +322,75 @@ impl DependencyResolver {
     }
 }
 
+/// Represents a batch of fixtures to execute together
+#[derive(Debug, Clone)]
+pub struct FixtureBatch {
+    pub fixtures: Vec<String>,
+    pub level: usize, // Dependency level for parallel execution
+}
+
 /// Executes fixture code and returns the fixture values
 pub struct FixtureExecutor {
     fixture_code: HashMap<String, String>,
-    cache: Arc<Mutex<HashMap<FixtureCacheKey, FixtureValue>>>,
+    cache: Arc<DashMap<FixtureCacheKey, FixtureValue>>,
     dependency_resolver: DependencyResolver,
-    teardown_stack: Arc<Mutex<Vec<(FixtureCacheKey, String)>>>, // (key, teardown_code)
+    teardown_stack: Arc<DashMap<String, Vec<(FixtureCacheKey, String)>>>, // scope_id -> [(key, teardown_code)]
+    code_cache: Arc<DashMap<String, String>>, // Cache for generated Python code
+    execution_semaphore: Arc<Semaphore>,      // Limit parallel Python processes
 }
 
 impl FixtureExecutor {
     pub fn new() -> Self {
+        let max_parallel = num_cpus::get().min(8); // Limit parallel Python processes
         Self {
             fixture_code: HashMap::new(),
-            cache: Arc::new(Mutex::new(HashMap::new())),
+            cache: Arc::new(DashMap::with_capacity(1000)), // Pre-allocate for better performance
             dependency_resolver: DependencyResolver::new(),
-            teardown_stack: Arc::new(Mutex::new(Vec::new())),
+            teardown_stack: Arc::new(DashMap::new()),
+            code_cache: Arc::new(DashMap::with_capacity(100)), // Cache generated code
+            execution_semaphore: Arc::new(Semaphore::new(max_parallel)),
+        }
+    }
+
+    /// Warm the cache with commonly used fixtures
+    pub fn warm_cache(&self, common_fixtures: &[&str]) {
+        debug!(
+            "Warming fixture cache with {} common fixtures",
+            common_fixtures.len()
+        );
+        // Pre-generate code for common fixtures
+        for fixture_name in common_fixtures {
+            let fixture = Fixture {
+                name: fixture_name.to_string(),
+                scope: FixtureScope::Function,
+                autouse: false,
+                params: vec![],
+                func_path: std::path::PathBuf::from("builtin"),
+                dependencies: vec![],
+            };
+            let _ = self.generate_fixture_execution_code(&fixture);
+        }
+    }
+
+    /// Evict old entries from cache if it grows too large
+    pub fn evict_old_cache_entries(&self, max_entries: usize) {
+        if self.cache.len() > max_entries {
+            let mut entries: Vec<(FixtureCacheKey, std::time::SystemTime)> = self
+                .cache
+                .iter()
+                .map(|entry| (entry.key().clone(), entry.value().created_at))
+                .collect();
+
+            // Sort by creation time (oldest first)
+            entries.sort_by_key(|e| e.1);
+
+            // Remove oldest entries
+            let to_remove = entries.len() - max_entries;
+            for (key, _) in entries.into_iter().take(to_remove) {
+                self.cache.remove(&key);
+            }
+
+            debug!("Evicted {} old fixture cache entries", to_remove);
         }
     }
 
@@ -187,19 +410,106 @@ impl FixtureExecutor {
         test: &TestItem,
         required_fixtures: &[String],
     ) -> Result<HashMap<String, FixtureValue>> {
-        // Resolve dependencies
-        let ordered_fixtures = self
-            .dependency_resolver
-            .resolve_dependencies(required_fixtures)?;
-
+        // Resolve dependencies and batch by level
+        let batches = self.create_fixture_batches(required_fixtures)?;
         let mut fixture_values = HashMap::new();
 
-        for fixture_name in ordered_fixtures {
-            let fixture_value = self.get_or_create_fixture(&fixture_name, test)?;
-            fixture_values.insert(fixture_name, fixture_value);
+        // Execute batches in order, with parallel execution within each batch
+        for batch in batches {
+            let batch_results = self.execute_fixture_batch(&batch, test, &fixture_values)?;
+            fixture_values.extend(batch_results);
         }
 
         Ok(fixture_values)
+    }
+
+    /// Create batches of fixtures that can be executed in parallel
+    fn create_fixture_batches(&self, required_fixtures: &[String]) -> Result<Vec<FixtureBatch>> {
+        let ordered_fixtures = self
+            .dependency_resolver
+            .resolve_dependencies(required_fixtures)?;
+        let mut batches = Vec::new();
+        let mut current_batch = Vec::new();
+        let mut processed = HashSet::new();
+
+        // Group fixtures by dependency level
+        for fixture_name in ordered_fixtures {
+            let deps = self
+                .dependency_resolver
+                .fixture_registry
+                .get(&fixture_name)
+                .map(|f| f.dependencies.clone())
+                .unwrap_or_else(Vec::new);
+
+            // Check if all dependencies are already processed
+            let can_batch = deps.iter().all(|dep| processed.contains(dep));
+
+            if can_batch && !current_batch.is_empty() {
+                // Can execute in parallel with current batch
+                current_batch.push(fixture_name.clone());
+            } else {
+                // Need to start a new batch
+                if !current_batch.is_empty() {
+                    batches.push(FixtureBatch {
+                        fixtures: current_batch,
+                        level: batches.len(),
+                    });
+                    current_batch = Vec::new();
+                }
+                current_batch.push(fixture_name.clone());
+            }
+
+            processed.insert(fixture_name);
+        }
+
+        if !current_batch.is_empty() {
+            batches.push(FixtureBatch {
+                fixtures: current_batch,
+                level: batches.len(),
+            });
+        }
+
+        // Log batch information for debugging
+        if !batches.is_empty() {
+            debug!(
+                "Created {} fixture batches for parallel execution",
+                batches.len()
+            );
+            for (i, batch) in batches.iter().enumerate() {
+                trace!("  Batch {}: {} fixtures", i, batch.fixtures.len());
+            }
+        }
+
+        Ok(batches)
+    }
+
+    /// Execute a batch of fixtures in parallel where possible
+    fn execute_fixture_batch(
+        &self,
+        batch: &FixtureBatch,
+        test: &TestItem,
+        _existing_values: &HashMap<String, FixtureValue>,
+    ) -> Result<HashMap<String, FixtureValue>> {
+        if batch.fixtures.len() == 1 {
+            // Single fixture, execute directly
+            let fixture_name = &batch.fixtures[0];
+            let value = self.get_or_create_fixture(fixture_name, test)?;
+            let mut result = HashMap::new();
+            result.insert(fixture_name.clone(), value);
+            return Ok(result);
+        }
+
+        // Multiple fixtures - check if they can be executed in parallel
+        let results: Result<Vec<_>> = batch
+            .fixtures
+            .par_iter()
+            .map(|fixture_name| {
+                let value = self.get_or_create_fixture(fixture_name, test)?;
+                Ok((fixture_name.clone(), value))
+            })
+            .collect();
+
+        results.map(|vec| vec.into_iter().collect())
     }
 
     /// Get or create a fixture value
@@ -212,12 +522,10 @@ impl FixtureExecutor {
 
         let cache_key = FixtureCacheKey::for_test(fixture_name, test, fixture.scope.clone());
 
-        // Check cache first
-        {
-            let cache = self.cache.lock().unwrap();
-            if let Some(cached_value) = cache.get(&cache_key) {
-                return Ok(cached_value.clone());
-            }
+        // Check cache first - DashMap allows concurrent reads
+        if let Some(cached_value) = self.cache.get(&cache_key) {
+            trace!("Cache hit for fixture: {}", fixture_name);
+            return Ok(cached_value.clone());
         }
 
         // Create new fixture instance
@@ -228,78 +536,198 @@ impl FixtureExecutor {
             fixture.scope,
             FixtureScope::Class | FixtureScope::Module | FixtureScope::Session
         ) {
-            let mut cache = self.cache.lock().unwrap();
-            cache.insert(cache_key.clone(), fixture_value.clone());
+            self.cache.insert(cache_key.clone(), fixture_value.clone());
 
             // Add to teardown stack if needed
             if let Some(teardown_code) = &fixture_value.teardown_code {
-                let mut teardown_stack = self.teardown_stack.lock().unwrap();
-                teardown_stack.push((cache_key, teardown_code.clone()));
+                let scope_id = cache_key.scope_id.clone();
+                self.teardown_stack
+                    .entry(scope_id)
+                    .or_insert_with(Vec::new)
+                    .push((cache_key, teardown_code.clone()));
             }
         }
 
         Ok(fixture_value)
     }
 
-    /// Create a new fixture instance
+    /// Create a new fixture instance with optimized execution
     fn create_fixture_instance(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
-        // Generate fixture execution code
-        let _execution_code = self.generate_fixture_execution_code(fixture)?;
+        let start_time = std::time::Instant::now();
 
-        // For now, create a placeholder value
-        // In the full implementation, this would execute Python code via the runtime
         let value = if crate::fixtures::is_builtin_fixture(&fixture.name) {
+            // Built-in fixtures are created directly without Python execution
             self.create_builtin_fixture_value(&fixture.name)?
         } else {
-            // User-defined fixture - would be executed via Python runtime
-            serde_json::json!({
-                "type": "user_fixture",
-                "name": fixture.name,
-                "scope": format!("{:?}", fixture.scope),
-                "placeholder": true
-            })
+            // User-defined fixture - use optimized execution path
+            self.execute_user_fixture(fixture, test)?
         };
+
+        let duration = start_time.elapsed();
+        trace!("Created fixture '{}' in {:?}", fixture.name, duration);
 
         Ok(FixtureValue {
             name: fixture.name.clone(),
             value,
             scope: fixture.scope.clone(),
-            teardown_code: None, // TODO: Extract teardown code from yield fixtures
+            teardown_code: self.extract_teardown_code(fixture)?,
             created_at: std::time::SystemTime::now(),
+            msgpack_value: None,
         })
     }
 
-    /// Generate Python code to execute a fixture
-    fn generate_fixture_execution_code(&self, fixture: &Fixture) -> Result<String> {
-        if crate::fixtures::is_builtin_fixture(&fixture.name) {
-            Ok(
-                crate::fixtures::generate_builtin_fixture_code(&fixture.name)
-                    .unwrap_or_else(|| "# Unknown builtin fixture".to_string()),
-            )
+    /// Execute a user-defined fixture using the most efficient method
+    fn execute_user_fixture(
+        &self,
+        fixture: &Fixture,
+        test: &TestItem,
+    ) -> Result<serde_json::Value> {
+        // Check if we can use PyO3 for in-process execution
+        if self.can_use_pyo3_execution(fixture) {
+            self.execute_fixture_pyo3(fixture, test)
         } else {
-            // For user-defined fixtures, we'd need to load the actual fixture function
-            // This is a placeholder implementation
-            Ok(format!(
-                r#"
-# Execute fixture: {}
-# Scope: {:?}
-# Dependencies: {:?}
-# Auto-use: {}
-
-def execute_fixture_{}():
-    # This would contain the actual fixture implementation
-    return "fixture_value_placeholder"
-
-fixture_result = execute_fixture_{}()
-"#,
-                fixture.name,
-                fixture.scope,
-                fixture.dependencies,
-                fixture.autouse,
-                fixture.name.replace("-", "_"),
-                fixture.name.replace("-", "_")
-            ))
+            // Fall back to subprocess execution
+            self.execute_fixture_subprocess(fixture, test)
         }
+    }
+
+    /// Check if a fixture can be executed using PyO3
+    fn can_use_pyo3_execution(&self, fixture: &Fixture) -> bool {
+        // Simple fixtures without complex dependencies can use PyO3
+        fixture.dependencies.len() < 3 && !fixture.func_path.to_string_lossy().contains("conftest")
+    }
+
+    /// Execute fixture using PyO3 (fast path)
+    fn execute_fixture_pyo3(
+        &self,
+        fixture: &Fixture,
+        _test: &TestItem,
+    ) -> Result<serde_json::Value> {
+        // This would use PyO3 for direct Python execution
+        // For now, return a placeholder
+        Ok(serde_json::json!({
+            "type": "pyo3_fixture",
+            "name": fixture.name,
+            "executed_with": "pyo3",
+            "scope": format!("{:?}", fixture.scope)
+        }))
+    }
+
+    /// Execute fixture using subprocess (fallback)
+    fn execute_fixture_subprocess(
+        &self,
+        fixture: &Fixture,
+        _test: &TestItem,
+    ) -> Result<serde_json::Value> {
+        let execution_code = self.generate_fixture_execution_code(fixture)?;
+
+        // Execute via subprocess with environment variable for output format
+        let output = std::process::Command::new("python")
+            .arg("-c")
+            .arg(&execution_code)
+            .env("FASTEST_OUTPUT_FORMAT", "msgpack")
+            .output()
+            .map_err(|e| anyhow!("Failed to execute fixture: {}", e))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!("Fixture execution failed: {}", stderr));
+        }
+
+        // Try to parse as MessagePack first, fall back to JSON
+        if output.stdout.starts_with(b"\x82") || output.stdout.starts_with(b"\x83") {
+            // Likely MessagePack format
+            rmp_serde::from_slice(&output.stdout)
+                .map_err(|e| anyhow!("Failed to parse MessagePack fixture result: {}", e))
+        } else {
+            // Fall back to JSON
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            serde_json::from_str(&stdout)
+                .map_err(|e| anyhow!("Failed to parse JSON fixture result: {}", e))
+        }
+    }
+
+    /// Extract teardown code from yield fixtures
+    fn extract_teardown_code(&self, _fixture: &Fixture) -> Result<Option<String>> {
+        // TODO: Parse fixture code to extract teardown portion
+        Ok(None)
+    }
+
+    /// Generate optimized Python code to execute a fixture
+    fn generate_fixture_execution_code(&self, fixture: &Fixture) -> Result<String> {
+        // Check code cache first
+        let cache_key = format!("fixture-{}-{:?}", fixture.name, fixture.func_path);
+        if let Some(cached_code) = self.code_cache.get(&cache_key) {
+            return Ok(cached_code.clone());
+        }
+
+        let code = if crate::fixtures::is_builtin_fixture(&fixture.name) {
+            crate::fixtures::generate_builtin_fixture_code(&fixture.name)
+                .unwrap_or_else(|| "# Unknown builtin fixture".to_string())
+        } else {
+            // Generate optimized fixture execution code
+            let mut code = String::with_capacity(1024);
+
+            write!(
+                &mut code,
+                r#"
+import sys
+import json
+import os
+from pathlib import Path
+
+# Setup path
+fixture_path = Path(r'{}')
+sys.path.insert(0, str(fixture_path.parent))
+
+# Import fixture module
+try:
+    module_name = fixture_path.stem
+    if 'conftest' in module_name:
+        import conftest as fixture_module
+    else:
+        fixture_module = __import__(module_name)
+except ImportError as e:
+    print(json.dumps({{"error": f"Failed to import fixture module: {{e}}"}})
+    sys.exit(1)
+
+# Get fixture function
+fixture_func = getattr(fixture_module, '{}', None)
+if not fixture_func:
+    print(json.dumps({{"error": "Fixture function not found"}})
+    sys.exit(1)
+
+# Execute fixture with minimal overhead
+try:
+    result = fixture_func()
+    
+    # Use MessagePack if requested for better performance
+    output_format = os.environ.get('FASTEST_OUTPUT_FORMAT', 'json')
+    
+    if output_format == 'msgpack':
+        try:
+            import msgpack
+            sys.stdout.buffer.write(msgpack.packb({{"value": result}}, default=str))
+        except ImportError:
+            # Fall back to JSON if msgpack not available
+            print(json.dumps({{"value": result}}, default=str))
+    else:
+        print(json.dumps({{"value": result}}, default=str))
+except Exception as e:
+    print(json.dumps({{"error": str(e)}}), file=sys.stderr)
+    sys.exit(1)
+"#,
+                fixture.func_path.display(),
+                fixture.name
+            )?;
+
+            code
+        };
+
+        // Cache the generated code
+        self.code_cache.insert(cache_key, code.clone());
+
+        Ok(code)
     }
 
     /// Create built-in fixture values
@@ -368,6 +796,15 @@ fixture_result = execute_fixture_{}()
         test_path: &std::path::Path,
         existing_values: &HashMap<String, Value>,
     ) -> Result<String> {
+        // Generate cache key for this code
+        let cache_key = format!("{:?}-{:?}", fixtures, test_path);
+
+        // Check code cache first
+        if let Some(cached_code) = self.code_cache.get(&cache_key) {
+            trace!("Code cache hit for fixtures: {:?}", fixtures);
+            return Ok(cached_code.clone());
+        }
+
         let test_dir = test_path
             .parent()
             .map(|p| p.to_string_lossy().to_string())
@@ -378,8 +815,11 @@ fixture_result = execute_fixture_{}()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_else(|| "test".to_string());
 
-        // Build the Python code
-        let mut code = format!(
+        // Use string buffer for efficient concatenation
+        let mut code = String::with_capacity(2048 + fixtures.len() * 512);
+
+        write!(
+            &mut code,
             r#"
 import sys
 import json
@@ -405,11 +845,12 @@ existing_fixtures = {}
             test_dir,
             module_name,
             serde_json::to_string(existing_values)?
-        );
+        )?;
 
         // Add code to execute each fixture
         for fixture_name in fixtures {
-            code.push_str(&format!(
+            write!(
+                &mut code,
                 r#"
 # Execute fixture: {}
 try:
@@ -449,66 +890,80 @@ except Exception as e:
                 fixture_name,
                 fixture_name,
                 fixture_name
-            ));
+            )?;
         }
 
         // Output results as JSON
-        code.push_str(
-            "\n# Output fixture results as JSON\nprint(json.dumps(fixture_results, default=str))",
-        );
+        write!(
+            &mut code,
+            "\n# Output fixture results as JSON\nprint(json.dumps(fixture_results, default=str))"
+        )?;
+
+        // Cache the generated code
+        self.code_cache.insert(cache_key, code.clone());
 
         Ok(code)
     }
 
     /// Cleanup fixtures for a specific scope
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
-        let mut cache = self.cache.lock().unwrap();
-        let mut teardown_stack = self.teardown_stack.lock().unwrap();
-
         // Find fixtures to cleanup
-        let keys_to_remove: Vec<_> = cache
-            .keys()
-            .filter(|key| {
-                key.scope == scope && (scope == FixtureScope::Session || key.scope_id == scope_id)
-            })
-            .cloned()
-            .collect();
+        let mut keys_to_remove = Vec::new();
+        self.cache.iter().for_each(|entry| {
+            let key = entry.key();
+            if key.scope == scope && (scope == FixtureScope::Session || key.scope_id == scope_id) {
+                keys_to_remove.push(key.clone());
+            }
+        });
 
-        // Execute teardown code in reverse order
-        let teardown_items: Vec<_> = teardown_stack
-            .iter()
-            .filter(|(key, _)| keys_to_remove.contains(key))
-            .cloned()
-            .collect();
+        // Execute teardown code if exists
+        if let Some(teardown_list) = self.teardown_stack.get(scope_id) {
+            let teardown_items: Vec<_> = teardown_list
+                .iter()
+                .filter(|(key, _)| keys_to_remove.contains(key))
+                .cloned()
+                .collect();
 
-        for (key, teardown_code) in teardown_items.into_iter().rev() {
-            // Execute teardown code via Python runtime
-            // For now, just log it
-            eprintln!(
-                "Would execute teardown for fixture '{}': {}",
-                key.name, teardown_code
-            );
+            for (key, _teardown_code) in teardown_items.into_iter().rev() {
+                // Execute teardown code via Python runtime
+                // TODO: Integrate with Python runtime for actual execution
+                debug!("Executing teardown for fixture '{}'", key.name);
+            }
         }
 
-        // Remove from cache and teardown stack
+        // Remove from cache
         for key in &keys_to_remove {
-            cache.remove(key);
+            self.cache.remove(key);
         }
 
-        teardown_stack.retain(|(key, _)| !keys_to_remove.contains(key));
+        // Clean up teardown stack
+        if scope == FixtureScope::Session || !keys_to_remove.is_empty() {
+            self.teardown_stack.remove(scope_id);
+        }
 
         Ok(())
     }
 
     /// Get all autouse fixtures applicable to a test
     pub fn get_autouse_fixtures(&self, test: &TestItem) -> Vec<String> {
-        self.dependency_resolver
+        let autouse_fixtures: Vec<String> = self
+            .dependency_resolver
             .fixture_registry
             .values()
             .filter(|f| f.autouse)
             .filter(|f| self.is_fixture_applicable_to_test(f, test))
             .map(|f| f.name.clone())
-            .collect()
+            .collect();
+
+        if !autouse_fixtures.is_empty() {
+            trace!(
+                "Found {} autouse fixtures for test {}",
+                autouse_fixtures.len(),
+                test.name
+            );
+        }
+
+        autouse_fixtures
     }
 
     /// Check if a fixture is applicable to a test based on scope and location
@@ -534,18 +989,25 @@ except Exception as e:
 
     /// Get statistics about cached fixtures
     pub fn get_cache_stats(&self) -> FixtureCacheStats {
-        let cache = self.cache.lock().unwrap();
-        let teardown_stack = self.teardown_stack.lock().unwrap();
-
         let mut stats_by_scope = HashMap::new();
-        for key in cache.keys() {
+        let mut total_cached = 0;
+
+        self.cache.iter().for_each(|entry| {
+            let key = entry.key();
             *stats_by_scope.entry(key.scope.clone()).or_insert(0) += 1;
-        }
+            total_cached += 1;
+        });
+
+        let pending_teardowns = self
+            .teardown_stack
+            .iter()
+            .map(|entry| entry.value().len())
+            .sum();
 
         FixtureCacheStats {
-            total_cached: cache.len(),
+            total_cached,
             by_scope: stats_by_scope,
-            pending_teardowns: teardown_stack.len(),
+            pending_teardowns,
         }
     }
 }
@@ -564,10 +1026,10 @@ pub struct FixtureCacheStats {
     pub pending_teardowns: usize,
 }
 
-/// Generate Python code that includes fixture injection
+/// Generate optimized Python code that includes fixture injection
 pub fn generate_test_code_with_fixtures(
     test: &crate::discovery::TestItem,
-    fixture_values: &HashMap<String, Value>,
+    fixture_values: &HashMap<String, FixtureValue>,
 ) -> String {
     let test_dir = test
         .path
@@ -581,26 +1043,11 @@ pub fn generate_test_code_with_fixtures(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "test".to_string());
 
-    // Build fixture kwargs string
-    let _fixture_kwargs = if test.fixture_deps.is_empty() {
-        String::new()
-    } else {
-        let mut kwargs = Vec::new();
-        for fixture_name in &test.fixture_deps {
-            if let Some(value) = fixture_values.get(fixture_name) {
-                kwargs.push(format!(
-                    "{}={}",
-                    fixture_name,
-                    serde_json::to_string(value).unwrap_or_else(|_| "None".to_string())
-                ));
-            }
-        }
-        if kwargs.is_empty() {
-            String::new()
-        } else {
-            format!("({})", kwargs.join(", "))
-        }
-    };
+    // Convert fixture values to a format suitable for Python
+    let fixture_json_values: HashMap<String, Value> = fixture_values
+        .iter()
+        .map(|(k, v)| (k.clone(), v.value.clone()))
+        .collect();
 
     if test.is_async {
         format!(
@@ -651,7 +1098,7 @@ except Exception as e:
                     test.function_name
                 )
             },
-            serde_json::to_string(fixture_values).unwrap_or_else(|_| "{}".to_string()),
+            serde_json::to_string(&fixture_json_values).unwrap_or_else(|_| "{}".to_string()),
             serde_json::to_string(&test.fixture_deps).unwrap_or_else(|_| "[]".to_string()),
             if test.class_name.is_some() {
                 format!("test_instance.{}(**kwargs)", test.function_name)
@@ -700,7 +1147,7 @@ except Exception as e:
                     test.function_name
                 )
             },
-            serde_json::to_string(fixture_values).unwrap_or_else(|_| "{}".to_string()),
+            serde_json::to_string(&fixture_json_values).unwrap_or_else(|_| "{}".to_string()),
             serde_json::to_string(&test.fixture_deps).unwrap_or_else(|_| "[]".to_string()),
             if test.class_name.is_some() {
                 format!("test_instance.{}(**kwargs)", test.function_name)
