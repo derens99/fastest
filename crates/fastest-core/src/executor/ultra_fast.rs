@@ -9,6 +9,7 @@
 
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
+use pyo3::prelude::*;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
@@ -16,32 +17,30 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use pyo3::prelude::*;
-use pyo3::types::PyModule;
 
+use super::TestResult; // keep same re‑export path as before
+use crate::developer_experience::{DevExperienceConfig, DevExperienceManager};
 use crate::discovery::TestItem;
 use crate::error::{Error, Result};
-use super::TestResult; // keep same re‑export path as before
+use crate::plugin_compatibility::{PluginCompatibilityConfig, PluginCompatibilityManager};
 use crate::utils::PYTHON_CMD;
-use crate::developer_experience::{DevExperienceManager, DevExperienceConfig};
-use crate::plugin_compatibility::{PluginCompatibilityManager, PluginCompatibilityConfig};
 
 /* -------------------------------------------------------------------------- */
 /*                        Performance Optimization Thresholds                */
 /* -------------------------------------------------------------------------- */
 /// Threshold for switching execution strategies
-const SMALL_SUITE_THRESHOLD: usize = 20;  // Use in-process for ≤20 tests
-const MEDIUM_SUITE_THRESHOLD: usize = 100; // Use warm workers for 21-100 tests  
-const LARGE_SUITE_THRESHOLD: usize = 500;  // Use full parallel for >100 tests
+const SMALL_SUITE_THRESHOLD: usize = 20; // Use in-process for ≤20 tests
+const MEDIUM_SUITE_THRESHOLD: usize = 100; // Use warm workers for 21-100 tests
+                                           // Note: LARGE_SUITE_THRESHOLD removed as unused - can be re-added if needed
 
 /// Optimized batch sizes based on suite size
-const SMALL_BATCH_SIZE: usize = 10;   // Small batches for quick iteration
-const MEDIUM_BATCH_SIZE: usize = 25;  // Medium batches for balanced performance
-const LARGE_BATCH_SIZE: usize = 50;   // Large batches for maximum throughput
+// Note: SMALL_BATCH_SIZE removed as unused - can be re-added if needed
+const MEDIUM_BATCH_SIZE: usize = 25; // Medium batches for balanced performance
+const LARGE_BATCH_SIZE: usize = 50; // Large batches for maximum throughput
 
 /// Persistent worker pool configuration
 const POOL_SIZE: usize = 8;
-const WORKER_WARMUP_TIMEOUT: Duration = Duration::from_millis(100);
+// Note: WORKER_WARMUP_TIMEOUT removed as unused
 
 #[derive(Debug, Clone, Copy)]
 enum ExecutionStrategy {
@@ -137,14 +136,17 @@ impl FastInterpreter {
         if bytes_read == 0 {
             return Err(Error::Execution("Worker closed stdout".to_string()));
         }
-        
+
         // Debug output
         if line.trim().is_empty() {
-            return Err(Error::Execution("Worker returned empty response".to_string()));
+            return Err(Error::Execution(
+                "Worker returned empty response".to_string(),
+            ));
         }
-        
-        serde_json::from_str(&line)
-            .map_err(|e| Error::Execution(format!("Failed to parse response: {} (raw: {:?})", e, line)))
+
+        serde_json::from_str(&line).map_err(|e| {
+            Error::Execution(format!("Failed to parse response: {} (raw: {:?})", e, line))
+        })
     }
 
     /// Embedded ultra‑thin Python worker
@@ -393,8 +395,13 @@ struct InterpreterPool {
 impl InterpreterPool {
     fn new(size: usize) -> Result<Self> {
         let mut v = Vec::with_capacity(size);
-        for id in 0..size { v.push(Arc::new(FastInterpreter::spawn(id)?)); }
-        Ok(Self { workers: v, cursor: AtomicUsize::new(0) })
+        for id in 0..size {
+            v.push(Arc::new(FastInterpreter::spawn(id)?));
+        }
+        Ok(Self {
+            workers: v,
+            cursor: AtomicUsize::new(0),
+        })
     }
 
     #[inline]
@@ -405,7 +412,8 @@ impl InterpreterPool {
 }
 
 // global pool (lazy‑init on first access)
-static POOL: Lazy<InterpreterPool> = Lazy::new(|| InterpreterPool::new(POOL_SIZE).expect("init pool"));
+static POOL: Lazy<InterpreterPool> =
+    Lazy::new(|| InterpreterPool::new(POOL_SIZE).expect("init pool"));
 
 /* -------------------------------------------------------------------------- */
 /*                    Public wrapper – preserves old API                      */
@@ -418,20 +426,20 @@ pub struct UltraFastExecutor {
 }
 
 impl UltraFastExecutor {
-    pub fn new(verbose: bool) -> Self { 
-        Self { 
+    pub fn new(verbose: bool) -> Self {
+        Self {
             verbose,
             dev_experience: None,
             plugin_compatibility: None,
-        } 
+        }
     }
-    
+
     /// Alternative constructor for ParallelExecutor compatibility
     pub fn new_with_workers(_num_workers: Option<usize>, verbose: bool) -> Self {
         // Ignore num_workers - the pool manages its own size
         Self::new(verbose)
     }
-    
+
     /// Enable developer experience features
     pub fn with_dev_experience(mut self, config: DevExperienceConfig) -> Self {
         self.dev_experience = Some(DevExperienceManager::new(config));
@@ -447,25 +455,27 @@ impl UltraFastExecutor {
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         let test_count = tests.len();
         let strategy = Self::determine_execution_strategy(test_count);
-        
+
         if self.verbose {
             let strategy_name = match strategy {
                 ExecutionStrategy::InProcess => "in-process (fastest startup)",
                 ExecutionStrategy::WarmWorkers => "warm workers (balanced)",
                 ExecutionStrategy::FullParallel => "full parallel (maximum throughput)",
             };
-            eprintln!("⚡ ultra‑fast executor: {} tests using {} strategy", 
-                     test_count, strategy_name);
+            eprintln!(
+                "⚡ ultra‑fast executor: {} tests using {} strategy",
+                test_count, strategy_name
+            );
         }
-        
+
         // Use plugin compatibility if available (Phase 5A)
         if let Some(plugin_mgr) = &self.plugin_compatibility {
             return self.execute_with_plugins(tests, plugin_mgr);
         }
-        
+
         self.run_tests_with_strategy(tests, strategy)
     }
-    
+
     /// Intelligently determine the best execution strategy based on test count
     fn determine_execution_strategy(test_count: usize) -> ExecutionStrategy {
         if test_count <= SMALL_SUITE_THRESHOLD {
@@ -476,49 +486,53 @@ impl UltraFastExecutor {
             ExecutionStrategy::FullParallel
         }
     }
-    
+
     /// Execute tests using the optimal strategy for performance
-    fn run_tests_with_strategy(&self, tests: Vec<TestItem>, strategy: ExecutionStrategy) -> Result<Vec<TestResult>> {
-        if tests.is_empty() { return Ok(vec![]); }
-        
+    fn run_tests_with_strategy(
+        &self,
+        tests: Vec<TestItem>,
+        strategy: ExecutionStrategy,
+    ) -> Result<Vec<TestResult>> {
+        if tests.is_empty() {
+            return Ok(vec![]);
+        }
+
         let start_time = Instant::now();
-        
+
         let results = match strategy {
-            ExecutionStrategy::InProcess => {
-                self.execute_in_process(tests)
-            },
-            ExecutionStrategy::WarmWorkers => {
-                self.execute_with_warm_workers(tests)
-            },
-            ExecutionStrategy::FullParallel => {
-                run_tests(tests, self.verbose)
-            }
+            ExecutionStrategy::InProcess => self.execute_in_process(tests),
+            ExecutionStrategy::WarmWorkers => self.execute_with_warm_workers(tests),
+            ExecutionStrategy::FullParallel => run_tests(tests, self.verbose),
         }?;
-        
+
         if self.verbose {
             let duration = start_time.elapsed();
-            eprintln!("🚀 Completed {} tests in {:.3}s", results.len(), duration.as_secs_f64());
+            eprintln!(
+                "🚀 Completed {} tests in {:.3}s",
+                results.len(),
+                duration.as_secs_f64()
+            );
         }
-        
+
         Ok(results)
     }
-    
+
     /// Ultra-fast in-process execution for small test suites (≤20 tests)
     /// Eliminates process startup overhead entirely
     fn execute_in_process(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         if self.verbose {
             eprintln!("🔥 Using in-process execution for maximum speed");
         }
-        
+
         // Use PyO3 to execute tests directly in the current process
         // This eliminates all IPC overhead for small test suites
-        
+
         Python::with_gil(|py| {
             let mut results = Vec::with_capacity(tests.len());
-            
+
             for test in tests {
                 let start_time = Instant::now();
-                
+
                 let result = match self.execute_single_test_in_process(py, &test) {
                     Ok(_) => TestResult {
                         test_id: test.id.clone(),
@@ -537,72 +551,79 @@ impl UltraFastExecutor {
                         output: String::new(),
                         stdout: String::new(),
                         stderr: String::new(),
-                    }
+                    },
                 };
-                
+
                 results.push(result);
             }
-            
+
             Ok(results)
         })
     }
-    
+
     /// Execute a single test in-process using PyO3
     fn execute_single_test_in_process(&self, py: Python, test: &TestItem) -> PyResult<()> {
         // Get Python's sys module to modify path
         let sys = py.import("sys")?;
         let sys_path = sys.getattr("path")?;
-        
+
         // Add the test directory to Python path
-        let test_dir = test.path.parent()
+        let test_dir = test
+            .path
+            .parent()
             .unwrap_or_else(|| std::path::Path::new("."))
             .to_string_lossy();
         sys_path.call_method1("insert", (0, test_dir.as_ref()))?;
-        
+
         // Import the test module using importlib
         let importlib = py.import("importlib")?;
-        let module_name = test.path.file_stem()
+        let module_name = test
+            .path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("test_module");
-            
+
         let module = importlib.call_method1("import_module", (module_name,))?;
-        
+
         // Get the test function
         let test_func = if let Some(class_name) = &test.class_name {
             // Handle class-based tests
             let test_class = module.getattr(class_name.as_str())?;
             let instance = test_class.call0()?;
-            
+
             // Call setUp if it exists (for unittest compatibility)
             if instance.hasattr("setUp")? {
                 let _ = instance.call_method0("setUp"); // Ignore errors
             }
-            
+
             instance.getattr(test.function_name.as_str())?
         } else {
             // Handle function-based tests
             module.getattr(test.function_name.as_str())?
         };
-        
+
         // Execute the test function
         test_func.call0()?;
-        
+
         Ok(())
     }
-    
+
     /// Optimized execution with pre-warmed worker pool for medium suites (21-100 tests)
     fn execute_with_warm_workers(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         if self.verbose {
             eprintln!("🔥 Using warm worker pool for optimal throughput");
         }
-        
+
         // Use smaller batch sizes for faster iteration on medium suites
         let batch_size = MEDIUM_BATCH_SIZE;
         let chunks: Vec<_> = tests.chunks(batch_size).collect();
         let total_batches = chunks.len();
-        
+
         if self.verbose {
-            eprintln!("Running {} batches of up to {} tests each", total_batches, batch_size);
+            eprintln!(
+                "Running {} batches of up to {} tests each",
+                total_batches, batch_size
+            );
         }
 
         let results: Vec<TestResult> = chunks
@@ -612,12 +633,13 @@ impl UltraFastExecutor {
                 if self.verbose {
                     eprintln!("Processing batch {}/{}", i + 1, total_batches);
                 }
-                
+
                 // Use optimized worker with faster startup
-                run_batch_optimized(chunk.to_vec(), i)
-                    .unwrap_or_else(|e| {
-                        eprintln!("Batch {} failed: {}", i, e);
-                        chunk.iter().map(|test| TestResult {
+                run_batch_optimized(chunk.to_vec(), i).unwrap_or_else(|e| {
+                    eprintln!("Batch {} failed: {}", i, e);
+                    chunk
+                        .iter()
+                        .map(|test| TestResult {
                             test_id: test.id.clone(),
                             passed: false,
                             error: Some(format!("Batch execution failed: {}", e)),
@@ -625,18 +647,23 @@ impl UltraFastExecutor {
                             output: String::new(),
                             stdout: String::new(),
                             stderr: String::new(),
-                        }).collect()
-                    })
+                        })
+                        .collect()
+                })
             })
             .collect();
-            
+
         Ok(results)
     }
-    
+
     /// Execute tests with plugin compatibility support
-    fn execute_with_plugins(&self, tests: Vec<TestItem>, plugin_mgr: &PluginCompatibilityManager) -> Result<Vec<TestResult>> {
+    fn execute_with_plugins(
+        &self,
+        tests: Vec<TestItem>,
+        plugin_mgr: &PluginCompatibilityManager,
+    ) -> Result<Vec<TestResult>> {
         let runtime = tokio::runtime::Runtime::new()?;
-        
+
         runtime.block_on(async {
             match plugin_mgr.execute_with_plugins(tests).await {
                 Ok(results) => Ok(results),
@@ -644,9 +671,9 @@ impl UltraFastExecutor {
             }
         })
     }
-    
+
     // Legacy compatibility methods
-    
+
     /// Accept coverage configuration for API compatibility. No-op for now.
     pub fn with_coverage(self, _source_dirs: Vec<std::path::PathBuf>) -> Self {
         if self.verbose {
@@ -654,7 +681,7 @@ impl UltraFastExecutor {
         }
         self
     }
-    
+
     /// Legacy method for BatchExecutor compatibility
     pub fn execute_tests(&self, tests: Vec<TestItem>) -> Vec<TestResult> {
         self.execute(tests).unwrap_or_else(|e| {
@@ -668,15 +695,20 @@ impl UltraFastExecutor {
 /*                              Core execution                                */
 /* -------------------------------------------------------------------------- */
 fn run_tests(tests: Vec<TestItem>, verbose: bool) -> Result<Vec<TestResult>> {
-    if tests.is_empty() { return Ok(vec![]); }
+    if tests.is_empty() {
+        return Ok(vec![]);
+    }
 
     // Use optimized batch size for large test suites
     let batch_size = LARGE_BATCH_SIZE;
     let chunks: Vec<_> = tests.chunks(batch_size).collect();
     let total_batches = chunks.len();
-    
+
     if verbose {
-        eprintln!("🚀 Full parallel execution: {} batches of up to {} tests each", total_batches, batch_size);
+        eprintln!(
+            "🚀 Full parallel execution: {} batches of up to {} tests each",
+            total_batches, batch_size
+        );
     }
 
     let results: Vec<TestResult> = chunks
@@ -697,7 +729,7 @@ fn run_tests(tests: Vec<TestItem>, verbose: bool) -> Result<Vec<TestResult>> {
 fn run_batch_optimized(chunk: Vec<TestItem>, batch_id: usize) -> Result<Vec<TestResult>> {
     // Use a simplified worker with reduced startup time
     let mut worker = OptimizedWorker::spawn(batch_id)?;
-    
+
     let cmd = WorkerCommand {
         id: batch_id,
         tests: chunk
@@ -708,7 +740,7 @@ fn run_batch_optimized(chunk: Vec<TestItem>, batch_id: usize) -> Result<Vec<Test
                 } else {
                     &t.id
                 };
-                
+
                 TestData {
                     id: t.id.clone(),
                     module: test_id.split("::").nth(0).unwrap_or(&t.name).to_string(),
@@ -719,20 +751,24 @@ fn run_batch_optimized(chunk: Vec<TestItem>, batch_id: usize) -> Result<Vec<Test
             })
             .collect(),
     };
-    
+
     let response = worker.run(&cmd)?;
-    
+
     // Convert TestResultData to TestResult
-    let results = response.results.into_iter().map(|data| TestResult {
-        test_id: data.id,
-        passed: data.passed,
-        duration: Duration::from_secs_f64(data.duration / 1000.0),
-        error: data.error,
-        output: String::new(),
-        stdout: String::new(),
-        stderr: String::new(),
-    }).collect();
-    
+    let results = response
+        .results
+        .into_iter()
+        .map(|data| TestResult {
+            test_id: data.id,
+            passed: data.passed,
+            duration: Duration::from_secs_f64(data.duration / 1000.0),
+            error: data.error,
+            output: String::new(),
+            stdout: String::new(),
+            stderr: String::new(),
+        })
+        .collect();
+
     Ok(results)
 }
 
@@ -764,7 +800,7 @@ impl OptimizedWorker {
         let mut stdout = BufReader::new(child.stdout.take().unwrap());
         let mut ready = String::new();
         stdout.read_line(&mut ready)?;
-        
+
         if ready.trim() != "READY" {
             return Err(Error::Execution("optimized worker not ready".into()));
         }
@@ -775,19 +811,19 @@ impl OptimizedWorker {
             process: child,
         })
     }
-    
+
     fn run(&mut self, cmd: &WorkerCommand) -> Result<WorkerResponse> {
         // Use the same protocol but with faster execution
         let json_str = serde_json::to_string(cmd)?;
         writeln!(&mut self.stdin, "{}", json_str)?;
-        
+
         let mut line = String::new();
         self.stdout.read_line(&mut line)?;
-        
+
         serde_json::from_str(&line.trim())
             .map_err(|e| Error::Execution(format!("Failed to parse optimized response: {}", e)))
     }
-    
+
     /// Optimized Python worker code with faster imports and execution
     fn get_optimized_worker_code() -> String {
         r#"
@@ -897,7 +933,8 @@ while True:
         }
         print(json.dumps(error_response))
         sys.stdout.flush()
-"#.to_string()
+"#
+        .to_string()
     }
 }
 
@@ -913,7 +950,7 @@ fn run_batch(chunk: &[TestItem], verbose: bool) -> Vec<TestResult> {
                 } else {
                     &t.id
                 };
-                
+
                 // More robust parsing of test IDs
                 let parts: Vec<&str> = test_id.split("::").collect();
                 let (module, func) = match parts.len() {
@@ -922,20 +959,24 @@ fn run_batch(chunk: &[TestItem], verbose: bool) -> Vec<TestResult> {
                     3 => (parts[0], format!("{}::{}", parts[1], parts[2])),
                     _ => (parts[0], parts[1..].join("::")),
                 };
-                
+
                 // Extract parameters from decorators
-                let params = t.decorators.iter()
+                let params = t
+                    .decorators
+                    .iter()
                     .find(|d| d.starts_with("__params__="))
                     .and_then(|d| {
                         let json_str = d.trim_start_matches("__params__=");
                         serde_json::from_str::<serde_json::Value>(json_str).ok()
                     });
-                
+
                 if verbose {
-                    eprintln!("Test mapping: {} -> module: {}, func: {}, params: {:?}", 
-                             t.id, module, func, params);
+                    eprintln!(
+                        "Test mapping: {} -> module: {}, func: {}, params: {:?}",
+                        t.id, module, func, params
+                    );
                 }
-                
+
                 TestData {
                     id: t.id.clone(),
                     module: module.to_owned(),
@@ -948,7 +989,10 @@ fn run_batch(chunk: &[TestItem], verbose: bool) -> Vec<TestResult> {
     };
 
     if verbose {
-        eprintln!("Sending command: {}", serde_json::to_string_pretty(&cmd).unwrap_or_default());
+        eprintln!(
+            "Sending command: {}",
+            serde_json::to_string_pretty(&cmd).unwrap_or_default()
+        );
     }
 
     let worker = POOL.next();
@@ -970,17 +1014,21 @@ fn run_batch(chunk: &[TestItem], verbose: bool) -> Vec<TestResult> {
 
 #[inline]
 fn to_result(r: TestResultData) -> TestResult {
-    let is_skip = r.error.as_ref().map(|e| e.starts_with("SKIPPED:")).unwrap_or(false);
+    let is_skip = r
+        .error
+        .as_ref()
+        .map(|e| e.starts_with("SKIPPED:"))
+        .unwrap_or(false);
     TestResult {
         test_id: r.id,
         passed: r.passed,
         duration: Duration::from_secs_f64(r.duration),
-        output: if is_skip { 
-            "SKIPPED".to_owned() 
-        } else if r.passed { 
-            "PASSED".to_owned() 
-        } else { 
-            "FAILED".to_owned() 
+        output: if is_skip {
+            "SKIPPED".to_owned()
+        } else if r.passed {
+            "PASSED".to_owned()
+        } else {
+            "FAILED".to_owned()
         },
         error: r.error,
         stdout: String::new(),

@@ -2,7 +2,7 @@ use crate::cache::DiscoveryCache;
 use crate::error::Result;
 use crate::fixtures::{Fixture, FixtureScope};
 use crate::parametrize::expand_parametrized_tests;
-use crate::parser::{Parser, FixtureDefinition, TestFunction};
+use crate::parser::{FixtureDefinition, Parser, TestFunction};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -59,9 +59,7 @@ pub fn discover_tests(path: &Path) -> Result<Vec<TestItem>> {
     Ok(result.tests)
 }
 
-pub fn discover_tests_and_fixtures(
-    path: &Path,
-) -> Result<DiscoveryResult> {
+pub fn discover_tests_and_fixtures(path: &Path) -> Result<DiscoveryResult> {
     let mut tests = Vec::new();
     let mut fixtures = Vec::new();
 
@@ -175,10 +173,7 @@ pub fn discover_tests_ast(path: &Path) -> Result<Vec<TestItem>> {
 }
 
 /// Discover tests with caching support
-pub fn discover_tests_cached(
-    path: &Path,
-    cache: &mut DiscoveryCache,
-) -> Result<Vec<TestItem>> {
+pub fn discover_tests_cached(path: &Path, cache: &mut DiscoveryCache) -> Result<Vec<TestItem>> {
     let mut tests = Vec::new();
     let mut cache_hits = 0;
     let mut cache_misses = 0;

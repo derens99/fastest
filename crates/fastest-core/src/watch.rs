@@ -173,10 +173,7 @@ pub struct WatchMode {
 
 impl WatchMode {
     /// Create a new watch mode controller
-    pub fn new(
-        filter: Option<String>,
-        markers: Option<String>,
-    ) -> Result<Self> {
+    pub fn new(filter: Option<String>, markers: Option<String>) -> Result<Self> {
         Ok(Self {
             watcher: TestWatcher::new()?,
             _filter: filter,

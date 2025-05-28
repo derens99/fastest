@@ -188,7 +188,10 @@ impl PluginCompatibilityManager {
 
         if let Some(cov) = &mut self.coverage_manager {
             cov.initialize().await?;
-            tracing::info!("  ✓ pytest-cov: {} source dirs", self.config.coverage_source.len());
+            tracing::info!(
+                "  ✓ pytest-cov: {} source dirs",
+                self.config.coverage_source.len()
+            );
         }
 
         if self.mock_manager.is_some() {
@@ -207,7 +210,9 @@ impl PluginCompatibilityManager {
     pub async fn execute_with_plugins(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         // If xdist is enabled, distribute tests across workers
         if let Some(xdist) = &self.xdist_manager {
-            return xdist.execute_distributed(tests, &self.coverage_manager).await;
+            return xdist
+                .execute_distributed(tests, &self.coverage_manager)
+                .await;
         }
 
         // Otherwise, execute with other plugin support
@@ -260,8 +265,11 @@ impl PluginCompatibilityManager {
     /// Check if test uses mocking features
     fn test_uses_mocking(&self, test: &TestItem) -> bool {
         // Check for mocker fixture or mock decorators
-        test.fixture_deps.contains(&"mocker".to_string()) ||
-        test.decorators.iter().any(|d| d.contains("mock") || d.contains("patch"))
+        test.fixture_deps.contains(&"mocker".to_string())
+            || test
+                .decorators
+                .iter()
+                .any(|d| d.contains("mock") || d.contains("patch"))
     }
 
     /// Execute async test with pytest-asyncio support
@@ -269,7 +277,9 @@ impl PluginCompatibilityManager {
         if let Some(asyncio) = &self.asyncio_manager {
             asyncio.execute_async_test(test).await
         } else {
-            Err(anyhow::anyhow!("Async test requires pytest-asyncio support"))
+            Err(anyhow::anyhow!(
+                "Async test requires pytest-asyncio support"
+            ))
         }
     }
 
@@ -292,21 +302,28 @@ impl PluginCompatibilityManager {
     pub async fn get_plugin_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
 
-        stats.insert("plugins_enabled".to_string(), serde_json::Value::Bool(
-            self.xdist_manager.is_some() || 
-            self.coverage_manager.is_some() || 
-            self.mock_manager.is_some() || 
-            self.asyncio_manager.is_some()
-        ));
+        stats.insert(
+            "plugins_enabled".to_string(),
+            serde_json::Value::Bool(
+                self.xdist_manager.is_some()
+                    || self.coverage_manager.is_some()
+                    || self.mock_manager.is_some()
+                    || self.asyncio_manager.is_some(),
+            ),
+        );
 
         if let Some(xdist) = &self.xdist_manager {
-            stats.insert("xdist_workers".to_string(), serde_json::Value::Number(
-                serde_json::Number::from(xdist.worker_count)
-            ));
+            stats.insert(
+                "xdist_workers".to_string(),
+                serde_json::Value::Number(serde_json::Number::from(xdist.worker_count)),
+            );
         }
 
         if self.coverage_manager.is_some() {
-            stats.insert("coverage_enabled".to_string(), serde_json::Value::Bool(true));
+            stats.insert(
+                "coverage_enabled".to_string(),
+                serde_json::Value::Bool(true),
+            );
         }
 
         if self.mock_manager.is_some() {
@@ -349,15 +366,25 @@ impl XdistManager {
         Ok(())
     }
 
-    async fn execute_distributed(&self, tests: Vec<TestItem>, coverage: &Option<CoverageManager>) -> Result<Vec<TestResult>> {
-        tracing::info!("🔄 Distributing {} tests across {} workers", tests.len(), self.worker_count);
+    async fn execute_distributed(
+        &self,
+        tests: Vec<TestItem>,
+        coverage: &Option<CoverageManager>,
+    ) -> Result<Vec<TestResult>> {
+        tracing::info!(
+            "🔄 Distributing {} tests across {} workers",
+            tests.len(),
+            self.worker_count
+        );
 
         // Distribute tests using load balancer
-        let test_batches = self.load_balancer.distribute_tests(tests, self.worker_count);
-        
+        let test_batches = self
+            .load_balancer
+            .distribute_tests(tests, self.worker_count);
+
         // Execute batches in parallel across workers
         let mut handles = Vec::new();
-        
+
         for (worker_id, batch) in test_batches.into_iter().enumerate() {
             let coverage_clone = coverage.as_ref().map(|c| c.clone());
             let handle = tokio::spawn(async move {
@@ -373,14 +400,17 @@ impl XdistManager {
             all_results.extend(worker_results);
         }
 
-        tracing::info!("✅ Completed distributed execution: {} results", all_results.len());
+        tracing::info!(
+            "✅ Completed distributed execution: {} results",
+            all_results.len()
+        );
         Ok(all_results)
     }
 
     async fn execute_worker_batch(
-        worker_id: usize, 
-        tests: Vec<TestItem>, 
-        coverage: Option<CoverageManager>
+        worker_id: usize,
+        tests: Vec<TestItem>,
+        coverage: Option<CoverageManager>,
     ) -> Result<Vec<TestResult>> {
         tracing::debug!("Worker {} executing {} tests", worker_id, tests.len());
 
@@ -421,9 +451,13 @@ impl LoadBalancer {
         }
     }
 
-    fn round_robin_distribution(&self, tests: Vec<TestItem>, worker_count: usize) -> Vec<Vec<TestItem>> {
+    fn round_robin_distribution(
+        &self,
+        tests: Vec<TestItem>,
+        worker_count: usize,
+    ) -> Vec<Vec<TestItem>> {
         let mut batches: Vec<Vec<TestItem>> = vec![Vec::new(); worker_count];
-        
+
         for (i, test) in tests.into_iter().enumerate() {
             let worker_idx = i % worker_count;
             batches[worker_idx].push(test);
@@ -432,24 +466,38 @@ impl LoadBalancer {
         batches
     }
 
-    fn load_based_distribution(&self, tests: Vec<TestItem>, worker_count: usize) -> Vec<Vec<TestItem>> {
+    fn load_based_distribution(
+        &self,
+        tests: Vec<TestItem>,
+        worker_count: usize,
+    ) -> Vec<Vec<TestItem>> {
         // Simple load balancing - can be enhanced with test execution time prediction
         let chunk_size = (tests.len() + worker_count - 1) / worker_count;
-        tests.chunks(chunk_size).map(|chunk| chunk.to_vec()).collect()
+        tests
+            .chunks(chunk_size)
+            .map(|chunk| chunk.to_vec())
+            .collect()
     }
 
-    fn module_based_distribution(&self, tests: Vec<TestItem>, worker_count: usize) -> Vec<Vec<TestItem>> {
+    fn module_based_distribution(
+        &self,
+        tests: Vec<TestItem>,
+        worker_count: usize,
+    ) -> Vec<Vec<TestItem>> {
         // Group tests by module, then distribute modules across workers
         let mut module_groups: HashMap<String, Vec<TestItem>> = HashMap::new();
-        
+
         for test in tests {
             let module = test.path.to_string_lossy().to_string();
-            module_groups.entry(module).or_insert_with(Vec::new).push(test);
+            module_groups
+                .entry(module)
+                .or_insert_with(Vec::new)
+                .push(test);
         }
 
         let mut batches: Vec<Vec<TestItem>> = vec![Vec::new(); worker_count];
         let modules: Vec<_> = module_groups.into_values().collect();
-        
+
         for (i, module_tests) in modules.into_iter().enumerate() {
             let worker_idx = i % worker_count;
             batches[worker_idx].extend(module_tests);
@@ -471,14 +519,17 @@ impl CoverageManager {
 
     async fn initialize(&mut self) -> Result<()> {
         // Initialize coverage.py integration
-        tracing::info!("Initializing coverage tracking for {} directories", self.source_dirs.len());
+        tracing::info!(
+            "Initializing coverage tracking for {} directories",
+            self.source_dirs.len()
+        );
         Ok(())
     }
 
     async fn execute_with_coverage(&self, test: &TestItem) -> Result<TestResult> {
         // Execute test with coverage tracking
         // This would integrate with coverage.py
-        
+
         // Placeholder implementation
         let result = TestResult {
             test_id: test.id.clone(),
@@ -498,33 +549,38 @@ impl CoverageManager {
 
     async fn record_coverage_for_test(&self, test: &TestItem, _result: &TestResult) -> Result<()> {
         let mut coverage_data = self.coverage_data.write().await;
-        
+
         // Record coverage data for the test file
         let file_path = test.path.to_string_lossy().to_string();
-        coverage_data.insert(file_path.clone(), CoverageData {
-            file_path,
-            lines_covered: vec![test.line_number], // Simplified
-            lines_total: 100, // Would be calculated from actual file
-            coverage_percentage: 85.0, // Would be calculated
-        });
+        coverage_data.insert(
+            file_path.clone(),
+            CoverageData {
+                file_path,
+                lines_covered: vec![test.line_number], // Simplified
+                lines_total: 100,                      // Would be calculated from actual file
+                coverage_percentage: 85.0,             // Would be calculated
+            },
+        );
 
         Ok(())
     }
 
     async fn generate_report(&self) -> Result<()> {
         let coverage_data = self.coverage_data.read().await;
-        
+
         println!("\n📊 Coverage Report:");
         println!("==================");
-        
+
         for (file, data) in coverage_data.iter() {
-            println!("{}: {:.1}% ({}/{} lines)", 
-                     file, 
-                     data.coverage_percentage, 
-                     data.lines_covered.len(), 
-                     data.lines_total);
+            println!(
+                "{}: {:.1}% ({}/{} lines)",
+                file,
+                data.coverage_percentage,
+                data.lines_covered.len(),
+                data.lines_total
+            );
         }
-        
+
         Ok(())
     }
 }
@@ -541,7 +597,7 @@ impl MockManager {
     async fn setup_mocks_for_test(&self, test: &TestItem) -> Result<()> {
         // Setup mocks for test based on decorators and fixtures
         tracing::debug!("Setting up mocks for test: {}", test.id);
-        
+
         // Parse mock decorators and setup accordingly
         for decorator in &test.decorators {
             if decorator.contains("patch") {
@@ -555,22 +611,25 @@ impl MockManager {
     async fn setup_patch_mock(&self, _test: &TestItem, decorator: &str) -> Result<()> {
         // Parse patch decorator and setup mock
         tracing::debug!("Setting up patch mock: {}", decorator);
-        
+
         // This would integrate with Python's unittest.mock
         // For now, just record the mock setup
         let mut mocks = self.active_mocks.write().await;
-        mocks.insert(decorator.to_string(), MockData {
-            target: decorator.to_string(),
-            mock_type: MockType::Patch,
-            return_value: None,
-        });
+        mocks.insert(
+            decorator.to_string(),
+            MockData {
+                target: decorator.to_string(),
+                mock_type: MockType::Patch,
+                return_value: None,
+            },
+        );
 
         Ok(())
     }
 
     async fn cleanup_mocks_for_test(&self, test: &TestItem) -> Result<()> {
         tracing::debug!("Cleaning up mocks for test: {}", test.id);
-        
+
         // Reset all mocks for this test
         let mut mocks = self.active_mocks.write().await;
         mocks.clear();
@@ -605,7 +664,7 @@ impl AsyncioManager {
 
         // Execute async test with proper event loop handling
         // This would integrate with Python's asyncio
-        
+
         let result = TestResult {
             test_id: test.id.clone(),
             passed: true,
@@ -623,7 +682,7 @@ impl AsyncioManager {
 /// Parse plugin configuration from command line arguments
 pub fn parse_plugin_args(args: &[String]) -> PluginCompatibilityConfig {
     let mut config = PluginCompatibilityConfig::default();
-    
+
     for arg in args {
         match arg.as_str() {
             arg if arg.starts_with("-n") => {
@@ -660,7 +719,7 @@ pub fn parse_plugin_args(args: &[String]) -> PluginCompatibilityConfig {
             _ => {}
         }
     }
-    
+
     config
 }
 
@@ -676,9 +735,9 @@ mod tests {
             "--mock".to_string(),
             "--asyncio-mode=strict".to_string(),
         ];
-        
+
         let config = parse_plugin_args(&args);
-        
+
         assert!(config.xdist_enabled);
         assert_eq!(config.xdist_workers, 4);
         assert!(config.coverage_enabled);
@@ -699,18 +758,21 @@ mod tests {
             asyncio_enabled: true,
             asyncio_mode: "auto".to_string(),
         };
-        
+
         let mut manager = PluginCompatibilityManager::new(config);
         assert!(manager.initialize().await.is_ok());
-        
+
         let stats = manager.get_plugin_stats().await;
-        assert_eq!(stats.get("plugins_enabled").unwrap(), &serde_json::Value::Bool(true));
+        assert_eq!(
+            stats.get("plugins_enabled").unwrap(),
+            &serde_json::Value::Bool(true)
+        );
     }
 
     #[test]
     fn test_load_balancer() {
         let balancer = LoadBalancer::new(LoadBalanceStrategy::RoundRobin);
-        
+
         let tests = vec![
             TestItem {
                 id: "test1".to_string(),
@@ -735,9 +797,9 @@ mod tests {
                 decorators: vec![],
                 fixture_deps: vec![],
                 is_xfail: false,
-            }
+            },
         ];
-        
+
         let batches = balancer.distribute_tests(tests, 2);
         assert_eq!(batches.len(), 2);
         assert_eq!(batches[0].len(), 1);

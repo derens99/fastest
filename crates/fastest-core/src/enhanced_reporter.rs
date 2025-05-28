@@ -165,7 +165,11 @@ impl EnhancedReporter {
     }
 
     /// Generate enhanced failure report
-    pub fn generate_failure_report(&self, test: &TestItem, result: &TestResult) -> Result<FailureReport> {
+    pub fn generate_failure_report(
+        &self,
+        test: &TestItem,
+        result: &TestResult,
+    ) -> Result<FailureReport> {
         let default_error = "Unknown error".to_string();
         let error_message = result.error.as_ref().unwrap_or(&default_error);
         let error_type = self.classify_error(error_message);
@@ -217,21 +221,37 @@ impl EnhancedReporter {
     fn display_colored_report(&self, report: &FailureReport) -> Result<()> {
         println!();
         println!("{}", "━".repeat(80).bright_red());
-        println!("{} {}", "❌ FAILURE:".bright_red().bold(), report.test_id.bright_white().bold());
+        println!(
+            "{} {}",
+            "❌ FAILURE:".bright_red().bold(),
+            report.test_id.bright_white().bold()
+        );
         println!("{}", "━".repeat(80).bright_red());
 
         // Error title and type
-        println!("{}: {}", "Error Type".cyan().bold(), report.error_type.red());
+        println!(
+            "{}: {}",
+            "Error Type".cyan().bold(),
+            report.error_type.red()
+        );
         println!("{}: {}", "Title".cyan().bold(), report.title.yellow());
 
         // Context information
         if self.config.detailed_context {
             println!("\n{}", "📍 Context:".bright_blue().bold());
-            println!("  {}: {}", "File".cyan(), report.context.file_path.bright_blue());
+            println!(
+                "  {}: {}",
+                "File".cyan(),
+                report.context.file_path.bright_blue()
+            );
             if let Some(line) = report.context.line_number {
                 println!("  {}: {}", "Line".cyan(), line.to_string().green());
             }
-            println!("  {}: {}", "Function".cyan(), report.context.function_name.magenta());
+            println!(
+                "  {}: {}",
+                "Function".cyan(),
+                report.context.function_name.magenta()
+            );
 
             if let Some(params) = &report.context.test_parameters {
                 println!("  {}: {}", "Parameters".cyan(), params.to_string().yellow());
@@ -242,9 +262,17 @@ impl EnhancedReporter {
                 for (i, line) in code.lines().enumerate() {
                     let line_num = report.context.line_number.unwrap_or(0) + i as u32;
                     if Some(line_num) == report.context.line_number {
-                        println!("  {} {}", format!("{:>4}", line_num).red().bold(), line.white());
+                        println!(
+                            "  {} {}",
+                            format!("{:>4}", line_num).red().bold(),
+                            line.white()
+                        );
                     } else {
-                        println!("  {} {}", format!("{:>4}", line_num).bright_black(), line.bright_black());
+                        println!(
+                            "  {} {}",
+                            format!("{:>4}", line_num).bright_black(),
+                            line.bright_black()
+                        );
                     }
                 }
             }
@@ -416,8 +444,9 @@ impl EnhancedReporter {
         if let Ok(content) = std::fs::read_to_string(&test.path) {
             let lines: Vec<&str> = content.lines().collect();
             let start = (line_num.saturating_sub(self.config.max_context_lines)).max(0);
-            let end = ((line_num + self.config.max_context_lines).min(lines.len())).max(line_num + 1);
-            
+            let end =
+                ((line_num + self.config.max_context_lines).min(lines.len())).max(line_num + 1);
+
             let snippet = lines[start..end].join("\n");
             return Ok(Some(snippet));
         }
@@ -468,7 +497,11 @@ impl EnhancedReporter {
     fn parse_traceback(&self, error_message: &str) -> Vec<String> {
         error_message
             .lines()
-            .filter(|line| line.trim().starts_with("File ") || line.trim().starts_with("    ") || line.contains("Error:"))
+            .filter(|line| {
+                line.trim().starts_with("File ")
+                    || line.trim().starts_with("    ")
+                    || line.contains("Error:")
+            })
             .map(|line| line.to_string())
             .collect()
     }
@@ -477,11 +510,15 @@ impl EnhancedReporter {
     pub fn generate_failure_summary(&self, failures: &[FailureReport]) -> Result<String> {
         let mut summary = String::new();
 
-        writeln!(summary, "\n{}", if self.config.colors_enabled {
-            "📊 Failure Summary".bright_red().bold().to_string()
-        } else {
-            "Failure Summary".to_string()
-        })?;
+        writeln!(
+            summary,
+            "\n{}",
+            if self.config.colors_enabled {
+                "📊 Failure Summary".bright_red().bold().to_string()
+            } else {
+                "Failure Summary".to_string()
+            }
+        )?;
 
         let mut error_counts: HashMap<String, usize> = HashMap::new();
         for failure in failures {
@@ -490,11 +527,15 @@ impl EnhancedReporter {
 
         for (error_type, count) in error_counts {
             let line = format!("  {}: {} test(s)", error_type, count);
-            writeln!(summary, "{}", if self.config.colors_enabled {
-                line.red().to_string()
-            } else {
-                line
-            })?;
+            writeln!(
+                summary,
+                "{}",
+                if self.config.colors_enabled {
+                    line.red().to_string()
+                } else {
+                    line
+                }
+            )?;
         }
 
         Ok(summary)
@@ -515,10 +556,19 @@ mod tests {
     #[test]
     fn test_error_classification() {
         let reporter = EnhancedReporter::new(ReporterConfig::default());
-        
-        assert_eq!(reporter.classify_error("AssertionError: test failed"), "Assertion Failed");
-        assert_eq!(reporter.classify_error("AttributeError: no attribute"), "Attribute Not Found");
-        assert_eq!(reporter.classify_error("SomeRandomError: unknown"), "Unknown Error");
+
+        assert_eq!(
+            reporter.classify_error("AssertionError: test failed"),
+            "Assertion Failed"
+        );
+        assert_eq!(
+            reporter.classify_error("AttributeError: no attribute"),
+            "Attribute Not Found"
+        );
+        assert_eq!(
+            reporter.classify_error("SomeRandomError: unknown"),
+            "Unknown Error"
+        );
     }
 
     #[test]

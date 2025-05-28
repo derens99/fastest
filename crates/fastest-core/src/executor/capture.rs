@@ -36,7 +36,7 @@ impl Default for CaptureConfig {
             capture_logs: false,
             isolate_filesystem: false,
             isolate_environment: true,
-            timeout_seconds: Some(300), // 5 minutes
+            timeout_seconds: Some(300),   // 5 minutes
             max_output_size: 1024 * 1024, // 1MB
         }
     }
@@ -110,21 +110,22 @@ impl CaptureManager {
             active_captures: Arc::new(Mutex::new(HashMap::new())),
         }
     }
-    
+
     /// Start capturing output for a test
     pub fn start_capture(&self, test_id: &str, test_code: &str) -> Result<()> {
         let start_time = Instant::now();
-        
+
         // Generate enhanced Python test execution code with capture
         let execution_code = self.generate_capture_code(test_code)?;
-        
+
         // Create isolated environment
-        let (temp_dir, env_vars) = if self.config.isolate_filesystem || self.config.isolate_environment {
-            self.create_isolated_environment()?
-        } else {
-            (None, HashMap::new())
-        };
-        
+        let (temp_dir, env_vars) =
+            if self.config.isolate_filesystem || self.config.isolate_environment {
+                self.create_isolated_environment()?
+            } else {
+                (None, HashMap::new())
+            };
+
         // Start Python process with capture
         let mut command = Command::new("python");
         command
@@ -134,7 +135,7 @@ impl CaptureManager {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        
+
         // Set environment variables
         if self.config.isolate_environment {
             command.env_clear();
@@ -145,22 +146,23 @@ impl CaptureManager {
                 ("FASTEST_TEST_ID", test_id),
             ]);
         }
-        
+
         for (key, value) in &env_vars {
             command.env(key, value);
         }
-        
+
         // Set working directory to temp dir if isolating filesystem
         if let Some(ref temp_dir) = temp_dir {
             command.current_dir(temp_dir);
         }
-        
-        let mut child = command.spawn()
+
+        let mut child = command
+            .spawn()
             .map_err(|e| anyhow!("Failed to start test process for {}: {}", test_id, e))?;
-        
+
         let stdout_reader = BufReader::new(child.stdout.take().unwrap());
         let stderr_reader = BufReader::new(child.stderr.take().unwrap());
-        
+
         let capture = ActiveCapture {
             start_time,
             python_process: child,
@@ -169,52 +171,60 @@ impl CaptureManager {
             temp_dir,
             original_env: std::env::vars().collect(),
         };
-        
+
         let mut active_captures = self.active_captures.lock().unwrap();
         active_captures.insert(test_id.to_string(), capture);
-        
+
         Ok(())
     }
-    
+
     /// Stop capturing and return results
     pub fn stop_capture(&self, test_id: &str) -> Result<CaptureResult> {
         let mut active_captures = self.active_captures.lock().unwrap();
-        let mut capture = active_captures.remove(test_id)
+        let mut capture = active_captures
+            .remove(test_id)
             .ok_or_else(|| anyhow!("No active capture for test {}", test_id))?;
-        
+
         drop(active_captures); // Release the lock
-        
+
         let duration = capture.start_time.elapsed();
-        
+
         // Read all output
         let stdout = self.read_output(&mut capture.stdout_reader)?;
         let stderr = self.read_output(&mut capture.stderr_reader)?;
-        
+
         // Wait for process to complete
-        let exit_status = capture.python_process.wait()
+        let exit_status = capture
+            .python_process
+            .wait()
             .map_err(|e| anyhow!("Failed to wait for test process: {}", e))?;
-        
+
         // Parse captured output for structured data
-        let (clean_stdout, warnings, logs, exception) = self.parse_captured_output(&stdout, &stderr)?;
-        
+        let (clean_stdout, warnings, logs, exception) =
+            self.parse_captured_output(&stdout, &stderr)?;
+
         // Detect file system changes
         let files_created = if let Some(ref temp_dir) = capture.temp_dir {
             self.detect_created_files(temp_dir)?
         } else {
             Vec::new()
         };
-        
+
         // Detect environment changes
         let env_vars_changed = self.detect_env_changes(&capture.original_env);
-        
+
         // Cleanup isolated environment
         if let Some(temp_dir) = capture.temp_dir {
             self.cleanup_temp_dir(&temp_dir)?;
         }
-        
+
         Ok(CaptureResult {
             stdout: clean_stdout,
-            stderr: if exception.is_some() { String::new() } else { stderr },
+            stderr: if exception.is_some() {
+                String::new()
+            } else {
+                stderr
+            },
             warnings,
             logs,
             exception,
@@ -224,10 +234,11 @@ impl CaptureManager {
             env_vars_changed,
         })
     }
-    
+
     /// Generate Python code with comprehensive capture
     fn generate_capture_code(&self, test_code: &str) -> Result<String> {
-        let capture_wrapper = format!(r#"
+        let capture_wrapper = format!(
+            r#"
 import sys
 import os
 import io
@@ -421,7 +432,7 @@ except Exception as e:
 print("FASTEST_CAPTURE_START")
 print(json.dumps(result, default=str, indent=2))
 print("FASTEST_CAPTURE_END")
-"#, 
+"#,
             self.config.capture_stdout,
             self.config.capture_stderr,
             self.config.capture_warnings,
@@ -429,41 +440,46 @@ print("FASTEST_CAPTURE_END")
             self.config.max_output_size,
             test_code
         );
-        
+
         Ok(capture_wrapper)
     }
-    
+
     /// Create isolated environment for test execution
-    fn create_isolated_environment(&self) -> Result<(Option<std::path::PathBuf>, HashMap<String, String>)> {
+    fn create_isolated_environment(
+        &self,
+    ) -> Result<(Option<std::path::PathBuf>, HashMap<String, String>)> {
         let mut env_vars = HashMap::new();
         let temp_dir = if self.config.isolate_filesystem {
             let temp_dir_handle = tempfile::tempdir()
                 .map_err(|e| anyhow!("Failed to create temp directory: {}", e))?;
             let temp_dir = temp_dir_handle.keep();
-            
+
             // Setup Python path
-            env_vars.insert("PYTHONPATH".to_string(), temp_dir.to_string_lossy().to_string());
-            
+            env_vars.insert(
+                "PYTHONPATH".to_string(),
+                temp_dir.to_string_lossy().to_string(),
+            );
+
             Some(temp_dir)
         } else {
             None
         };
-        
+
         if self.config.isolate_environment {
             // Set clean environment variables
             env_vars.insert("HOME".to_string(), "/tmp".to_string());
             env_vars.insert("USER".to_string(), "fastest_test".to_string());
             env_vars.insert("TMPDIR".to_string(), "/tmp".to_string());
         }
-        
+
         Ok((temp_dir, env_vars))
     }
-    
+
     /// Read output from a buffered reader with size limits
     fn read_output(&self, reader: &mut dyn BufRead) -> Result<String> {
         let mut output = String::new();
         let mut total_size = 0;
-        
+
         loop {
             let mut line = String::new();
             match reader.read_line(&mut line) {
@@ -471,7 +487,10 @@ print("FASTEST_CAPTURE_END")
                 Ok(bytes_read) => {
                     total_size += bytes_read;
                     if total_size > self.config.max_output_size {
-                        output.push_str(&format!("\n[OUTPUT TRUNCATED - {} bytes limit exceeded]", self.config.max_output_size));
+                        output.push_str(&format!(
+                            "\n[OUTPUT TRUNCATED - {} bytes limit exceeded]",
+                            self.config.max_output_size
+                        ));
                         break;
                     }
                     output.push_str(&line);
@@ -479,26 +498,32 @@ print("FASTEST_CAPTURE_END")
                 Err(e) => return Err(anyhow!("Failed to read output: {}", e)),
             }
         }
-        
+
         Ok(output)
     }
-    
+
     /// Parse captured output to extract structured data
-    fn parse_captured_output(&self, stdout: &str, stderr: &str) -> Result<(String, Vec<String>, Vec<LogEntry>, Option<ExceptionInfo>)> {
+    fn parse_captured_output(
+        &self,
+        stdout: &str,
+        stderr: &str,
+    ) -> Result<(String, Vec<String>, Vec<LogEntry>, Option<ExceptionInfo>)> {
         // Look for our JSON output markers
         if let Some(start) = stdout.find("FASTEST_CAPTURE_START") {
             if let Some(end) = stdout.find("FASTEST_CAPTURE_END") {
                 let json_start = start + "FASTEST_CAPTURE_START".len();
                 let json_content = &stdout[json_start..end].trim();
-                
+
                 match serde_json::from_str::<serde_json::Value>(json_content) {
                     Ok(data) => {
-                        let clean_stdout = data.get("stdout")
+                        let clean_stdout = data
+                            .get("stdout")
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        
-                        let warnings = data.get("warnings")
+
+                        let warnings = data
+                            .get("warnings")
                             .and_then(|v| v.as_array())
                             .map(|arr| {
                                 arr.iter()
@@ -507,8 +532,9 @@ print("FASTEST_CAPTURE_END")
                                     .collect()
                             })
                             .unwrap_or_default();
-                        
-                        let logs = data.get("logs")
+
+                        let logs = data
+                            .get("logs")
                             .and_then(|v| v.as_array())
                             .map(|arr| {
                                 arr.iter()
@@ -517,19 +543,29 @@ print("FASTEST_CAPTURE_END")
                                             level: log.get("level")?.as_str()?.to_string(),
                                             message: log.get("message")?.as_str()?.to_string(),
                                             timestamp: log.get("timestamp")?.as_str()?.to_string(),
-                                            logger_name: log.get("logger_name")?.as_str()?.to_string(),
-                                            filename: log.get("filename")?.as_str().map(|s| s.to_string()),
-                                            line_number: log.get("line_number")?.as_u64().map(|n| n as u32),
+                                            logger_name: log
+                                                .get("logger_name")?
+                                                .as_str()?
+                                                .to_string(),
+                                            filename: log
+                                                .get("filename")?
+                                                .as_str()
+                                                .map(|s| s.to_string()),
+                                            line_number: log
+                                                .get("line_number")?
+                                                .as_u64()
+                                                .map(|n| n as u32),
                                         })
                                     })
                                     .collect()
                             })
                             .unwrap_or_default();
-                        
-                        let exception = data.get("exception")
+
+                        let exception = data
+                            .get("exception")
                             .and_then(|v| if v.is_null() { None } else { Some(v) })
                             .and_then(|exc| self.parse_exception_info(exc).ok());
-                        
+
                         return Ok((clean_stdout, warnings, logs, exception));
                     }
                     Err(e) => {
@@ -538,24 +574,27 @@ print("FASTEST_CAPTURE_END")
                 }
             }
         }
-        
+
         // Fallback: return raw output
         Ok((stdout.to_string(), Vec::new(), Vec::new(), None))
     }
-    
+
     /// Parse exception information from JSON
     fn parse_exception_info(&self, exc_data: &serde_json::Value) -> Result<ExceptionInfo> {
-        let exception_type = exc_data.get("exception_type")
+        let exception_type = exc_data
+            .get("exception_type")
             .and_then(|v| v.as_str())
             .unwrap_or("Exception")
             .to_string();
-        
-        let message = exc_data.get("message")
+
+        let message = exc_data
+            .get("message")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        
-        let traceback = exc_data.get("traceback")
+
+        let traceback = exc_data
+            .get("traceback")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -565,7 +604,8 @@ print("FASTEST_CAPTURE_END")
                             line_number: frame.get("line_number")?.as_u64()? as u32,
                             function_name: frame.get("function_name")?.as_str()?.to_string(),
                             code: frame.get("code")?.as_str()?.to_string(),
-                            locals: frame.get("locals")?
+                            locals: frame
+                                .get("locals")?
                                 .as_object()?
                                 .iter()
                                 .filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string())))
@@ -575,8 +615,9 @@ print("FASTEST_CAPTURE_END")
                     .collect()
             })
             .unwrap_or_default();
-        
-        let context = exc_data.get("context")
+
+        let context = exc_data
+            .get("context")
             .and_then(|v| v.as_object())
             .map(|obj| {
                 obj.iter()
@@ -584,12 +625,13 @@ print("FASTEST_CAPTURE_END")
                     .collect()
             })
             .unwrap_or_default();
-        
-        let cause = exc_data.get("cause")
+
+        let cause = exc_data
+            .get("cause")
             .and_then(|v| if v.is_null() { None } else { Some(v) })
             .and_then(|cause_data| self.parse_exception_info(cause_data).ok())
             .map(Box::new);
-        
+
         Ok(ExceptionInfo {
             exception_type,
             message,
@@ -599,16 +641,16 @@ print("FASTEST_CAPTURE_END")
             locals_at_failure: HashMap::new(), // TODO: Extract from last frame
         })
     }
-    
+
     /// Detect files created during test execution
     fn detect_created_files(&self, temp_dir: &std::path::Path) -> Result<Vec<String>> {
         let mut files = Vec::new();
-        
+
         fn visit_dir(dir: &std::path::Path, files: &mut Vec<String>) -> Result<()> {
             for entry in std::fs::read_dir(dir)? {
                 let entry = entry?;
                 let path = entry.path();
-                
+
                 if path.is_file() {
                     files.push(path.to_string_lossy().to_string());
                 } else if path.is_dir() {
@@ -617,16 +659,19 @@ print("FASTEST_CAPTURE_END")
             }
             Ok(())
         }
-        
+
         visit_dir(temp_dir, &mut files)?;
         Ok(files)
     }
-    
+
     /// Detect environment variable changes
-    fn detect_env_changes(&self, original_env: &HashMap<String, String>) -> HashMap<String, String> {
+    fn detect_env_changes(
+        &self,
+        original_env: &HashMap<String, String>,
+    ) -> HashMap<String, String> {
         let mut changes = HashMap::new();
         let current_env: HashMap<String, String> = std::env::vars().collect();
-        
+
         // Find new or changed variables
         for (key, value) in &current_env {
             if let Some(original_value) = original_env.get(key) {
@@ -637,10 +682,10 @@ print("FASTEST_CAPTURE_END")
                 changes.insert(key.clone(), value.clone());
             }
         }
-        
+
         changes
     }
-    
+
     /// Cleanup temporary directory
     fn cleanup_temp_dir(&self, temp_dir: &std::path::Path) -> Result<()> {
         std::fs::remove_dir_all(temp_dir)
@@ -658,26 +703,29 @@ impl Default for CaptureManager {
 /// Utility functions for enhanced exception handling
 pub mod exception_utils {
     use super::*;
-    
+
     /// Format exception for display
     pub fn format_exception_display(exception: &ExceptionInfo) -> String {
         let mut output = String::new();
-        
-        output.push_str(&format!("{}: {}\n", exception.exception_type, exception.message));
-        
+
+        output.push_str(&format!(
+            "{}: {}\n",
+            exception.exception_type, exception.message
+        ));
+
         if !exception.traceback.is_empty() {
             output.push_str("\nTraceback (most recent call last):\n");
-            
+
             for frame in &exception.traceback {
                 output.push_str(&format!(
                     "  File \"{}\", line {}, in {}\n",
                     frame.filename, frame.line_number, frame.function_name
                 ));
-                
+
                 if !frame.code.is_empty() {
                     output.push_str(&format!("    {}\n", frame.code));
                 }
-                
+
                 if !frame.locals.is_empty() {
                     output.push_str("    Locals:\n");
                     for (name, value) in &frame.locals {
@@ -686,25 +734,28 @@ pub mod exception_utils {
                 }
             }
         }
-        
+
         if let Some(ref cause) = exception.cause {
             output.push_str("\nCaused by:\n");
             output.push_str(&format_exception_display(cause));
         }
-        
+
         output
     }
-    
+
     /// Extract exception summary for quick display
     pub fn exception_summary(exception: &ExceptionInfo) -> String {
         format!("{}: {}", exception.exception_type, exception.message)
     }
-    
+
     /// Check if exception is a test skip
     pub fn is_skip_exception(exception: &ExceptionInfo) -> bool {
-        matches!(exception.exception_type.as_str(), "SkipTest" | "Skipped" | "pytest.skip")
+        matches!(
+            exception.exception_type.as_str(),
+            "SkipTest" | "Skipped" | "pytest.skip"
+        )
     }
-    
+
     /// Check if exception is an assertion error
     pub fn is_assertion_error(exception: &ExceptionInfo) -> bool {
         exception.exception_type == "AssertionError"
@@ -715,7 +766,7 @@ pub mod exception_utils {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    
+
     #[test]
     fn test_capture_config_default() {
         let config = CaptureConfig::default();
@@ -723,35 +774,33 @@ mod tests {
         assert!(config.capture_stderr);
         assert_eq!(config.max_output_size, 1024 * 1024);
     }
-    
+
     #[test]
     fn test_capture_manager_creation() {
         let config = CaptureConfig::default();
         let manager = CaptureManager::new(config);
-        
+
         // Should create without errors
         assert_eq!(manager.active_captures.lock().unwrap().len(), 0);
     }
-    
+
     #[test]
     fn test_exception_formatting() {
         let exception = ExceptionInfo {
             exception_type: "ValueError".to_string(),
             message: "invalid literal".to_string(),
-            traceback: vec![
-                TracebackFrame {
-                    filename: "test.py".to_string(),
-                    line_number: 10,
-                    function_name: "test_func".to_string(),
-                    code: "x = int('abc')".to_string(),
-                    locals: HashMap::new(),
-                }
-            ],
+            traceback: vec![TracebackFrame {
+                filename: "test.py".to_string(),
+                line_number: 10,
+                function_name: "test_func".to_string(),
+                code: "x = int('abc')".to_string(),
+                locals: HashMap::new(),
+            }],
             cause: None,
             context: HashMap::new(),
             locals_at_failure: HashMap::new(),
         };
-        
+
         let formatted = exception_utils::format_exception_display(&exception);
         assert!(formatted.contains("ValueError"));
         assert!(formatted.contains("invalid literal"));

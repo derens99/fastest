@@ -96,7 +96,11 @@ impl DebugManager {
     }
 
     /// Handle test failure with debugging support
-    pub async fn handle_test_failure(&mut self, test: &TestItem, result: &TestResult) -> Result<()> {
+    pub async fn handle_test_failure(
+        &mut self,
+        test: &TestItem,
+        result: &TestResult,
+    ) -> Result<()> {
         if self.config.pdb_enabled && self.should_debug_test(test, result) {
             self.launch_debugger(test).await?;
         }
@@ -110,12 +114,12 @@ impl DebugManager {
 
     /// Launch PDB debugger for failed test
     async fn launch_debugger(&mut self, test: &TestItem) -> Result<()> {
-        tracing::info!("🐛 Launching debugger for test: {}", test.id);
+        eprintln!("🐛 Launching debugger for test: {}", test.id);
 
         // Prepare Python debug command
         let debug_script = self.create_debug_script(test)?;
-        
-        let mut cmd = Command::new("python")
+
+        let cmd = Command::new("python")
             .args(["-c", &debug_script])
             .stdin(Stdio::inherit())
             .stdout(Stdio::inherit())
@@ -131,17 +135,19 @@ impl DebugManager {
 
         self.active_sessions.insert(test.id.clone(), session);
 
-        tracing::info!("🐛 Debugger launched. Use 'c' to continue, 'q' to quit.");
+        eprintln!("🐛 Debugger launched. Use 'c' to continue, 'q' to quit.");
         Ok(())
     }
 
     /// Create Python debug script for test
     fn create_debug_script(&self, test: &TestItem) -> Result<String> {
-        let module_path = test.path.file_stem()
+        let module_path = test
+            .path
+            .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("test_module");
         let function_name = &test.function_name;
-        
+
         let script = format!(
             r#"
 import sys
@@ -193,13 +199,13 @@ if __name__ == "__main__":
     /// Check if test should be debugged
     fn should_debug_test(&self, _test: &TestItem, result: &TestResult) -> bool {
         // Only debug on failures or errors
-        !result.passed && 
+        !result.passed &&
         // If first failure only, check if this is the first failure
         (!self.config.pdb_on_first_failure || self.active_sessions.is_empty())
     }
 
     /// Get breakpoints for specific test
-    fn get_breakpoints_for_test(&self, test: &TestItem) -> Vec<Breakpoint> {
+    fn get_breakpoints_for_test(&self, _test: &TestItem) -> Vec<Breakpoint> {
         // For now, return empty - would integrate with IDE/config
         Vec::new()
     }
@@ -246,7 +252,7 @@ if __name__ == "__main__":
     /// Parse Python traceback into structured format
     async fn parse_traceback(&self, error: &str) -> Result<Vec<TraceFrame>> {
         let mut frames = Vec::new();
-        
+
         // Simple traceback parsing - in production would use Python's traceback module
         for line in error.lines() {
             if line.trim().starts_with("File \"") {
@@ -264,7 +270,9 @@ if __name__ == "__main__":
         // Parse format: File "/path/file.py", line 123, in function_name
         let parts: Vec<&str> = line.split(", ").collect();
         if parts.len() >= 3 {
-            let file_path = parts[0].trim_start_matches("  File \"").trim_end_matches("\"");
+            let file_path = parts[0]
+                .trim_start_matches("  File \"")
+                .trim_end_matches("\"");
             let line_number = parts[1].trim_start_matches("line ").parse().unwrap_or(0);
             let function_name = parts[2].trim_start_matches("in ");
 
@@ -286,7 +294,7 @@ if __name__ == "__main__":
             test_file: test.path.to_string_lossy().to_string(),
             test_function: test.function_name.clone(),
             fixtures_used: Vec::new(), // Would extract from test metadata
-            parameters: None, // TestItem doesn't have params field
+            parameters: None,          // TestItem doesn't have params field
         }
     }
 
@@ -296,7 +304,8 @@ if __name__ == "__main__":
 
         if error.contains("AssertionError") {
             suggestions.push("Check your assertion logic and expected values".to_string());
-            suggestions.push("Use pytest's assert introspection for better error messages".to_string());
+            suggestions
+                .push("Use pytest's assert introspection for better error messages".to_string());
         }
 
         if error.contains("AttributeError") {
@@ -323,27 +332,28 @@ if __name__ == "__main__":
 
     /// Display enhanced error with formatting
     fn display_enhanced_error(&self, error: &EnhancedError) -> Result<()> {
-        use colored::Colorize;
+        // Note: colored crate not available, using plain text formatting
 
-        println!("\n{}", "🚨 Enhanced Error Report".bright_red().bold());
-        println!("{}: {}", "Test".cyan(), error.test_id);
-        println!("{}: {}", "Error Type".cyan(), error.error_type.red());
-        println!("{}: {}", "Message".cyan(), error.message);
+        println!("\n🚨 Enhanced Error Report");
+        println!("Test: {}", error.test_id);
+        println!("Error Type: {}", error.error_type);
+        println!("Message: {}", error.message);
 
         if !error.traceback.is_empty() {
-            println!("\n{}", "📍 Traceback:".yellow().bold());
+            println!("\n📍 Traceback:");
             for (i, frame) in error.traceback.iter().enumerate() {
-                println!("  {}. {} (line {}) in {}", 
-                    i + 1, 
-                    frame.file_path.bright_blue(),
-                    frame.line_number.to_string().green(),
-                    frame.function_name.magenta()
+                println!(
+                    "  {}. {} (line {}) in {}",
+                    i + 1,
+                    frame.file_path,
+                    frame.line_number,
+                    frame.function_name
                 );
             }
         }
 
         if !error.suggestions.is_empty() {
-            println!("\n{}", "💡 Suggestions:".green().bold());
+            println!("\n💡 Suggestions:");
             for suggestion in &error.suggestions {
                 println!("  • {}", suggestion);
             }
@@ -355,9 +365,11 @@ if __name__ == "__main__":
 
     /// Set breakpoint for debugging
     pub fn set_breakpoint(&mut self, breakpoint: Breakpoint) -> Result<()> {
-        tracing::info!("🔍 Setting breakpoint at {}:{}", 
-                      breakpoint.file_path.display(), 
-                      breakpoint.line);
+        eprintln!(
+            "🔍 Setting breakpoint at {}:{}",
+            breakpoint.file_path.display(),
+            breakpoint.line
+        );
 
         // In production, would integrate with debugger API
         Ok(())
@@ -365,23 +377,31 @@ if __name__ == "__main__":
 
     /// Remove breakpoint
     pub fn remove_breakpoint(&mut self, file_path: &PathBuf, line: u32) -> Result<()> {
-        tracing::info!("🔍 Removing breakpoint at {}:{}", file_path.display(), line);
+        eprintln!("🔍 Removing breakpoint at {}:{}", file_path.display(), line);
         Ok(())
     }
 
     /// Get debug statistics
     pub fn get_debug_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("active_sessions".to_string(), 
-                    serde_json::Value::Number(self.active_sessions.len().into()));
-        stats.insert("pdb_enabled".to_string(), 
-                    serde_json::Value::Bool(self.config.pdb_enabled));
-        stats.insert("enhanced_errors".to_string(), 
-                    serde_json::Value::Bool(self.config.enhanced_errors));
-        stats.insert("debugger_class".to_string(), 
-                    serde_json::Value::String(self.config.pdb_class.clone()));
-        
+
+        stats.insert(
+            "active_sessions".to_string(),
+            serde_json::Value::Number(self.active_sessions.len().into()),
+        );
+        stats.insert(
+            "pdb_enabled".to_string(),
+            serde_json::Value::Bool(self.config.pdb_enabled),
+        );
+        stats.insert(
+            "enhanced_errors".to_string(),
+            serde_json::Value::Bool(self.config.enhanced_errors),
+        );
+        stats.insert(
+            "debugger_class".to_string(),
+            serde_json::Value::String(self.config.pdb_class.clone()),
+        );
+
         stats
     }
 
@@ -391,7 +411,7 @@ if __name__ == "__main__":
             if let Some(mut process) = session.debugger_process.take() {
                 let _ = process.kill();
                 let _ = process.wait();
-                tracing::debug!("Cleaned up debug session for test: {}", test_id);
+                eprintln!("Cleaned up debug session for test: {}", test_id);
             }
         }
         Ok(())
@@ -401,7 +421,7 @@ if __name__ == "__main__":
 /// Debug command line argument parsing
 pub fn parse_debug_args(args: &[String]) -> DebugConfig {
     let mut config = DebugConfig::default();
-    
+
     for arg in args {
         match arg.as_str() {
             "--pdb" => config.pdb_enabled = true,
@@ -418,7 +438,7 @@ pub fn parse_debug_args(args: &[String]) -> DebugConfig {
             _ => {}
         }
     }
-    
+
     config
 }
 
@@ -438,7 +458,7 @@ mod tests {
     fn test_parse_debug_args() {
         let args = vec!["--pdb".to_string(), "--pdbcls=ipdb".to_string()];
         let config = parse_debug_args(&args);
-        
+
         assert!(config.pdb_enabled);
         assert_eq!(config.pdb_class, "ipdb");
     }
@@ -446,9 +466,18 @@ mod tests {
     #[test]
     fn test_error_classification() {
         let manager = DebugManager::new(DebugConfig::default());
-        
-        assert_eq!(manager.classify_error("AssertionError: test failed"), "Assertion Failure");
-        assert_eq!(manager.classify_error("AttributeError: 'str' object has no attribute 'foo'"), "Attribute Error");
-        assert_eq!(manager.classify_error("SomeRandomError: unknown"), "Unknown Error");
+
+        assert_eq!(
+            manager.classify_error("AssertionError: test failed"),
+            "Assertion Failure"
+        );
+        assert_eq!(
+            manager.classify_error("AttributeError: 'str' object has no attribute 'foo'"),
+            "Attribute Error"
+        );
+        assert_eq!(
+            manager.classify_error("SomeRandomError: unknown"),
+            "Unknown Error"
+        );
     }
 }

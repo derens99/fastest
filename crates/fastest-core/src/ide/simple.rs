@@ -1,4 +1,4 @@
-//! Simplified IDE Integration 
+//! Simplified IDE Integration
 //!
 //! Basic IDE integration without complex LSP dependencies
 
@@ -69,28 +69,31 @@ impl SimpleIdeIntegration {
 
     /// Convert test items to IDE format
     pub fn convert_tests(&self, tests: Vec<TestItem>) -> Vec<IdeTestItem> {
-        tests.into_iter().map(|test| {
-            let kind = if test.id.contains("::") {
-                if test.decorators.iter().any(|d| d.contains("parametrize")) {
-                    TestKind::Parametrized
+        tests
+            .into_iter()
+            .map(|test| {
+                let kind = if test.id.contains("::") {
+                    if test.decorators.iter().any(|d| d.contains("parametrize")) {
+                        TestKind::Parametrized
+                    } else {
+                        TestKind::Function
+                    }
                 } else {
-                    TestKind::Function
-                }
-            } else {
-                TestKind::File
-            };
+                    TestKind::File
+                };
 
-            IdeTestItem {
-                id: test.id.clone(),
-                label: self.create_test_label(&test),
-                file_path: test.path.to_string_lossy().to_string(),
-                line_number: test.line_number as u32,
-                kind,
-                status: TestStatus::NotRun,
-                parent: self.get_parent_test_id(&test),
-                children: Vec::new(),
-            }
-        }).collect()
+                IdeTestItem {
+                    id: test.id.clone(),
+                    label: self.create_test_label(&test),
+                    file_path: test.path.to_string_lossy().to_string(),
+                    line_number: test.line_number as u32,
+                    kind,
+                    status: TestStatus::NotRun,
+                    parent: self.get_parent_test_id(&test),
+                    children: Vec::new(),
+                }
+            })
+            .collect()
     }
 
     /// Create human-readable test label
@@ -107,12 +110,11 @@ impl SimpleIdeIntegration {
     /// Format test parameters for display
     fn format_params(&self, params: &serde_json::Value) -> String {
         match params {
-            serde_json::Value::Object(map) => {
-                map.iter()
-                    .map(|(k, v)| format!("{}={}", k, self.format_param_value(v)))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            }
+            serde_json::Value::Object(map) => map
+                .iter()
+                .map(|(k, v)| format!("{}={}", k, self.format_param_value(v)))
+                .collect::<Vec<_>>()
+                .join(", "),
             _ => params.to_string(),
         }
     }
@@ -132,7 +134,7 @@ impl SimpleIdeIntegration {
         if test.id.contains("::") {
             let parts: Vec<&str> = test.id.split("::").collect();
             if parts.len() > 1 {
-                Some(parts[0..parts.len()-1].join("::"))
+                Some(parts[0..parts.len() - 1].join("::"))
             } else {
                 None
             }
@@ -159,21 +161,28 @@ impl SimpleIdeIntegration {
     }
 
     /// Generate test discovery information
-    pub fn generate_test_discovery(&self, tests: &[IdeTestItem]) -> HashMap<String, serde_json::Value> {
+    pub fn generate_test_discovery(
+        &self,
+        tests: &[IdeTestItem],
+    ) -> HashMap<String, serde_json::Value> {
         let mut discovery = HashMap::new();
-        
-        discovery.insert("total_tests".to_string(), 
-                        serde_json::Value::Number(tests.len().into()));
-        
+
+        discovery.insert(
+            "total_tests".to_string(),
+            serde_json::Value::Number(tests.len().into()),
+        );
+
         let mut kind_counts = HashMap::new();
         for test in tests {
             let kind_str = format!("{:?}", test.kind);
             *kind_counts.entry(kind_str).or_insert(0) += 1;
         }
-        
-        discovery.insert("test_kinds".to_string(), 
-                        serde_json::to_value(kind_counts).unwrap());
-        
+
+        discovery.insert(
+            "test_kinds".to_string(),
+            serde_json::to_value(kind_counts).unwrap(),
+        );
+
         discovery
     }
 
@@ -194,12 +203,16 @@ impl SimpleIdeIntegration {
     /// Generate IDE statistics
     pub fn get_ide_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("cached_tests".to_string(), 
-                    serde_json::Value::Number(self.test_cache.len().into()));
-        stats.insert("cached_results".to_string(), 
-                    serde_json::Value::Number(self.results_cache.len().into()));
-        
+
+        stats.insert(
+            "cached_tests".to_string(),
+            serde_json::Value::Number(self.test_cache.len().into()),
+        );
+        stats.insert(
+            "cached_results".to_string(),
+            serde_json::Value::Number(self.results_cache.len().into()),
+        );
+
         stats
     }
 }
@@ -225,13 +238,13 @@ mod tests {
     #[test]
     fn test_format_params() {
         let ide = SimpleIdeIntegration::new();
-        
+
         let params = serde_json::json!({
             "x": 1,
             "y": "test",
             "z": true
         });
-        
+
         let formatted = ide.format_params(&params);
         assert!(formatted.contains("x=1"));
         assert!(formatted.contains("y='test'"));

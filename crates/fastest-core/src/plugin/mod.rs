@@ -3,11 +3,11 @@
 //! This module provides a minimal, fast plugin system that's compatible with pytest
 //! while leveraging external libraries for simplicity and performance.
 
+pub mod builtin;
+pub mod conftest;
 pub mod hooks;
 pub mod manager;
-pub mod conftest;
 pub mod registry;
-pub mod builtin;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -15,15 +15,17 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+pub use conftest::ConftestLoader;
 pub use hooks::{HookRegistry, HookResult, PytestHooks};
 pub use manager::PluginManager;
-pub use conftest::ConftestLoader;
-pub use registry::{PluginRegistry, PluginInfo};
+pub use registry::{PluginInfo, PluginRegistry};
 
 /// Plugin trait for maximum simplicity and performance
 pub trait Plugin: Send + Sync {
     fn name(&self) -> &str;
-    fn pytest_compatible(&self) -> bool { true }
+    fn pytest_compatible(&self) -> bool {
+        true
+    }
     fn register_hooks(&self, registry: &mut HookRegistry) -> Result<()>;
 }
 
@@ -140,16 +142,16 @@ impl SmartPluginLoader {
 
     fn load_builtin_plugins(&self) -> Result<Vec<Box<dyn Plugin>>> {
         use inventory;
-        
+
         let mut plugins = Vec::new();
-        
+
         // Use inventory to collect all registered plugins at compile time
         for info in inventory::iter::<PluginInfo> {
             if self.is_plugin_enabled(&info.name) {
                 plugins.push(info.create_instance()?);
             }
         }
-        
+
         Ok(plugins)
     }
 
@@ -160,38 +162,37 @@ impl SmartPluginLoader {
 
     fn load_external_plugins(&self) -> Result<Vec<Box<dyn Plugin>>> {
         let mut plugins = Vec::new();
-        
+
         for search_path in &self.config.plugin_search_paths {
             // Use libloading for dynamic plugin loading
             plugins.extend(self.load_plugins_from_path(search_path)?);
         }
-        
+
         Ok(plugins)
     }
 
     fn load_plugins_from_path(&self, path: &PathBuf) -> Result<Vec<Box<dyn Plugin>>> {
         use libloading::{Library, Symbol};
         use std::ffi::OsStr;
-        
+
         let mut plugins = Vec::new();
-        
+
         if path.is_file() && path.extension() == Some(OsStr::new("so")) {
             // Load dynamic library plugin
             unsafe {
                 let lib = Library::new(path)?;
-                let create_plugin: Symbol<fn() -> Box<dyn Plugin>> = 
-                    lib.get(b"create_plugin")?;
+                let create_plugin: Symbol<fn() -> Box<dyn Plugin>> = lib.get(b"create_plugin")?;
                 plugins.push(create_plugin());
             }
         }
-        
+
         Ok(plugins)
     }
 
     fn is_plugin_enabled(&self, name: &str) -> bool {
-        !self.config.disabled_plugins.contains(&name.to_string()) &&
-        (self.config.enabled_plugins.is_empty() || 
-         self.config.enabled_plugins.contains(&name.to_string()))
+        !self.config.disabled_plugins.contains(&name.to_string())
+            && (self.config.enabled_plugins.is_empty()
+                || self.config.enabled_plugins.contains(&name.to_string()))
     }
 }
 
@@ -211,7 +212,7 @@ mod tests {
     fn test_smart_plugin_loader() {
         let config = PluginConfig::default();
         let loader = SmartPluginLoader::new(config);
-        
+
         // Should create without errors
         assert_eq!(loader.registry.count(), 0);
     }

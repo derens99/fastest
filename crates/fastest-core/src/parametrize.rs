@@ -25,10 +25,10 @@ pub struct ParamSet {
 pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<ParamSet>)> {
     // Remove @ prefix if present and extract the call expression
     let cleaned = decorator.trim_start_matches('@');
-    
+
     // Parse as a function call expression
     let expr = ast::Expr::parse(cleaned, "<decorator>").ok()?;
-    
+
     // Handle both direct calls and attribute calls
     match &expr {
         ast::Expr::Call(call) => parse_parametrize_call(call),
@@ -73,9 +73,11 @@ fn parse_parametrize_call(call: &ast::ExprCall) -> Option<(Vec<String>, Vec<Para
 
     // Extract parameter values (second argument)
     let values = call.args.get(1)?;
-    
+
     // Extract ids if provided
-    let ids = call.keywords.iter()
+    let ids = call
+        .keywords
+        .iter()
         .find(|kw| kw.arg.as_deref() == Some("ids"))
         .and_then(|kw| extract_ids(&kw.value));
 
@@ -104,8 +106,9 @@ fn extract_param_names(expr: &ast::Expr) -> Option<Vec<String>> {
 
 fn extract_ids(expr: &ast::Expr) -> Option<Vec<String>> {
     match expr {
-        ast::Expr::List(list) => {
-            Some(list.elts.iter()
+        ast::Expr::List(list) => Some(
+            list.elts
+                .iter()
                 .filter_map(|e| {
                     if let ast::Expr::Constant(c) = e {
                         if let ast::Constant::Str(s) = &c.value {
@@ -114,8 +117,8 @@ fn extract_ids(expr: &ast::Expr) -> Option<Vec<String>> {
                     }
                     None
                 })
-                .collect())
-        }
+                .collect(),
+        ),
         _ => None,
     }
 }
@@ -128,10 +131,10 @@ fn parse_param_values(
     match expr {
         ast::Expr::List(list) => {
             let mut param_sets = Vec::new();
-            
+
             for (idx, item) in list.elts.iter().enumerate() {
                 let mut param_set = parse_single_param_set(item, param_names.len())?;
-                
+
                 // Apply overall id if no specific id
                 if param_set.id.is_none() {
                     if let Some(ids_vec) = ids {
@@ -140,10 +143,10 @@ fn parse_param_values(
                         }
                     }
                 }
-                
+
                 param_sets.push(param_set);
             }
-            
+
             Some(param_sets)
         }
         _ => None,
@@ -157,32 +160,26 @@ fn parse_single_param_set(expr: &ast::Expr, expected_params: usize) -> Option<Pa
             parse_pytest_param(call, expected_params)
         }
         // Single value (for single parameter)
-        _ if expected_params == 1 => {
-            Some(ParamSet {
-                id: None,
-                values: vec![ast_expr_to_json(expr)],
-                marks: Vec::new(),
-                is_xfail: false,
-            })
-        }
+        _ if expected_params == 1 => Some(ParamSet {
+            id: None,
+            values: vec![ast_expr_to_json(expr)],
+            marks: Vec::new(),
+            is_xfail: false,
+        }),
         // Tuple of values
-        ast::Expr::Tuple(tuple) if tuple.elts.len() == expected_params => {
-            Some(ParamSet {
-                id: None,
-                values: tuple.elts.iter().map(ast_expr_to_json).collect(),
-                marks: Vec::new(),
-                is_xfail: false,
-            })
-        }
+        ast::Expr::Tuple(tuple) if tuple.elts.len() == expected_params => Some(ParamSet {
+            id: None,
+            values: tuple.elts.iter().map(ast_expr_to_json).collect(),
+            marks: Vec::new(),
+            is_xfail: false,
+        }),
         // List of values (less common but valid)
-        ast::Expr::List(list) if list.elts.len() == expected_params => {
-            Some(ParamSet {
-                id: None,
-                values: list.elts.iter().map(ast_expr_to_json).collect(),
-                marks: Vec::new(),
-                is_xfail: false,
-            })
-        }
+        ast::Expr::List(list) if list.elts.len() == expected_params => Some(ParamSet {
+            id: None,
+            values: list.elts.iter().map(ast_expr_to_json).collect(),
+            marks: Vec::new(),
+            is_xfail: false,
+        }),
         _ => None,
     }
 }
@@ -193,19 +190,21 @@ fn is_pytest_param_call(func: &ast::Expr) -> bool {
 
 fn parse_pytest_param(call: &ast::ExprCall, expected_params: usize) -> Option<ParamSet> {
     // Extract values from positional arguments
-    let values: Vec<Value> = call.args.iter()
+    let values: Vec<Value> = call
+        .args
+        .iter()
         .take(expected_params)
         .map(ast_expr_to_json)
         .collect();
-    
+
     if values.len() != expected_params {
         return None;
     }
-    
+
     let mut id = None;
     let mut marks = Vec::new();
     let mut is_xfail = false;
-    
+
     // Process keyword arguments
     for kw in &call.keywords {
         match kw.arg.as_deref() {
@@ -224,7 +223,7 @@ fn parse_pytest_param(call: &ast::ExprCall, expected_params: usize) -> Option<Pa
             _ => {}
         }
     }
-    
+
     Some(ParamSet {
         id,
         values,
@@ -235,20 +234,20 @@ fn parse_pytest_param(call: &ast::ExprCall, expected_params: usize) -> Option<Pa
 
 fn extract_marks(expr: &ast::Expr) -> Vec<String> {
     match expr {
-        ast::Expr::List(list) => {
-            list.elts.iter()
-                .filter_map(|e| {
-                    let s = expr_to_string(e);
-                    if s.contains("xfail") {
-                        Some("xfail".to_string())
-                    } else if s.contains("skip") {
-                        Some("skip".to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        }
+        ast::Expr::List(list) => list
+            .elts
+            .iter()
+            .filter_map(|e| {
+                let s = expr_to_string(e);
+                if s.contains("xfail") {
+                    Some("xfail".to_string())
+                } else if s.contains("skip") {
+                    Some("skip".to_string())
+                } else {
+                    None
+                }
+            })
+            .collect(),
         _ => {
             let s = expr_to_string(expr);
             if s.contains("xfail") {
@@ -263,12 +262,8 @@ fn extract_marks(expr: &ast::Expr) -> Vec<String> {
 fn ast_expr_to_json(expr: &ast::Expr) -> Value {
     match expr {
         ast::Expr::Constant(c) => constant_to_json(&c.value),
-        ast::Expr::List(list) => {
-            Value::Array(list.elts.iter().map(ast_expr_to_json).collect())
-        }
-        ast::Expr::Tuple(tuple) => {
-            Value::Array(tuple.elts.iter().map(ast_expr_to_json).collect())
-        }
+        ast::Expr::List(list) => Value::Array(list.elts.iter().map(ast_expr_to_json).collect()),
+        ast::Expr::Tuple(tuple) => Value::Array(tuple.elts.iter().map(ast_expr_to_json).collect()),
         ast::Expr::Dict(dict) => {
             let mut map = serde_json::Map::new();
             for (key_expr, value_expr) in dict.keys.iter().zip(&dict.values) {
@@ -316,11 +311,9 @@ fn constant_to_json(constant: &ast::Constant) -> Value {
                 Value::String(i.to_string())
             }
         }
-        ast::Constant::Float(f) => {
-            serde_json::Number::from_f64(*f)
-                .map(Value::Number)
-                .unwrap_or(Value::Null)
-        }
+        ast::Constant::Float(f) => serde_json::Number::from_f64(*f)
+            .map(Value::Number)
+            .unwrap_or(Value::Null),
         ast::Constant::Bool(b) => Value::Bool(*b),
         ast::Constant::None => Value::Null,
         _ => Value::Null,
@@ -343,7 +336,7 @@ fn expr_to_string(expr: &ast::Expr) -> String {
 /// Expand a test function with parametrize decorators into multiple test items
 pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Result<Vec<TestItem>> {
     let mut param_info_list = Vec::new();
-    
+
     // Extract all parametrize decorators
     for decorator in decorators {
         if decorator.contains("parametrize") {
@@ -353,16 +346,18 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
             } else {
                 format!("@{}", decorator)
             };
-            
+
             if let Some((names, param_sets)) = parse_parametrize_decorator(&decorator_with_at) {
                 param_info_list.push((names, param_sets));
             }
         }
     }
-    
+
     // Check for simple xfail marker
-    let base_xfail = decorators.iter().any(|d| d.contains("xfail") && !d.contains("parametrize"));
-    
+    let base_xfail = decorators
+        .iter()
+        .any(|d| d.contains("xfail") && !d.contains("parametrize"));
+
     if param_info_list.is_empty() {
         let mut test_clone = test.clone();
         if base_xfail {
@@ -370,31 +365,33 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
         }
         return Ok(vec![test_clone]);
     }
-    
+
     // Generate test cases
     let test_cases = generate_test_cases(&param_info_list);
-    
+
     // Create expanded tests
     let mut expanded_tests = Vec::new();
     for case in test_cases {
         let mut expanded_test = test.clone();
-        
+
         let id_str = case.id.unwrap_or_else(|| format_param_id(&case.params));
         expanded_test.id = format!("{}[{}]", test.id, id_str);
         expanded_test.name = format!("{}[{}]", test.function_name, id_str);
         expanded_test.is_xfail = base_xfail || case.is_xfail;
-        
+
         // Store parameters
         let params_json = serde_json::to_string(&case.params).unwrap_or_default();
-        expanded_test.decorators.push(format!("__params__={}", params_json));
-        
+        expanded_test
+            .decorators
+            .push(format!("__params__={}", params_json));
+
         if expanded_test.is_xfail {
             expanded_test.decorators.push("__xfail__=True".to_string());
         }
-        
+
         expanded_tests.push(expanded_test);
     }
-    
+
     Ok(expanded_tests)
 }
 
@@ -409,32 +406,33 @@ fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>)]) -> Vec<
     if param_info_list.is_empty() {
         return vec![];
     }
-    
+
     // Start with first decorator
     let (first_names, first_sets) = &param_info_list[0];
-    let mut cases: Vec<TestCase> = first_sets.iter()
+    let mut cases: Vec<TestCase> = first_sets
+        .iter()
         .map(|set| TestCase {
             params: create_params_map(first_names, &set.values),
             id: set.id.clone(),
             is_xfail: set.is_xfail,
         })
         .collect();
-    
+
     // Cross product with remaining decorators
     for (names, param_sets) in param_info_list.iter().skip(1) {
         let mut new_cases = Vec::new();
-        
+
         for case in &cases {
             for set in param_sets {
                 let mut params = case.params.clone();
-                
+
                 // Add new parameters
                 for (idx, name) in names.iter().enumerate() {
                     if let Some(value) = set.values.get(idx) {
                         params.insert(name.clone(), value.clone());
                     }
                 }
-                
+
                 new_cases.push(TestCase {
                     params,
                     id: set.id.clone().or_else(|| case.id.clone()),
@@ -442,10 +440,10 @@ fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>)]) -> Vec<
                 });
             }
         }
-        
+
         cases = new_cases;
     }
-    
+
     cases
 }
 
@@ -461,13 +459,13 @@ fn format_param_id(params: &HashMap<String, Value>) -> String {
     let mut parts = Vec::new();
     let mut keys: Vec<_> = params.keys().collect();
     keys.sort();
-    
+
     for key in keys {
         if let Some(value) = params.get(key) {
             parts.push(format_value(value));
         }
     }
-    
+
     parts.join("-")
 }
 
@@ -551,14 +549,10 @@ mod tests {
             fixture_deps: vec![],
             is_xfail: false,
         };
-        
+
         let expanded = expand_parametrized_tests(&test, &test.decorators).unwrap();
         assert_eq!(expanded.len(), 2);
         assert_eq!(expanded[0].id, "test_module::test_func[1]");
         assert_eq!(expanded[1].id, "test_module::test_func[2]");
     }
 }
-
-
-
-

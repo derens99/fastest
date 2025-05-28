@@ -82,3 +82,6 @@ temp/
 # Test outputs
 test_output/
 test_results/ 
+
+# Other
+CLAUDE.md

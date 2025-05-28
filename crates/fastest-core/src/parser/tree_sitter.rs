@@ -40,9 +40,7 @@ impl Parser {
             .set_language(&language)
             .context("Failed to set Python language")?;
 
-        Ok(Self {
-            parser,
-        })
+        Ok(Self { parser })
     }
 
     /// Parse a file and extract tests and fixtures
@@ -107,7 +105,7 @@ impl Parser {
         if node.kind() == "class_definition" {
             if let Some(name_node) = node.child_by_field_name("name") {
                 let class_name = name_node.utf8_text(content.as_bytes())?;
-                
+
                 // Find all methods in this class
                 if let Some(body) = node.child_by_field_name("body") {
                     self.collect_class_methods(body, content, class_name, class_map)?;
@@ -206,10 +204,7 @@ impl Parser {
         let name = name_node.utf8_text(content.as_bytes())?;
 
         // Check if it's async
-        let is_async = node
-            .child(0)
-            .map(|n| n.kind() == "async")
-            .unwrap_or(false);
+        let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
 
         // Parse parameters
         let params = if let Some(params_node) = node.child_by_field_name("parameters") {
@@ -252,11 +247,9 @@ impl Parser {
         for child in node.children(&mut cursor) {
             let param_name = match child.kind() {
                 "identifier" => Some(child.utf8_text(content.as_bytes())?),
-                "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
-                    child
-                        .child_by_field_name("name")
-                        .and_then(|n| n.utf8_text(content.as_bytes()).ok())
-                }
+                "typed_parameter" | "default_parameter" | "typed_default_parameter" => child
+                    .child_by_field_name("name")
+                    .and_then(|n| n.utf8_text(content.as_bytes()).ok()),
                 _ => None,
             };
 
@@ -321,7 +314,7 @@ impl Parser {
         if let Some(start) = decorator.find(&pattern) {
             let value_start = start + pattern.len();
             let value_part = &decorator[value_start..];
-            
+
             // Handle quoted strings
             if let Some(quote_char) = value_part.chars().next() {
                 if quote_char == '"' || quote_char == '\'' {
@@ -330,7 +323,7 @@ impl Parser {
                     }
                 }
             }
-            
+
             // Handle unquoted values
             if let Some(end) = value_part.find(&[',', ')'][..]) {
                 return Some(value_part[..end].trim().to_string());

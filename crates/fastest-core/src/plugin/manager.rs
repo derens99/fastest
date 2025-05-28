@@ -8,10 +8,10 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use super::{
-    Plugin, PluginConfig, SmartPluginLoader,
-    hooks::{HookRegistry, HookData, HookResult, PytestHooks},
     conftest::ConftestLoader,
+    hooks::{HookData, HookRegistry, HookResult, PytestHooks},
     registry::PluginRegistry,
+    Plugin, PluginConfig, SmartPluginLoader,
 };
 
 /// Central plugin manager with smart orchestration
@@ -29,7 +29,7 @@ impl PluginManager {
     pub fn new(config: PluginConfig) -> Self {
         let hook_registry = Arc::new(HookRegistry::new());
         let pytest_hooks = PytestHooks::new(hook_registry.clone());
-        
+
         Self {
             config,
             registry: PluginRegistry::new(),
@@ -51,7 +51,7 @@ impl PluginManager {
         for plugin in plugins {
             // Register with hook registry
             plugin.register_hooks(&mut *Arc::get_mut(&mut self.hook_registry).unwrap())?;
-            
+
             // Store plugin
             let name = plugin.name().to_string();
             self.loaded_plugins.insert(name.clone(), Arc::from(plugin));
@@ -85,7 +85,11 @@ impl PluginManager {
     }
 
     /// Execute a pytest hook with automatic plugin orchestration
-    pub async fn execute_hook(&self, hook_name: &str, args: serde_json::Value) -> Result<Vec<HookResult>> {
+    pub async fn execute_hook(
+        &self,
+        hook_name: &str,
+        args: serde_json::Value,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: hook_name.to_string(),
             args,
@@ -98,7 +102,11 @@ impl PluginManager {
     }
 
     /// Fast synchronous hook execution for performance-critical paths
-    pub fn execute_hook_sync(&self, hook_name: &str, args: serde_json::Value) -> Result<Vec<HookResult>> {
+    pub fn execute_hook_sync(
+        &self,
+        hook_name: &str,
+        args: serde_json::Value,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: hook_name.to_string(),
             args,
@@ -140,10 +148,12 @@ impl PluginManager {
     pub fn get_stats(&self) -> PluginManagerStats {
         PluginManagerStats {
             total_plugins: self.loaded_plugins.len(),
-            builtin_plugins: self.loaded_plugins.iter()
+            builtin_plugins: self
+                .loaded_plugins
+                .iter()
                 .filter(|entry| entry.value().pytest_compatible())
                 .count(),
-            conftest_files: 0, // TODO: Add getter method
+            conftest_files: 0,   // TODO: Add getter method
             registered_hooks: 0, // TODO: Add getter method
         }
     }
@@ -160,7 +170,9 @@ impl PluginManager {
             "shutdown_time": chrono::Utc::now().to_rfc3339()
         });
 
-        self.pytest_hooks.pytest_sessionfinish(session_data, 0).await?;
+        self.pytest_hooks
+            .pytest_sessionfinish(session_data, 0)
+            .await?;
         Ok(())
     }
 }
@@ -182,10 +194,10 @@ mod tests {
     async fn test_plugin_manager_initialization() {
         let config = PluginConfig::default();
         let mut manager = PluginManager::new(config);
-        
+
         // Should initialize without errors
         assert!(manager.initialize().await.is_ok());
-        
+
         let stats = manager.get_stats();
         assert!(stats.registered_hooks > 0);
     }
@@ -198,8 +210,11 @@ mod tests {
 
         // Test hook execution
         let args = serde_json::json!({"test": "data"});
-        let results = manager.execute_hook("pytest_configure", args).await.unwrap();
-        
+        let results = manager
+            .execute_hook("pytest_configure", args)
+            .await
+            .unwrap();
+
         // Should execute without errors (even if no handlers)
         assert!(results.is_empty() || !results.is_empty());
     }

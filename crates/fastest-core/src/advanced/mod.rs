@@ -2,13 +2,13 @@
 //!
 //! Smart, fast advanced features using external libraries for optimal performance
 
-// Complex modules temporarily disabled for compilation
+// TODO: Re-enable these modules when implementation is complete
 // pub mod coverage;
 // pub mod dependencies;
 // pub mod incremental;
 // pub mod prioritization;
-pub mod simple;
 pub mod phase3;
+pub mod simple;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -67,9 +67,7 @@ impl AdvancedManager {
         // Ensure cache directory exists
         std::fs::create_dir_all(&config.cache_dir)?;
 
-        Ok(Self {
-            config,
-        })
+        Ok(Self { config })
     }
 
     /// Initialize advanced features (simplified)

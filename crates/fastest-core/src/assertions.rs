@@ -43,15 +43,41 @@ impl Default for AssertionConfig {
 /// Types of assertions that can be rewritten
 #[derive(Debug, Clone, PartialEq)]
 pub enum AssertionType {
-    Compare { op: CompareOp, left: String, right: String },
-    Contains { item: String, container: String },
-    IsInstance { obj: String, type_name: String },
-    StartsWith { string: String, prefix: String },
-    EndsWith { string: String, suffix: String },
-    In { item: String, container: String },
-    Is { left: String, right: String },
-    Boolean { expr: String },
-    Custom { expr: String },
+    Compare {
+        op: CompareOp,
+        left: String,
+        right: String,
+    },
+    Contains {
+        item: String,
+        container: String,
+    },
+    IsInstance {
+        obj: String,
+        type_name: String,
+    },
+    StartsWith {
+        string: String,
+        prefix: String,
+    },
+    EndsWith {
+        string: String,
+        suffix: String,
+    },
+    In {
+        item: String,
+        container: String,
+    },
+    Is {
+        left: String,
+        right: String,
+    },
+    Boolean {
+        expr: String,
+    },
+    Custom {
+        expr: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -86,22 +112,22 @@ impl AssertionRewriter {
             helpers: AssertionHelpers::new(),
         }
     }
-    
+
     /// Rewrite assertions in Python source code
     pub fn rewrite_source(&self, source: &str, file_path: &str) -> Result<String> {
         if !self.config.enabled {
             return Ok(source.to_string());
         }
-        
+
         let lines: Vec<&str> = source.lines().collect();
         let mut rewritten_lines = Vec::new();
         let mut in_multiline_assert = false;
         let mut current_assert = String::new();
         let mut assert_start_line = 0;
-        
+
         for (line_no, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            
+
             // Check if this line starts or continues an assert statement
             if trimmed.starts_with("assert ") || in_multiline_assert {
                 if !in_multiline_assert {
@@ -110,14 +136,18 @@ impl AssertionRewriter {
                     current_assert.clear();
                     assert_start_line = line_no;
                 }
-                
+
                 current_assert.push_str(line);
                 current_assert.push('\n');
-                
+
                 // Check if the assert statement is complete
                 if self.is_assert_complete(&current_assert) {
                     // Rewrite the complete assert statement
-                    match self.rewrite_assert_statement(&current_assert, assert_start_line + 1, file_path) {
+                    match self.rewrite_assert_statement(
+                        &current_assert,
+                        assert_start_line + 1,
+                        file_path,
+                    ) {
                         Ok(rewritten) => {
                             // Replace the original lines with rewritten code
                             let rewritten_lines_vec: Vec<&str> = rewritten.lines().collect();
@@ -150,10 +180,10 @@ impl AssertionRewriter {
                 rewritten_lines.push(line.to_string());
             }
         }
-        
+
         Ok(rewritten_lines.join("\n"))
     }
-    
+
     /// Check if an assert statement is syntactically complete
     fn is_assert_complete(&self, assert_text: &str) -> bool {
         // Simple heuristic: count parentheses, brackets, and braces
@@ -163,13 +193,13 @@ impl AssertionRewriter {
         let mut in_string = false;
         let mut string_char = '"';
         let mut escaped = false;
-        
+
         for ch in assert_text.chars() {
             if escaped {
                 escaped = false;
                 continue;
             }
-            
+
             match ch {
                 '\\' if in_string => escaped = true,
                 '"' | '\'' if !in_string => {
@@ -186,69 +216,75 @@ impl AssertionRewriter {
                 _ => {}
             }
         }
-        
+
         // Statement is complete if all brackets are balanced and it doesn't end with a continuation
         let balanced = paren_count == 0 && bracket_count == 0 && brace_count == 0;
         let not_continued = !assert_text.trim_end().ends_with('\\');
-        
+
         balanced && not_continued && !in_string
     }
-    
+
     /// Rewrite a single assert statement
-    fn rewrite_assert_statement(&self, assert_stmt: &str, line_number: usize, file_path: &str) -> Result<String> {
+    fn rewrite_assert_statement(
+        &self,
+        assert_stmt: &str,
+        line_number: usize,
+        file_path: &str,
+    ) -> Result<String> {
         let assertion_type = self.analyze_assertion(assert_stmt)?;
-        let rewritten_code = self.generate_rewritten_assertion(&assertion_type, line_number, file_path)?;
-        
+        let rewritten_code =
+            self.generate_rewritten_assertion(&assertion_type, line_number, file_path)?;
+
         Ok(rewritten_code)
     }
-    
+
     /// Analyze an assert statement to determine its type
     fn analyze_assertion(&self, assert_stmt: &str) -> Result<AssertionType> {
         let cleaned = assert_stmt.replace('\n', " ").replace("assert ", "");
         let parts: Vec<&str> = cleaned.split(',').collect();
         let main_expr = parts[0].trim();
-        
+
         // Try to parse comparison expressions
         if let Some(assertion_type) = self.parse_comparison(main_expr) {
             return Ok(assertion_type);
         }
-        
+
         // Try to parse method calls
         if let Some(assertion_type) = self.parse_method_call(main_expr) {
             return Ok(assertion_type);
         }
-        
+
         // Try to parse membership tests
         if let Some(assertion_type) = self.parse_membership(main_expr) {
-        return Ok(assertion_type);
+            return Ok(assertion_type);
         }
-        
+
         // Try to parse identity tests
         if let Some(assertion_type) = self.parse_identity(main_expr) {
             return Ok(assertion_type);
         }
-        
+
         // Fallback to custom expression
         Ok(AssertionType::Custom {
             expr: main_expr.to_string(),
         })
     }
-    
+
     fn parse_comparison(&self, expr: &str) -> Option<AssertionType> {
         let operators = [
             ("==", CompareOp::Eq),
-            ("!=", CompareOp::NotEq), 
+            ("!=", CompareOp::NotEq),
             ("<=", CompareOp::LtE),
             (">=", CompareOp::GtE),
             ("<", CompareOp::Lt),
             (">", CompareOp::Gt),
         ];
-        
+
         for (op_str, op) in &operators {
             if let Some(pos) = expr.find(op_str) {
                 let left = expr[..pos].trim().to_string();
                 let right = expr[pos + op_str.len()..].trim().to_string();
-                
+
                 return Some(AssertionType::Compare {
                     op: op.clone(),
                     left,
@@ -256,10 +292,10 @@ impl AssertionRewriter {
                 });
             }
         }
-        
+
         None
     }
-    
+
     fn parse_method_call(&self, expr: &str) -> Option<AssertionType> {
         if let Some(pos) = expr.find(".startswith(") {
             let string = expr[..pos].trim().to_string();
@@ -269,7 +305,7 @@ impl AssertionRewriter {
                 return Some(AssertionType::StartsWith { string, prefix });
             }
         }
-        
+
         if let Some(pos) = expr.find(".endswith(") {
             let string = expr[..pos].trim().to_string();
             let rest = &expr[pos + 10..]; // ".endswith(".len()
@@ -278,7 +314,7 @@ impl AssertionRewriter {
                 return Some(AssertionType::EndsWith { string, suffix });
             }
         }
-        
+
         if expr.contains("isinstance(") {
             // Parse isinstance(obj, type)
             if let Some(start) = expr.find('(') {
@@ -293,10 +329,10 @@ impl AssertionRewriter {
                 }
             }
         }
-        
+
         None
     }
-    
+
     fn parse_membership(&self, expr: &str) -> Option<AssertionType> {
         if expr.contains(" in ") {
             let parts: Vec<&str> = expr.split(" in ").collect();
@@ -306,10 +342,10 @@ impl AssertionRewriter {
                 return Some(AssertionType::In { item, container });
             }
         }
-        
+
         None
     }
-    
+
     fn parse_identity(&self, expr: &str) -> Option<AssertionType> {
         if expr.contains(" is ") {
             let parts: Vec<&str> = expr.split(" is ").collect();
@@ -319,17 +355,22 @@ impl AssertionRewriter {
                 return Some(AssertionType::Is { left, right });
             }
         }
-        
+
         None
     }
-    
+
     /// Generate rewritten assertion code
-    fn generate_rewritten_assertion(&self, assertion_type: &AssertionType, line_number: usize, file_path: &str) -> Result<String> {
+    fn generate_rewritten_assertion(
+        &self,
+        assertion_type: &AssertionType,
+        line_number: usize,
+        file_path: &str,
+    ) -> Result<String> {
         let mut code = String::new();
-        
+
         // Add helper import
         writeln!(code, "from fastest_assertions import assert_helper")?;
-        
+
         match assertion_type {
             AssertionType::Compare { op, left, right } => {
                 let op_str = match op {
@@ -340,52 +381,84 @@ impl AssertionRewriter {
                     CompareOp::Gt => ">",
                     CompareOp::GtE => ">=",
                 };
-                
-                writeln!(code, "assert_helper.compare({}, {}, '{}', {}, '{}', '{}')", 
-                        left, right, op_str, line_number, file_path, format!("{} {} {}", left, op_str, right))?;
+
+                writeln!(
+                    code,
+                    "assert_helper.compare({}, {}, '{}', {}, '{}', '{}')",
+                    left,
+                    right,
+                    op_str,
+                    line_number,
+                    file_path,
+                    format!("{} {} {}", left, op_str, right)
+                )?;
             }
-            
+
             AssertionType::Contains { item, container } => {
-                writeln!(code, "assert_helper.contains({}, {}, {}, '{}', '{} in {}')", 
-                        item, container, line_number, file_path, item, container)?;
+                writeln!(
+                    code,
+                    "assert_helper.contains({}, {}, {}, '{}', '{} in {}')",
+                    item, container, line_number, file_path, item, container
+                )?;
             }
-            
+
             AssertionType::IsInstance { obj, type_name } => {
-                writeln!(code, "assert_helper.isinstance({}, {}, {}, '{}', 'isinstance({}, {})')", 
-                        obj, type_name, line_number, file_path, obj, type_name)?;
+                writeln!(
+                    code,
+                    "assert_helper.isinstance({}, {}, {}, '{}', 'isinstance({}, {})')",
+                    obj, type_name, line_number, file_path, obj, type_name
+                )?;
             }
-            
+
             AssertionType::StartsWith { string, prefix } => {
-                writeln!(code, "assert_helper.startswith({}, {}, {}, '{}', '{}.startswith({})')", 
-                        string, prefix, line_number, file_path, string, prefix)?;
+                writeln!(
+                    code,
+                    "assert_helper.startswith({}, {}, {}, '{}', '{}.startswith({})')",
+                    string, prefix, line_number, file_path, string, prefix
+                )?;
             }
-            
+
             AssertionType::EndsWith { string, suffix } => {
-                writeln!(code, "assert_helper.endswith({}, {}, {}, '{}', '{}.endswith({})')", 
-                        string, suffix, line_number, file_path, string, suffix)?;
+                writeln!(
+                    code,
+                    "assert_helper.endswith({}, {}, {}, '{}', '{}.endswith({})')",
+                    string, suffix, line_number, file_path, string, suffix
+                )?;
             }
-            
+
             AssertionType::In { item, container } => {
-                writeln!(code, "assert_helper.membership({}, {}, {}, '{}', '{} in {}')", 
-                        item, container, line_number, file_path, item, container)?;
+                writeln!(
+                    code,
+                    "assert_helper.membership({}, {}, {}, '{}', '{} in {}')",
+                    item, container, line_number, file_path, item, container
+                )?;
             }
-            
+
             AssertionType::Is { left, right } => {
-                writeln!(code, "assert_helper.identity({}, {}, {}, '{}', '{} is {}')", 
-                        left, right, line_number, file_path, left, right)?;
+                writeln!(
+                    code,
+                    "assert_helper.identity({}, {}, {}, '{}', '{} is {}')",
+                    left, right, line_number, file_path, left, right
+                )?;
             }
-            
+
             AssertionType::Boolean { expr } => {
-                writeln!(code, "assert_helper.boolean({}, {}, '{}', '{}')", 
-                        expr, line_number, file_path, expr)?;
+                writeln!(
+                    code,
+                    "assert_helper.boolean({}, {}, '{}', '{}')",
+                    expr, line_number, file_path, expr
+                )?;
             }
-            
+
             AssertionType::Custom { expr } => {
-                writeln!(code, "assert_helper.custom({}, {}, '{}', '{}')", 
-                        expr, line_number, file_path, expr)?;
+                writeln!(
+                    code,
+                    "assert_helper.custom({}, {}, '{}', '{}')",
+                    expr, line_number, file_path, expr
+                )?;
             }
         }
-        
+
         Ok(code)
     }
 }
@@ -401,10 +474,11 @@ impl AssertionHelpers {
             diff_threshold: 80, // Number of characters before showing diff
         }
     }
-    
+
     /// Generate Python code for assertion helpers
     pub fn generate_helper_code(&self) -> String {
-        format!(r#"
+        format!(
+            r#"
 """
 Fastest assertion helpers for enhanced error reporting.
 """
@@ -577,7 +651,9 @@ Details: {{message}}"""
 
 # Global instance
 assert_helper = AssertionHelper()
-"#, self.diff_threshold)
+"#,
+            self.diff_threshold
+        )
     }
 }
 

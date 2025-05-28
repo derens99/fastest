@@ -3,8 +3,8 @@
 //! Fast, minimal hook system compatible with pytest using external libraries
 
 use anyhow::Result;
-use dashmap::DashMap;
 use async_trait::async_trait;
+use dashmap::DashMap;
 use linkme::distributed_slice;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -61,7 +61,7 @@ impl HookRegistry {
             specs: DashMap::new(),
             timeout_ms: 5000,
         };
-        
+
         // Register all pytest hooks at startup
         registry.register_pytest_hooks();
         registry
@@ -86,16 +86,16 @@ impl HookRegistry {
 
         let spec = self.specs.get(name);
         let firstresult = spec.as_ref().map(|s| s.firstresult).unwrap_or(false);
-        
+
         let mut results = Vec::new();
-        
+
         for hook_fn in hooks.iter() {
             // Execute with timeout
-            let result = timeout(
-                Duration::from_millis(self.timeout_ms),
-                async { hook_fn(&data) }
-            ).await;
-            
+            let result = timeout(Duration::from_millis(self.timeout_ms), async {
+                hook_fn(&data)
+            })
+            .await;
+
             match result {
                 Ok(Ok(hook_result)) => {
                     // Handle firstresult optimization
@@ -112,7 +112,7 @@ impl HookRegistry {
                 }
             }
         }
-        
+
         Ok(results)
     }
 
@@ -125,9 +125,9 @@ impl HookRegistry {
 
         let spec = self.specs.get(name);
         let firstresult = spec.as_ref().map(|s| s.firstresult).unwrap_or(false);
-        
+
         let mut results = Vec::new();
-        
+
         for hook_fn in hooks.iter() {
             match hook_fn(&data) {
                 Ok(hook_result) => {
@@ -141,40 +141,120 @@ impl HookRegistry {
                 }
             }
         }
-        
+
         Ok(results)
     }
 
     fn register_pytest_hooks(&self) {
         let hooks = [
             // Configuration hooks
-            HookSpec { name: "pytest_configure", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_unconfigure", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_addoption", firstresult: false, historic: false, warn_on_impl: false },
-            
+            HookSpec {
+                name: "pytest_configure",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_unconfigure",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_addoption",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
             // Collection hooks
-            HookSpec { name: "pytest_collect_file", firstresult: true, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_collection_modifyitems", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_collection_finish", firstresult: false, historic: false, warn_on_impl: false },
-            
+            HookSpec {
+                name: "pytest_collect_file",
+                firstresult: true,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_collection_modifyitems",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_collection_finish",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
             // Test execution hooks
-            HookSpec { name: "pytest_runtest_setup", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_runtest_call", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_runtest_teardown", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_runtest_makereport", firstresult: true, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_runtest_logreport", firstresult: false, historic: false, warn_on_impl: false },
-            
+            HookSpec {
+                name: "pytest_runtest_setup",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_runtest_call",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_runtest_teardown",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_runtest_makereport",
+                firstresult: true,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_runtest_logreport",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
             // Fixture hooks
-            HookSpec { name: "pytest_fixture_setup", firstresult: true, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_fixture_post_finalizer", firstresult: false, historic: false, warn_on_impl: false },
-            
+            HookSpec {
+                name: "pytest_fixture_setup",
+                firstresult: true,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_fixture_post_finalizer",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
             // Session hooks
-            HookSpec { name: "pytest_sessionstart", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_sessionfinish", firstresult: false, historic: false, warn_on_impl: false },
-            
+            HookSpec {
+                name: "pytest_sessionstart",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_sessionfinish",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
             // Reporting hooks
-            HookSpec { name: "pytest_report_header", firstresult: false, historic: false, warn_on_impl: false },
-            HookSpec { name: "pytest_terminal_summary", firstresult: false, historic: false, warn_on_impl: false },
+            HookSpec {
+                name: "pytest_report_header",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
+            HookSpec {
+                name: "pytest_terminal_summary",
+                firstresult: false,
+                historic: false,
+                warn_on_impl: false,
+            },
         ];
 
         for spec in &hooks {
@@ -217,7 +297,11 @@ impl PytestHooks {
     }
 
     /// Collection hooks
-    pub async fn pytest_collect_file(&self, path: &str, parent: Option<&str>) -> Result<Vec<HookResult>> {
+    pub async fn pytest_collect_file(
+        &self,
+        path: &str,
+        parent: Option<&str>,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: "pytest_collect_file".to_string(),
             args: serde_json::json!({ "path": path, "parent": parent }),
@@ -228,7 +312,12 @@ impl PytestHooks {
         self.registry.call_hook("pytest_collect_file", data).await
     }
 
-    pub async fn pytest_collection_modifyitems(&self, session: serde_json::Value, config: serde_json::Value, items: &[serde_json::Value]) -> Result<Vec<HookResult>> {
+    pub async fn pytest_collection_modifyitems(
+        &self,
+        session: serde_json::Value,
+        config: serde_json::Value,
+        items: &[serde_json::Value],
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: "pytest_collection_modifyitems".to_string(),
             args: serde_json::json!({ "session": session, "config": config, "items": items }),
@@ -236,7 +325,9 @@ impl PytestHooks {
             test_id: None,
             session_id: Uuid::new_v4().to_string(),
         };
-        self.registry.call_hook("pytest_collection_modifyitems", data).await
+        self.registry
+            .call_hook("pytest_collection_modifyitems", data)
+            .await
     }
 
     /// Test execution hooks
@@ -262,7 +353,10 @@ impl PytestHooks {
         self.registry.call_hook("pytest_runtest_call", data).await
     }
 
-    pub async fn pytest_runtest_teardown(&self, item: serde_json::Value) -> Result<Vec<HookResult>> {
+    pub async fn pytest_runtest_teardown(
+        &self,
+        item: serde_json::Value,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: "pytest_runtest_teardown".to_string(),
             args: serde_json::json!({ "item": item }),
@@ -270,11 +364,17 @@ impl PytestHooks {
             test_id: item.get("id").and_then(|v| v.as_str()).map(String::from),
             session_id: Uuid::new_v4().to_string(),
         };
-        self.registry.call_hook("pytest_runtest_teardown", data).await
+        self.registry
+            .call_hook("pytest_runtest_teardown", data)
+            .await
     }
 
     /// Fixture hooks  
-    pub async fn pytest_fixture_setup(&self, fixturedef: serde_json::Value, request: serde_json::Value) -> Result<Vec<HookResult>> {
+    pub async fn pytest_fixture_setup(
+        &self,
+        fixturedef: serde_json::Value,
+        request: serde_json::Value,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: "pytest_fixture_setup".to_string(),
             args: serde_json::json!({ "fixturedef": fixturedef, "request": request }),
@@ -297,7 +397,11 @@ impl PytestHooks {
         self.registry.call_hook("pytest_sessionstart", data).await
     }
 
-    pub async fn pytest_sessionfinish(&self, session: serde_json::Value, exitstatus: i32) -> Result<Vec<HookResult>> {
+    pub async fn pytest_sessionfinish(
+        &self,
+        session: serde_json::Value,
+        exitstatus: i32,
+    ) -> Result<Vec<HookResult>> {
         let data = HookData {
             name: "pytest_sessionfinish".to_string(),
             args: serde_json::json!({ "session": session, "exitstatus": exitstatus }),
@@ -345,12 +449,16 @@ mod tests {
     #[tokio::test]
     async fn test_hook_registry() {
         let registry = HookRegistry::new();
-        
+
         // Register a test hook
-        registry.add_hook("test_hook", |data| {
-            Ok(HookResult::Value(serde_json::json!({"received": data.name})))
-        }).unwrap();
-        
+        registry
+            .add_hook("test_hook", |data| {
+                Ok(HookResult::Value(
+                    serde_json::json!({"received": data.name}),
+                ))
+            })
+            .unwrap();
+
         // Call the hook
         let data = HookData {
             name: "test_hook".to_string(),
@@ -359,7 +467,7 @@ mod tests {
             test_id: None,
             session_id: "test".to_string(),
         };
-        
+
         let results = registry.call_hook("test_hook", data).await.unwrap();
         assert_eq!(results.len(), 1);
     }
@@ -367,7 +475,7 @@ mod tests {
     #[test]
     fn test_pytest_hooks_registration() {
         let registry = HookRegistry::new();
-        
+
         // Should have pytest hooks registered
         assert!(registry.specs.contains_key("pytest_configure"));
         assert!(registry.specs.contains_key("pytest_runtest_setup"));

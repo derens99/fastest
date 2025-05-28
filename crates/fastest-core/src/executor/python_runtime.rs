@@ -19,10 +19,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use super::TestResult;
 use crate::discovery::TestItem;
 use crate::error::Error;
 use crate::fixtures::{Fixture, FixtureManager, FixtureScope};
-use super::TestResult;
 use crate::utils::PYTHON_CMD;
 
 /// Configuration for the Python runtime
@@ -61,18 +61,11 @@ struct RuntimeCommand {
 #[serde(tag = "type")]
 enum CommandType {
     #[serde(rename = "setup_fixtures")]
-    SetupFixtures {
-        fixtures: Vec<FixtureSetupData>,
-    },
+    SetupFixtures { fixtures: Vec<FixtureSetupData> },
     #[serde(rename = "run_tests")]
-    RunTests {
-        tests: Vec<TestExecutionData>,
-    },
+    RunTests { tests: Vec<TestExecutionData> },
     #[serde(rename = "cleanup_fixtures")]
-    CleanupFixtures {
-        scope: String,
-        scope_id: String,
-    },
+    CleanupFixtures { scope: String, scope_id: String },
     #[serde(rename = "shutdown")]
     Shutdown,
 }
@@ -153,7 +146,7 @@ impl EnhancedPythonWorker {
         let mut reader = BufReader::new(child.stdout.take().unwrap());
         let mut ready_line = String::new();
         reader.read_line(&mut ready_line)?;
-        
+
         if ready_line.trim() != "WORKER_READY" {
             return Err(anyhow!("Worker {} not ready: {}", worker_id, ready_line));
         }
@@ -179,19 +172,26 @@ impl EnhancedPythonWorker {
         let mut reader = self.stdout.lock();
         let mut response_line = String::new();
         let bytes_read = reader.read_line(&mut response_line)?;
-        
+
         if bytes_read == 0 {
             return Err(anyhow!("Worker {} closed connection", self.worker_id));
         }
 
-        let response: RuntimeResponse = serde_json::from_str(&response_line.trim())
-            .map_err(|e| anyhow!("Failed to parse response from worker {}: {}", self.worker_id, e))?;
+        let response: RuntimeResponse =
+            serde_json::from_str(&response_line.trim()).map_err(|e| {
+                anyhow!(
+                    "Failed to parse response from worker {}: {}",
+                    self.worker_id,
+                    e
+                )
+            })?;
 
         Ok(response)
     }
 
     fn setup_fixtures(&self, fixtures: &[Fixture]) -> Result<HashMap<String, serde_json::Value>> {
-        let fixture_data: Vec<FixtureSetupData> = fixtures.iter()
+        let fixture_data: Vec<FixtureSetupData> = fixtures
+            .iter()
             .map(|f| FixtureSetupData {
                 name: f.name.clone(),
                 scope: match f.scope {
@@ -208,12 +208,14 @@ impl EnhancedPythonWorker {
 
         let cmd = RuntimeCommand {
             id: next_command_id(),
-            command_type: CommandType::SetupFixtures { fixtures: fixture_data },
+            command_type: CommandType::SetupFixtures {
+                fixtures: fixture_data,
+            },
             data: serde_json::Value::Null,
         };
 
         let response = self.execute_command(&cmd)?;
-        
+
         if !response.success {
             return Err(anyhow!("Fixture setup failed: {:?}", response.error));
         }
@@ -236,12 +238,14 @@ impl EnhancedPythonWorker {
     fn run_tests(&self, tests: &[TestExecutionData]) -> Result<Vec<TestExecutionResult>> {
         let cmd = RuntimeCommand {
             id: next_command_id(),
-            command_type: CommandType::RunTests { tests: tests.to_vec() },
+            command_type: CommandType::RunTests {
+                tests: tests.to_vec(),
+            },
             data: serde_json::Value::Null,
         };
 
         let response = self.execute_command(&cmd)?;
-        
+
         if !response.success {
             return Err(anyhow!("Test execution failed: {:?}", response.error));
         }
@@ -255,7 +259,7 @@ impl EnhancedPythonWorker {
     fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         let scope_str = match scope {
             FixtureScope::Function => "function",
-            FixtureScope::Class => "class", 
+            FixtureScope::Class => "class",
             FixtureScope::Module => "module",
             FixtureScope::Session => "session",
         };
@@ -270,7 +274,7 @@ impl EnhancedPythonWorker {
         };
 
         let response = self.execute_command(&cmd)?;
-        
+
         if !response.success {
             return Err(anyhow!("Fixture cleanup failed: {:?}", response.error));
         }
@@ -282,14 +286,16 @@ impl EnhancedPythonWorker {
         // Generate Python code for fixture
         // This is a simplified version - in practice would need more sophisticated code generation
         if crate::fixtures::is_builtin_fixture(&fixture.name) {
-            crate::fixtures::generate_builtin_fixture_code(&fixture.name).unwrap_or_else(|| "# Unknown builtin fixture".to_string())
+            crate::fixtures::generate_builtin_fixture_code(&fixture.name)
+                .unwrap_or_else(|| "# Unknown builtin fixture".to_string())
         } else {
             format!("# User fixture: {}\npass", fixture.name)
         }
     }
 
     fn worker_code(config: &RuntimeConfig) -> String {
-        format!(r#"
+        format!(
+            r#"
 import sys, json, time, importlib, gc, os, io, inspect, traceback, ast, tempfile, pathlib
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from typing import Any, Dict, List, Optional, Union
@@ -734,10 +740,8 @@ while True:
         }}
         sys.stdout.write(json.dumps(error_response) + '\n')
         sys.stdout.flush()
-"#, 
-            config.capture_output,
-            config.assertion_rewriting,
-            config.verbose
+"#,
+            config.capture_output, config.assertion_rewriting, config.verbose
         )
     }
 }
@@ -752,19 +756,19 @@ struct EnhancedWorkerPool {
 impl EnhancedWorkerPool {
     fn new(config: RuntimeConfig) -> Result<Self> {
         let mut workers = Vec::with_capacity(config.pool_size);
-        
+
         for i in 0..config.pool_size {
             let worker = Arc::new(EnhancedPythonWorker::spawn(i, &config)?);
             workers.push(worker);
         }
-        
+
         Ok(Self {
             workers,
             config,
             cursor: AtomicUsize::new(0),
         })
     }
-    
+
     fn get_worker(&self) -> Arc<EnhancedPythonWorker> {
         let idx = self.cursor.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         self.workers[idx].clone()
@@ -782,27 +786,31 @@ impl PythonRuntime {
     pub fn new(config: RuntimeConfig) -> Result<Self> {
         let pool = Arc::new(EnhancedWorkerPool::new(config.clone())?);
         let fixture_manager = Arc::new(Mutex::new(FixtureManager::new()));
-        
+
         Ok(Self {
             pool,
             fixture_manager,
             config,
         })
     }
-    
+
     /// Execute a batch of tests with complete fixture support
     pub fn execute_tests_with_fixtures(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         if tests.is_empty() {
             return Ok(Vec::new());
         }
-        
+
         let chunks: Vec<_> = tests.chunks(self.config.batch_size).collect();
         let total_batches = chunks.len();
-        
+
         if self.config.verbose {
-            eprintln!("⚡ Enhanced runtime: {} tests in {} batches", tests.len(), total_batches);
+            eprintln!(
+                "⚡ Enhanced runtime: {} tests in {} batches",
+                tests.len(),
+                total_batches
+            );
         }
-        
+
         let results: Vec<TestResult> = chunks
             .into_par_iter()
             .enumerate()
@@ -813,13 +821,13 @@ impl PythonRuntime {
                 self.execute_test_batch(chunk)
             })
             .collect();
-        
+
         Ok(results)
     }
-    
+
     fn execute_test_batch(&self, tests: &[TestItem]) -> Vec<TestResult> {
         let worker = self.pool.get_worker();
-        
+
         // Collect all fixtures needed for this batch
         let mut all_fixtures = std::collections::HashSet::new();
         for test in tests {
@@ -827,39 +835,49 @@ impl PythonRuntime {
             let fixtures = self.extract_test_fixtures(test);
             all_fixtures.extend(fixtures);
         }
-        
+
         // Setup fixtures
-        if let Err(e) = self.setup_batch_fixtures(&worker, &all_fixtures.into_iter().collect::<Vec<_>>()) {
+        if let Err(e) =
+            self.setup_batch_fixtures(&worker, &all_fixtures.into_iter().collect::<Vec<_>>())
+        {
             if self.config.verbose {
                 eprintln!("Fixture setup failed: {}", e);
             }
-            return tests.iter().map(|test| self.create_error_result(test, &e.to_string())).collect();
+            return tests
+                .iter()
+                .map(|test| self.create_error_result(test, &e.to_string()))
+                .collect();
         }
-        
+
         // Prepare test execution data
-        let test_data: Vec<TestExecutionData> = tests.iter()
+        let test_data: Vec<TestExecutionData> = tests
+            .iter()
             .map(|test| self.prepare_test_execution_data(test))
             .collect();
-        
+
         // Execute tests
         match worker.run_tests(&test_data) {
-            Ok(results) => {
-                results.into_iter().map(|r| self.convert_test_result(r)).collect()
-            }
+            Ok(results) => results
+                .into_iter()
+                .map(|r| self.convert_test_result(r))
+                .collect(),
             Err(e) => {
                 if self.config.verbose {
                     eprintln!("Test execution failed: {}", e);
                 }
-                tests.iter().map(|test| self.create_error_result(test, &e.to_string())).collect()
+                tests
+                    .iter()
+                    .map(|test| self.create_error_result(test, &e.to_string()))
+                    .collect()
             }
         }
     }
-    
+
     fn extract_test_fixtures(&self, test: &TestItem) -> Vec<String> {
         // Extract fixture names from test function signature
         // This is simplified - real implementation would parse the actual function signature
         let mut fixtures = Vec::new();
-        
+
         // Check decorators for fixture dependencies
         for decorator in &test.decorators {
             if decorator.starts_with("__fixtures__=") {
@@ -868,29 +886,33 @@ impl PythonRuntime {
                 }
             }
         }
-        
+
         // Add built-in fixtures if commonly used
         // In real implementation, this would be parsed from function signature
         fixtures
     }
-    
-    fn setup_batch_fixtures(&self, worker: &EnhancedPythonWorker, fixture_names: &[String]) -> Result<()> {
+
+    fn setup_batch_fixtures(
+        &self,
+        worker: &EnhancedPythonWorker,
+        fixture_names: &[String],
+    ) -> Result<()> {
         let fixture_manager = self.fixture_manager.lock();
         let mut fixtures_to_setup = Vec::new();
-        
+
         // Note: This would need to access fixtures through a public method
         // For now, we'll skip the fixture setup in this implementation
         // and focus on the test execution
-        
+
         drop(fixture_manager);
-        
+
         if !fixtures_to_setup.is_empty() {
             worker.setup_fixtures(&fixtures_to_setup)?;
         }
-        
+
         Ok(())
     }
-    
+
     fn prepare_test_execution_data(&self, test: &TestItem) -> TestExecutionData {
         // Parse test ID to extract module and function
         let parts: Vec<&str> = test.id.split("::").collect();
@@ -900,24 +922,28 @@ impl PythonRuntime {
             3 => (parts[0], format!("{}::{}", parts[1], parts[2])),
             _ => (parts[0], parts[1..].join("::")),
         };
-        
+
         // Extract fixtures (simplified)
         let fixtures = self.extract_test_fixtures(test);
-        
+
         // Extract parameters from decorators
-        let params = test.decorators.iter()
+        let params = test
+            .decorators
+            .iter()
             .find(|d| d.starts_with("__params__="))
             .and_then(|d| {
                 let json_str = d.trim_start_matches("__params__=");
                 serde_json::from_str::<serde_json::Value>(json_str).ok()
             });
-        
+
         // Extract markers
-        let markers = test.decorators.iter()
+        let markers = test
+            .decorators
+            .iter()
             .filter(|d| d.starts_with("@pytest.mark.") || d.starts_with("@fastest.mark."))
             .map(|d| d.to_string())
             .collect();
-        
+
         TestExecutionData {
             id: test.id.clone(),
             module: module.to_string(),
@@ -929,12 +955,14 @@ impl PythonRuntime {
             rewritten_code: None, // TODO: Add assertion rewriting
         }
     }
-    
+
     fn convert_test_result(&self, result: TestExecutionResult) -> TestResult {
-        let is_skip = result.error.as_ref()
+        let is_skip = result
+            .error
+            .as_ref()
             .map(|e| e.starts_with("SKIPPED:"))
             .unwrap_or(false);
-        
+
         TestResult {
             test_id: result.id,
             passed: result.passed,
@@ -951,7 +979,7 @@ impl PythonRuntime {
             stderr: result.stderr,
         }
     }
-    
+
     fn create_error_result(&self, test: &TestItem, error: &str) -> TestResult {
         TestResult {
             test_id: test.id.clone(),
@@ -963,28 +991,31 @@ impl PythonRuntime {
             stderr: String::new(),
         }
     }
-    
+
     /// Register a fixture with the runtime
     pub fn register_fixture(&self, fixture: Fixture) {
         let mut fixture_manager = self.fixture_manager.lock();
         fixture_manager.register_fixture(fixture);
     }
-    
+
     /// Cleanup fixtures for a specific scope
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         // Send cleanup command to all workers
         for worker in &self.pool.workers {
             if let Err(e) = worker.cleanup_fixtures(scope.clone(), scope_id) {
                 if self.config.verbose {
-                    eprintln!("Warning: Failed to cleanup fixtures on worker {}: {}", worker.worker_id, e);
+                    eprintln!(
+                        "Warning: Failed to cleanup fixtures on worker {}: {}",
+                        worker.worker_id, e
+                    );
                 }
             }
         }
-        
+
         // Cleanup fixture manager
         let fixture_manager = self.fixture_manager.lock();
         fixture_manager.teardown_fixtures("dummy", scope)?;
-        
+
         Ok(())
     }
 }

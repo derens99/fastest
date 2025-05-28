@@ -63,7 +63,7 @@ pub struct FileCoverage {
 impl Phase3Manager {
     pub fn new(config: Phase3Config) -> Result<Self> {
         std::fs::create_dir_all(&config.cache_dir)?;
-        
+
         Ok(Self {
             cache_dir: config.cache_dir.clone(),
             config,
@@ -74,15 +74,24 @@ impl Phase3Manager {
     pub async fn initialize(&mut self) -> Result<()> {
         tracing::info!("🚀 Phase 3: Advanced Features initialized");
         tracing::info!("  ✓ Smart test selection enabled");
-        tracing::info!("  ✓ Incremental testing: {}", self.config.incremental_enabled);
-        tracing::info!("  ✓ Test prioritization: {}", self.config.prioritization_enabled);
+        tracing::info!(
+            "  ✓ Incremental testing: {}",
+            self.config.incremental_enabled
+        );
+        tracing::info!(
+            "  ✓ Test prioritization: {}",
+            self.config.prioritization_enabled
+        );
         tracing::info!("  ✓ Coverage tracking: {}", self.config.coverage_enabled);
-        
+
         Ok(())
     }
 
     /// Get smart test selection based on advanced algorithms
-    pub async fn get_smart_test_selection(&self, all_tests: &[String]) -> Result<SmartTestSelection> {
+    pub async fn get_smart_test_selection(
+        &self,
+        all_tests: &[String],
+    ) -> Result<SmartTestSelection> {
         let mut selection = SmartTestSelection {
             tests_to_run: all_tests.to_vec(),
             priority_order: Vec::new(),
@@ -95,7 +104,10 @@ impl Phase3Manager {
             selection.incremental_tests = self.get_incremental_tests().await?;
             if !selection.incremental_tests.is_empty() {
                 selection.tests_to_run = selection.incremental_tests.clone();
-                tracing::info!("🔍 Incremental: Running {} affected tests", selection.tests_to_run.len());
+                tracing::info!(
+                    "🔍 Incremental: Running {} affected tests",
+                    selection.tests_to_run.len()
+                );
             }
         }
 
@@ -103,7 +115,10 @@ impl Phase3Manager {
         if self.config.prioritization_enabled {
             selection.priority_order = self.prioritize_tests(&selection.tests_to_run).await?;
             selection.tests_to_run = selection.priority_order.clone();
-            tracing::info!("⚡ Prioritized {} tests for optimal execution", selection.tests_to_run.len());
+            tracing::info!(
+                "⚡ Prioritized {} tests for optimal execution",
+                selection.tests_to_run.len()
+            );
         }
 
         Ok(selection)
@@ -117,13 +132,11 @@ impl Phase3Manager {
             .output();
 
         let changed_files = match output {
-            Ok(output) if output.status.success() => {
-                String::from_utf8_lossy(&output.stdout)
-                    .lines()
-                    .filter(|line| line.ends_with(".py"))
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            }
+            Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter(|line| line.ends_with(".py"))
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>(),
             _ => {
                 // Fallback: check file modification times
                 self.get_recently_modified_files().await?
@@ -136,7 +149,7 @@ impl Phase3Manager {
 
         // Smart impact analysis: find tests that might be affected
         let mut affected_tests = HashSet::new();
-        
+
         for file in changed_files {
             // Direct test files
             if file.contains("test_") || file.ends_with("_test.py") {
@@ -153,13 +166,11 @@ impl Phase3Manager {
     /// Find recently modified files as fallback
     async fn get_recently_modified_files(&self) -> Result<Vec<String>> {
         use std::time::{SystemTime, UNIX_EPOCH};
-        
-        let one_hour_ago = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() - 3600;
+
+        let one_hour_ago = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() - 3600;
 
         let mut recent_files = Vec::new();
-        
+
         for entry in walkdir::WalkDir::new(".")
             .into_iter()
             .filter_map(|e| e.ok())
@@ -194,14 +205,16 @@ impl Phase3Manager {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.extension().map_or(false, |ext| ext == "py") &&
-                (path.to_string_lossy().contains("test_") || path.to_string_lossy().ends_with("_test.py"))
+                path.extension().map_or(false, |ext| ext == "py")
+                    && (path.to_string_lossy().contains("test_")
+                        || path.to_string_lossy().ends_with("_test.py"))
             })
         {
             if let Ok(content) = std::fs::read_to_string(entry.path()) {
                 // Simple import detection
-                if content.contains(&format!("import {}", module_name)) ||
-                   content.contains(&format!("from {} import", module_name)) {
+                if content.contains(&format!("import {}", module_name))
+                    || content.contains(&format!("from {} import", module_name))
+                {
                     dependent_tests.push(entry.path().to_string_lossy().to_string());
                 }
             }
@@ -222,7 +235,7 @@ impl Phase3Manager {
                 if history.recently_failed {
                     score += 10.0; // High priority for failed tests
                 }
-                
+
                 // 2. Prefer faster tests slightly
                 if history.average_duration_ms < 1000.0 {
                     score += 1.0;
@@ -288,25 +301,32 @@ impl Phase3Manager {
                 if let Some(files_data) = coverage_data.get("files").and_then(|f| f.as_object()) {
                     for (file_path, file_data) in files_data {
                         if let Some(summary) = file_data.get("summary") {
-                            let lines_total = summary.get("num_statements")
+                            let lines_total = summary
+                                .get("num_statements")
                                 .and_then(|v| v.as_u64())
                                 .unwrap_or(0) as u32;
-                            let lines_covered = summary.get("covered_lines")
+                            let lines_covered = summary
+                                .get("covered_lines")
                                 .and_then(|v| v.as_u64())
-                                .unwrap_or(0) as u32;
-                            let coverage_percent = summary.get("percent_covered")
+                                .unwrap_or(0)
+                                as u32;
+                            let coverage_percent = summary
+                                .get("percent_covered")
                                 .and_then(|v| v.as_f64())
                                 .unwrap_or(0.0);
 
                             total_lines += lines_total;
                             covered_lines += lines_covered;
 
-                            files.insert(file_path.clone(), FileCoverage {
-                                file_path: file_path.clone(),
-                                lines_covered,
-                                lines_total,
-                                coverage_percent,
-                            });
+                            files.insert(
+                                file_path.clone(),
+                                FileCoverage {
+                                    file_path: file_path.clone(),
+                                    lines_covered,
+                                    lines_total,
+                                    coverage_percent,
+                                },
+                            );
                         }
                     }
                 }
@@ -347,12 +367,15 @@ impl Phase3Manager {
                 total_lines += lines_total;
                 covered_lines += lines_covered;
 
-                files.insert(test_file.clone(), FileCoverage {
-                    file_path: test_file.clone(),
-                    lines_covered,
-                    lines_total,
-                    coverage_percent,
-                });
+                files.insert(
+                    test_file.clone(),
+                    FileCoverage {
+                        file_path: test_file.clone(),
+                        lines_covered,
+                        lines_total,
+                        coverage_percent,
+                    },
+                );
             }
         }
 
@@ -379,7 +402,7 @@ impl Phase3Manager {
 
         let content = std::fs::read_to_string(cache_file)?;
         let history_map: HashMap<String, TestHistory> = serde_json::from_str(&content)?;
-        
+
         Ok(history_map.get(test_id).cloned())
     }
 
@@ -394,26 +417,44 @@ impl Phase3Manager {
     /// Get Phase 3 statistics
     pub async fn get_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("phase".to_string(), serde_json::Value::String("3".to_string()));
-        stats.insert("incremental_enabled".to_string(), serde_json::Value::Bool(self.config.incremental_enabled));
-        stats.insert("prioritization_enabled".to_string(), serde_json::Value::Bool(self.config.prioritization_enabled));
-        stats.insert("coverage_enabled".to_string(), serde_json::Value::Bool(self.config.coverage_enabled));
-        
+
+        stats.insert(
+            "phase".to_string(),
+            serde_json::Value::String("3".to_string()),
+        );
+        stats.insert(
+            "incremental_enabled".to_string(),
+            serde_json::Value::Bool(self.config.incremental_enabled),
+        );
+        stats.insert(
+            "prioritization_enabled".to_string(),
+            serde_json::Value::Bool(self.config.prioritization_enabled),
+        );
+        stats.insert(
+            "coverage_enabled".to_string(),
+            serde_json::Value::Bool(self.config.coverage_enabled),
+        );
+
         // Check git availability
         let git_available = Command::new("git")
             .args(["--version"])
             .output()
             .map_or(false, |out| out.status.success());
-        stats.insert("git_available".to_string(), serde_json::Value::Bool(git_available));
-        
+        stats.insert(
+            "git_available".to_string(),
+            serde_json::Value::Bool(git_available),
+        );
+
         // Check coverage.py availability
         let coverage_available = Command::new("python")
             .args(["-m", "coverage", "--version"])
             .output()
             .map_or(false, |out| out.status.success());
-        stats.insert("coverage_py_available".to_string(), serde_json::Value::Bool(coverage_available));
-        
+        stats.insert(
+            "coverage_py_available".to_string(),
+            serde_json::Value::Bool(coverage_available),
+        );
+
         stats
     }
 }

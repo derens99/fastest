@@ -35,12 +35,12 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            default_timeout: 60,      // 1 minute default
+            default_timeout: 60, // 1 minute default
             per_test_timeouts: true,
-            async_timeout: 120,       // 2 minutes for async tests
-            fixture_timeout: 30,      // 30 seconds for fixtures
+            async_timeout: 120,  // 2 minutes for async tests
+            fixture_timeout: 30, // 30 seconds for fixtures
             timeout_warnings: true,
-            warning_threshold: 0.8,   // Warn at 80% of timeout
+            warning_threshold: 0.8, // Warn at 80% of timeout
         }
     }
 }
@@ -97,10 +97,7 @@ impl TimeoutManager {
     }
 
     /// Execute test with timeout
-    pub async fn execute_with_timeout<F, T>(&mut self, 
-        test: &TestItem, 
-        future: F
-    ) -> Result<T>
+    pub async fn execute_with_timeout<F, T>(&mut self, test: &TestItem, future: F) -> Result<T>
     where
         F: std::future::Future<Output = Result<T>>,
     {
@@ -116,7 +113,8 @@ impl TimeoutManager {
 
         // Start timeout warning task
         if self.config.timeout_warnings {
-            self.start_timeout_warning_task(&test.id, timeout_duration).await;
+            self.start_timeout_warning_task(&test.id, timeout_duration)
+                .await;
         }
 
         let result = timeout(timeout_duration, future).await;
@@ -127,13 +125,18 @@ impl TimeoutManager {
         match result {
             Ok(test_result) => test_result,
             Err(_) => {
-                let elapsed = self.active_timeouts
+                let elapsed = self
+                    .active_timeouts
                     .get(&test.id)
                     .map(|h| h.start_time.elapsed())
                     .unwrap_or_default();
 
-                Err(anyhow::anyhow!("Test '{}' timed out after {:?} (limit: {:?})", 
-                    test.id, elapsed, timeout_duration))
+                Err(anyhow::anyhow!(
+                    "Test '{}' timed out after {:?} (limit: {:?})",
+                    test.id,
+                    elapsed,
+                    timeout_duration
+                ))
             }
         }
     }
@@ -190,7 +193,7 @@ impl TimeoutManager {
                 // Simple parsing - would be more sophisticated in production
                 if let Some(start) = decorator.find("(") {
                     if let Some(end) = decorator.find(")") {
-                        let timeout_str = &decorator[start+1..end];
+                        let timeout_str = &decorator[start + 1..end];
                         if let Ok(timeout_num) = timeout_str.parse::<u64>() {
                             return Some(timeout_num);
                         }
@@ -204,34 +207,40 @@ impl TimeoutManager {
     /// Check if test is async
     fn is_async_test(&self, test: &TestItem) -> bool {
         // Use the is_async field from TestItem
-        test.is_async || 
-        test.decorators.iter().any(|d| d.contains("asyncio"))
+        test.is_async || test.decorators.iter().any(|d| d.contains("asyncio"))
     }
 
     /// Start timeout warning task
     async fn start_timeout_warning_task(&self, test_id: &str, timeout_duration: Duration) {
         let warning_time = Duration::from_secs(
-            (timeout_duration.as_secs() as f64 * self.config.warning_threshold) as u64
+            (timeout_duration.as_secs() as f64 * self.config.warning_threshold) as u64,
         );
 
         let test_id = test_id.to_string();
         tokio::spawn(async move {
             tokio::time::sleep(warning_time).await;
-            tracing::warn!("⚠️  Test '{}' is approaching timeout ({:?} elapsed)", 
-                          test_id, warning_time);
+            tracing::warn!(
+                "⚠️  Test '{}' is approaching timeout ({:?} elapsed)",
+                test_id,
+                warning_time
+            );
         });
     }
 
     /// Create async test execution future
-    async fn create_async_test_future(&self, test: &TestItem, context: &AsyncExecutionContext) -> Result<TestResult> {
+    async fn create_async_test_future(
+        &self,
+        test: &TestItem,
+        context: &AsyncExecutionContext,
+    ) -> Result<TestResult> {
         // Simplified async test execution
         // In production, would integrate with Python async runtime
-        
+
         context.increment_awaited_operations().await;
-        
+
         // Simulate async test execution
         tokio::time::sleep(Duration::from_millis(100)).await;
-        
+
         Ok(TestResult {
             test_id: test.id.clone(),
             passed: true,
@@ -261,16 +270,24 @@ impl TimeoutManager {
     /// Get timeout statistics
     pub fn get_timeout_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("active_timeouts".to_string(), 
-                    serde_json::Value::Number(self.active_timeouts.len().into()));
-        stats.insert("default_timeout".to_string(), 
-                    serde_json::Value::Number(self.config.default_timeout.into()));
-        stats.insert("async_timeout".to_string(), 
-                    serde_json::Value::Number(self.config.async_timeout.into()));
-        stats.insert("warnings_enabled".to_string(), 
-                    serde_json::Value::Bool(self.config.timeout_warnings));
-        
+
+        stats.insert(
+            "active_timeouts".to_string(),
+            serde_json::Value::Number(self.active_timeouts.len().into()),
+        );
+        stats.insert(
+            "default_timeout".to_string(),
+            serde_json::Value::Number(self.config.default_timeout.into()),
+        );
+        stats.insert(
+            "async_timeout".to_string(),
+            serde_json::Value::Number(self.config.async_timeout.into()),
+        );
+        stats.insert(
+            "warnings_enabled".to_string(),
+            serde_json::Value::Bool(self.config.timeout_warnings),
+        );
+
         stats
     }
 
@@ -280,9 +297,13 @@ impl TimeoutManager {
 
         println!("\n{}", "⏰ TIMEOUT ERROR".bright_red().bold());
         println!("{}", "━".repeat(50).red());
-        
+
         println!("{}: {}", "Test".cyan(), error.test_id.bright_white());
-        println!("{}: {:?}", "Timeout Duration".cyan(), error.timeout_duration);
+        println!(
+            "{}: {:?}",
+            "Timeout Duration".cyan(),
+            error.timeout_duration
+        );
         println!("{}: {:?}", "Elapsed Time".cyan(), error.elapsed_time);
         println!("{}: {:?}", "Timeout Type".cyan(), error.timeout_type);
         println!("{}: {}", "Context".cyan(), error.context);
@@ -334,14 +355,19 @@ impl AsyncExecutionContext {
     }
 
     async fn increment_awaited_operations(&self) {
-        self.awaited_operations.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.awaited_operations
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     fn get_execution_info(&self, total_time: Duration) -> AsyncExecutionInfo {
         AsyncExecutionInfo {
             is_async: true,
-            awaited_operations: self.awaited_operations.load(std::sync::atomic::Ordering::Relaxed),
-            concurrent_tasks: self.concurrent_tasks.load(std::sync::atomic::Ordering::Relaxed),
+            awaited_operations: self
+                .awaited_operations
+                .load(std::sync::atomic::Ordering::Relaxed),
+            concurrent_tasks: self
+                .concurrent_tasks
+                .load(std::sync::atomic::Ordering::Relaxed),
             event_loop_time: self.event_loop_start.elapsed(),
         }
     }
@@ -354,7 +380,7 @@ pub mod utils {
     /// Parse timeout from string (e.g., "30s", "2m", "1h")
     pub fn parse_timeout_string(timeout_str: &str) -> Result<Duration> {
         let timeout_str = timeout_str.trim().to_lowercase();
-        
+
         if let Some(seconds_str) = timeout_str.strip_suffix('s') {
             let seconds: u64 = seconds_str.parse()?;
             Ok(Duration::from_secs(seconds))
@@ -394,7 +420,7 @@ pub mod utils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TestItem, Marker};
+    use crate::{Marker, TestItem};
 
     #[test]
     fn test_timeout_config() {
@@ -406,10 +432,22 @@ mod tests {
 
     #[test]
     fn test_parse_timeout_string() {
-        assert_eq!(utils::parse_timeout_string("30s").unwrap(), Duration::from_secs(30));
-        assert_eq!(utils::parse_timeout_string("2m").unwrap(), Duration::from_secs(120));
-        assert_eq!(utils::parse_timeout_string("1h").unwrap(), Duration::from_secs(3600));
-        assert_eq!(utils::parse_timeout_string("45").unwrap(), Duration::from_secs(45));
+        assert_eq!(
+            utils::parse_timeout_string("30s").unwrap(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            utils::parse_timeout_string("2m").unwrap(),
+            Duration::from_secs(120)
+        );
+        assert_eq!(
+            utils::parse_timeout_string("1h").unwrap(),
+            Duration::from_secs(3600)
+        );
+        assert_eq!(
+            utils::parse_timeout_string("45").unwrap(),
+            Duration::from_secs(45)
+        );
     }
 
     #[test]
@@ -417,7 +455,10 @@ mod tests {
         assert_eq!(utils::format_duration(Duration::from_millis(500)), "500ms");
         assert_eq!(utils::format_duration(Duration::from_secs(5)), "5.000s");
         assert_eq!(utils::format_duration(Duration::from_secs(90)), "1m 30s");
-        assert_eq!(utils::format_duration(Duration::from_secs(3661)), "1h 1m 1s");
+        assert_eq!(
+            utils::format_duration(Duration::from_secs(3661)),
+            "1h 1m 1s"
+        );
     }
 
     #[tokio::test]
@@ -436,10 +477,12 @@ mod tests {
         };
 
         // Test successful execution within timeout
-        let result = manager.execute_with_timeout(&test, async {
-            tokio::time::sleep(Duration::from_millis(10)).await;
-            Ok("success")
-        }).await;
+        let result = manager
+            .execute_with_timeout(&test, async {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                Ok("success")
+            })
+            .await;
 
         assert!(result.is_ok());
     }

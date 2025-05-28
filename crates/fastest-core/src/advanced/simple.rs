@@ -54,10 +54,10 @@ impl SimpleAdvancedManager {
     pub async fn prioritize_tests(&self, tests: &[String]) -> Result<Vec<String>> {
         // Simple prioritization: run failed tests first
         let mut prioritized = tests.to_vec();
-        
+
         // Sort by test name for deterministic order
         prioritized.sort();
-        
+
         tracing::info!("Prioritized {} tests", prioritized.len());
         Ok(prioritized)
     }

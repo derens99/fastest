@@ -1,12 +1,9 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
-    default_cache_path, discover_tests, discover_tests_cached,
-    executor::UltraFastExecutor,
-    filter_by_markers,
-    Config, DiscoveryCache,
-    parse_plugin_args, PluginCompatibilityConfig,
-    parse_dev_args, DevExperienceConfig,
+    default_cache_path, discover_tests, discover_tests_cached, executor::UltraFastExecutor,
+    filter_by_markers, parse_dev_args, parse_plugin_args, Config, DevExperienceConfig,
+    DiscoveryCache, PluginCompatibilityConfig,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -153,18 +150,12 @@ fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
     for path in &cli.paths {
         let tests = if cli.no_cache {
             if cli.verbose {
-                eprintln!(
-                    "Discovering tests in {} (cache disabled)",
-                    path.display()
-                );
+                eprintln!("Discovering tests in {} (cache disabled)", path.display());
             }
             discover_tests(path)?
         } else {
             if cli.verbose {
-                eprintln!(
-                    "Discovering tests in {} (cache enabled)",
-                    path.display()
-                );
+                eprintln!("Discovering tests in {} (cache enabled)", path.display());
             }
             let cache_path = default_cache_path();
             let mut cache =
@@ -262,18 +253,12 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
     for path in &cli.paths {
         let tests = if cli.no_cache {
             if cli.verbose {
-                eprintln!(
-                    "Discovering tests in {} (cache disabled)",
-                    path.display()
-                );
+                eprintln!("Discovering tests in {} (cache disabled)", path.display());
             }
             discover_tests(path)?
         } else {
             if cli.verbose {
-                eprintln!(
-                    "Discovering tests in {} (cache enabled)",
-                    path.display()
-                );
+                eprintln!("Discovering tests in {} (cache enabled)", path.display());
             }
             let cache_path = default_cache_path();
             let mut cache =
@@ -331,7 +316,7 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
 
     let workers = cli.workers.unwrap_or(0);
     let num_workers = if workers == 0 { None } else { Some(workers) };
-    
+
     // Use the optimized executor wrapper for compatibility
     let mut executor = UltraFastExecutor::new_with_workers(num_workers, cli.verbose);
 
@@ -349,13 +334,13 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
 
     // Configure plugin compatibility
     let mut plugin_config = PluginCompatibilityConfig::default();
-    
+
     // Check for xdist (distributed testing) - workers specified means xdist
     if cli.workers.is_some() && cli.workers.unwrap() > 1 {
         plugin_config.xdist_enabled = true;
         plugin_config.xdist_workers = cli.workers.unwrap();
     }
-    
+
     // Coverage support
     if cli.coverage {
         plugin_config.coverage_enabled = true;
@@ -365,24 +350,27 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
             cli.coverage_source.clone()
         };
     }
-    
+
     // Mock support
     if cli.mock {
         plugin_config.mock_enabled = true;
     }
-    
+
     // Asyncio support
     if let Some(asyncio_mode) = &cli.asyncio_mode {
         plugin_config.asyncio_enabled = true;
         plugin_config.asyncio_mode = asyncio_mode.clone();
     }
-    
+
     // Check for conflicting options before moving plugin_config
     let coverage_warning = cli.coverage && !plugin_config.coverage_enabled;
-    
+
     // Enable plugin compatibility if any plugins are enabled
-    if plugin_config.xdist_enabled || plugin_config.coverage_enabled || 
-       plugin_config.mock_enabled || plugin_config.asyncio_enabled {
+    if plugin_config.xdist_enabled
+        || plugin_config.coverage_enabled
+        || plugin_config.mock_enabled
+        || plugin_config.asyncio_enabled
+    {
         executor = executor.with_plugin_compatibility(plugin_config);
     }
 

@@ -7,8 +7,8 @@ use serde_json::json;
 use std::collections::HashMap;
 
 use super::Plugin;
+use crate::plugin::hooks::{HookData, HookRegistry, HookResult};
 use crate::register_plugin;
-use crate::plugin::hooks::{HookRegistry, HookData, HookResult};
 
 /// Markers plugin for pytest compatibility
 pub struct MarkersPlugin;
@@ -32,14 +32,15 @@ impl Plugin for MarkersPlugin {
             // Process markers on collected items
             if let Some(items) = data.args.get("items") {
                 if let Some(items_array) = items.as_array() {
-                    let processed_items: Vec<_> = items_array.iter()
+                    let processed_items: Vec<_> = items_array
+                        .iter()
                         .map(|item| {
                             let mut modified_item = item.clone();
                             // Add marker processing logic here
                             modified_item
                         })
                         .collect();
-                    
+
                     return Ok(HookResult::Modified(json!({
                         "items": processed_items
                     })));
@@ -66,15 +67,16 @@ impl Plugin for ParametrizePlugin {
             if let Some(items) = data.args.get("items") {
                 if let Some(items_array) = items.as_array() {
                     let mut expanded_items = Vec::new();
-                    
+
                     for item in items_array {
                         // Check for parametrize markers
                         if let Some(markers) = item.get("markers") {
-                            if markers.as_array().map_or(false, |m| 
-                                m.iter().any(|marker| 
-                                    marker.get("name").and_then(|n| n.as_str()) == Some("parametrize")
-                                )
-                            ) {
+                            if markers.as_array().map_or(false, |m| {
+                                m.iter().any(|marker| {
+                                    marker.get("name").and_then(|n| n.as_str())
+                                        == Some("parametrize")
+                                })
+                            }) {
                                 // Expand parametrized test
                                 let expanded = expand_parametrized_item(item);
                                 expanded_items.extend(expanded);
@@ -85,7 +87,7 @@ impl Plugin for ParametrizePlugin {
                             expanded_items.push(item.clone());
                         }
                     }
-                    
+
                     return Ok(HookResult::Modified(json!({
                         "items": expanded_items
                     })));
@@ -204,39 +206,45 @@ fn expand_parametrized_item(item: &serde_json::Value) -> Vec<serde_json::Value> 
                     if args.len() >= 2 {
                         let param_names = &args[0];
                         let param_values = &args[1];
-                        
+
                         if let Some(values_array) = param_values.as_array() {
-                            return values_array.iter().enumerate().map(|(i, values)| {
-                                let mut expanded_item = item.clone();
-                                
-                                // Add parameter info
-                                if let Some(item_obj) = expanded_item.as_object_mut() {
-                                    item_obj.insert("param_index".to_string(), json!(i));
-                                    item_obj.insert("param_values".to_string(), values.clone());
-                                    
-                                    // Modify test ID
-                                    if let Some(test_id) = item_obj.get("id").and_then(|id| id.as_str()) {
-                                        let new_id = format!("{}[{}]", test_id, i);
-                                        item_obj.insert("id".to_string(), json!(new_id));
+                            return values_array
+                                .iter()
+                                .enumerate()
+                                .map(|(i, values)| {
+                                    let mut expanded_item = item.clone();
+
+                                    // Add parameter info
+                                    if let Some(item_obj) = expanded_item.as_object_mut() {
+                                        item_obj.insert("param_index".to_string(), json!(i));
+                                        item_obj.insert("param_values".to_string(), values.clone());
+
+                                        // Modify test ID
+                                        if let Some(test_id) =
+                                            item_obj.get("id").and_then(|id| id.as_str())
+                                        {
+                                            let new_id = format!("{}[{}]", test_id, i);
+                                            item_obj.insert("id".to_string(), json!(new_id));
+                                        }
                                     }
-                                }
-                                
-                                expanded_item
-                            }).collect();
+
+                                    expanded_item
+                                })
+                                .collect();
                         }
                     }
                 }
             }
         }
     }
-    
+
     vec![item.clone()]
 }
 
 fn extract_fixture_dependencies(item: &serde_json::Value) -> Vec<String> {
     // Extract fixture dependencies from test item
     let mut fixtures = Vec::new();
-    
+
     // Check function signature or other metadata
     if let Some(fixtures_list) = item.get("fixtures").and_then(|f| f.as_array()) {
         for fixture in fixtures_list {
@@ -245,7 +253,7 @@ fn extract_fixture_dependencies(item: &serde_json::Value) -> Vec<String> {
             }
         }
     }
-    
+
     fixtures
 }
 
@@ -265,7 +273,7 @@ mod tests {
     fn test_markers_plugin() {
         let mut registry = HookRegistry::new();
         let plugin = MarkersPlugin;
-        
+
         plugin.register_hooks(&mut registry).unwrap();
         assert_eq!(plugin.name(), "markers");
     }
@@ -282,7 +290,7 @@ mod tests {
                 ]
             }]
         });
-        
+
         let expanded = expand_parametrized_item(&item);
         assert_eq!(expanded.len(), 2);
         assert_eq!(expanded[0]["id"], "test_example[0]");

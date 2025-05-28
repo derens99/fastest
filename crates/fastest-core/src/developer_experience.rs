@@ -87,12 +87,16 @@ impl DevExperienceManager {
         tracing::info!("  ✓ Enhanced reporting: {}", self.config.enhanced_reporting);
         tracing::info!("  ✓ IDE integration: {}", self.config.ide_integration);
         tracing::info!("  ✓ Timeout handling: {}", self.config.timeout_handling);
-        
+
         Ok(())
     }
 
     /// Process test result with enhanced features
-    pub async fn process_test_result(&self, test: &TestItem, result: &TestResult) -> Result<EnhancedTestResult> {
+    pub async fn process_test_result(
+        &self,
+        test: &TestItem,
+        result: &TestResult,
+    ) -> Result<EnhancedTestResult> {
         let debug_info = if self.config.debug_enabled && !result.passed {
             Some(self.create_debug_info(test, result))
         } else {
@@ -163,10 +167,18 @@ impl DevExperienceManager {
 
             println!("\n{}", "🚨 Enhanced Error Report".bright_red().bold());
             println!("{}", "━".repeat(60).red());
-            
+
             println!("{}: {}", "Test".cyan(), test.id.bright_white());
-            println!("{}: {}", "File".cyan(), test.path.display().to_string().bright_blue());
-            println!("{}: {}", "Line".cyan(), test.line_number.to_string().green());
+            println!(
+                "{}: {}",
+                "File".cyan(),
+                test.path.display().to_string().bright_blue()
+            );
+            println!(
+                "{}: {}",
+                "Line".cyan(),
+                test.line_number.to_string().green()
+            );
             println!("{}: {}", "Function".cyan(), test.function_name.magenta());
 
             let has_params = test.decorators.iter().any(|d| d.contains("parametrize"));
@@ -180,7 +192,11 @@ impl DevExperienceManager {
             if self.debug_enabled {
                 println!("\n{}", "🐛 Debug Options:".green().bold());
                 println!("  • Run with --pdb flag to enter debugger");
-                println!("  • Set breakpoint at: {}:{}", test.path.display(), test.line_number);
+                println!(
+                    "  • Set breakpoint at: {}:{}",
+                    test.path.display(),
+                    test.line_number
+                );
             }
 
             println!("\n{}", "💡 Suggestions:".green().bold());
@@ -244,7 +260,7 @@ print("Debug session ready - integrate with actual test execution")
 
         // In production, would launch actual debugger
         println!("{}", debug_script);
-        
+
         Ok(())
     }
 
@@ -255,12 +271,12 @@ print("Debug session ready - integrate with actual test execution")
         println!("\n{}", "⏰ TEST TIMEOUT".bright_red().bold());
         println!("{}: {}", "Test".cyan(), test.id.bright_white());
         println!("{}: {:?}", "Timeout".cyan(), timeout_duration);
-        
+
         println!("\n{}", "💡 Timeout Suggestions:".green().bold());
         println!("  • Increase timeout with @pytest.mark.timeout(seconds)");
         println!("  • Optimize test performance");
         println!("  • Check for infinite loops or blocking operations");
-        
+
         Ok(())
     }
 
@@ -297,20 +313,38 @@ print("Debug session ready - integrate with actual test execution")
     /// Get developer experience statistics
     pub async fn get_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("feature_set".to_string(), serde_json::Value::String("developer_experience".to_string()));
-        stats.insert("debug_enabled".to_string(), serde_json::Value::Bool(self.config.debug_enabled));
-        stats.insert("enhanced_reporting".to_string(), serde_json::Value::Bool(self.config.enhanced_reporting));
-        stats.insert("ide_integration".to_string(), serde_json::Value::Bool(self.config.ide_integration));
-        stats.insert("timeout_handling".to_string(), serde_json::Value::Bool(self.config.timeout_handling));
-        
+
+        stats.insert(
+            "feature_set".to_string(),
+            serde_json::Value::String("developer_experience".to_string()),
+        );
+        stats.insert(
+            "debug_enabled".to_string(),
+            serde_json::Value::Bool(self.config.debug_enabled),
+        );
+        stats.insert(
+            "enhanced_reporting".to_string(),
+            serde_json::Value::Bool(self.config.enhanced_reporting),
+        );
+        stats.insert(
+            "ide_integration".to_string(),
+            serde_json::Value::Bool(self.config.ide_integration),
+        );
+        stats.insert(
+            "timeout_handling".to_string(),
+            serde_json::Value::Bool(self.config.timeout_handling),
+        );
+
         // Check tool availability
         let pdb_available = Command::new("python")
             .args(["-c", "import pdb; print('available')"])
             .output()
             .map_or(false, |out| out.status.success());
-        stats.insert("pdb_available".to_string(), serde_json::Value::Bool(pdb_available));
-        
+        stats.insert(
+            "pdb_available".to_string(),
+            serde_json::Value::Bool(pdb_available),
+        );
+
         stats
     }
 
@@ -341,7 +375,7 @@ print("Debug session ready - integrate with actual test execution")
 /// Parse developer experience configuration from arguments
 pub fn parse_dev_args(args: &[String]) -> DevExperienceConfig {
     let mut config = DevExperienceConfig::default();
-    
+
     for arg in args {
         match arg.as_str() {
             "--pdb" => config.debug_enabled = true,
@@ -358,7 +392,7 @@ pub fn parse_dev_args(args: &[String]) -> DevExperienceConfig {
             _ => {}
         }
     }
-    
+
     config
 }
 
@@ -378,7 +412,7 @@ mod tests {
     fn test_parse_args() {
         let args = vec!["--pdb".to_string(), "--enhanced-errors".to_string()];
         let config = parse_dev_args(&args);
-        
+
         assert!(config.debug_enabled);
         assert!(config.enhanced_reporting);
     }
@@ -387,10 +421,13 @@ mod tests {
     async fn test_dev_experience_manager() {
         let config = DevExperienceConfig::default();
         let mut manager = DevExperienceManager::new(config);
-        
+
         assert!(manager.initialize().await.is_ok());
-        
+
         let stats = manager.get_stats().await;
-        assert_eq!(stats.get("feature_set").unwrap(), &serde_json::Value::String("developer_experience".to_string()));
+        assert_eq!(
+            stats.get("feature_set").unwrap(),
+            &serde_json::Value::String("developer_experience".to_string())
+        );
     }
 }

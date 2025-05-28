@@ -28,9 +28,7 @@ pub use discovery::{
     DiscoveryResult, TestItem,
 };
 pub use error::{Error, Result};
-pub use parser::{
-    Parser, FixtureDefinition, TestFunction,
-};
+pub use parser::{FixtureDefinition, Parser, TestFunction};
 
 // Re-export config types
 pub use config::Config;
@@ -46,8 +44,8 @@ pub use markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 
 // Re-export from executor module
 pub use executor::{
-    OptimizedExecutor, SimpleExecutor, TestResult, UltraFastExecutor,
-    PythonRuntime, RuntimeConfig, CaptureManager, CaptureConfig, CaptureResult, ExceptionInfo
+    CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo, OptimizedExecutor, PythonRuntime,
+    RuntimeConfig, SimpleExecutor, TestResult, UltraFastExecutor,
 };
 
 // Re-export parametrize module
@@ -63,22 +61,26 @@ pub use incremental::{DependencyTracker, IncrementalTestRunner};
 pub use coverage::{CoverageFormat, CoverageReport, CoverageRunner};
 
 // Re-export assertion types
-pub use assertions::{AssertionConfig, AssertionRewriter, AssertionHelpers, format_assertion_error};
+pub use assertions::{
+    format_assertion_error, AssertionConfig, AssertionHelpers, AssertionRewriter,
+};
 
 // Re-export advanced features (Phase 3)
-pub use advanced::phase3::{Phase3Manager, Phase3Config};
+pub use advanced::phase3::{Phase3Config, Phase3Manager};
 
 // Re-export Developer Experience features
-pub use debug::{DebugManager, DebugConfig, EnhancedError};
-pub use ide::{SimpleIdeIntegration, IdeTestItem, TestStatus as IdeTestStatus};
-pub use enhanced_reporter::{EnhancedReporter, ReporterConfig, FailureReport};
-pub use timeout::{TimeoutManager, TimeoutConfig, AsyncTestResult};
-pub use developer_experience::{DevExperienceManager, DevExperienceConfig, EnhancedTestResult, parse_dev_args};
+pub use debug::{DebugConfig, DebugManager, EnhancedError};
+pub use developer_experience::{
+    parse_dev_args, DevExperienceConfig, DevExperienceManager, EnhancedTestResult,
+};
+pub use enhanced_reporter::{EnhancedReporter, FailureReport, ReporterConfig};
+pub use ide::{IdeTestItem, SimpleIdeIntegration, TestStatus as IdeTestStatus};
+pub use timeout::{AsyncTestResult, TimeoutConfig, TimeoutManager};
 
 // Re-export Plugin Compatibility features (Phase 5A)
 pub use plugin_compatibility::{
-    PluginCompatibilityManager, PluginCompatibilityConfig, XdistManager, CoverageManager, 
-    MockManager, AsyncioManager, parse_plugin_args
+    parse_plugin_args, AsyncioManager, CoverageManager, MockManager, PluginCompatibilityConfig,
+    PluginCompatibilityManager, XdistManager,
 };
 
 // Version from Cargo.toml

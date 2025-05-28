@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::{Plugin, PluginConfig};
-use crate::plugin::hooks::{HookRegistry, HookData, HookResult};
+use crate::plugin::hooks::{HookData, HookRegistry, HookResult};
 
 /// Fast conftest.py loader using ignore crate for performance
 pub struct ConftestLoader {
@@ -59,7 +59,8 @@ impl ConftestLoader {
                 .git_ignore(true)
                 .add_custom_ignore_filename("pytest.ignore")
                 .filter_entry(|entry| {
-                    entry.file_name() == "conftest.py" || entry.file_type().map_or(false, |ft| ft.is_dir())
+                    entry.file_name() == "conftest.py"
+                        || entry.file_type().map_or(false, |ft| ft.is_dir())
                 })
                 .build();
 
@@ -67,7 +68,8 @@ impl ConftestLoader {
                 let entry = entry?;
                 if entry.file_name() == "conftest.py" {
                     let conftest = self.parse_conftest_file(entry.path())?;
-                    self.discovered.insert(entry.path().to_path_buf(), conftest.clone());
+                    self.discovered
+                        .insert(entry.path().to_path_buf(), conftest.clone());
                     conftest_files.push(conftest);
                 }
             }
@@ -83,9 +85,12 @@ impl ConftestLoader {
 
         // Fast parsing using tree-sitter
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_python::language()).unwrap();
-        
-        let tree = parser.parse(&content, None)
+        parser
+            .set_language(&tree_sitter_python::language())
+            .unwrap();
+
+        let tree = parser
+            .parse(&content, None)
             .ok_or_else(|| anyhow!("Failed to parse conftest.py: {}", path.display()))?;
 
         let mut fixtures = Vec::new();
@@ -94,7 +99,13 @@ impl ConftestLoader {
 
         // Walk the AST efficiently
         let mut cursor = tree.walk();
-        self.extract_conftest_components(&content, &mut cursor, &mut fixtures, &mut hooks, &mut plugins);
+        self.extract_conftest_components(
+            &content,
+            &mut cursor,
+            &mut fixtures,
+            &mut hooks,
+            &mut plugins,
+        );
 
         Ok(ConftestFile {
             path: path.to_path_buf(),
@@ -122,16 +133,19 @@ impl ConftestLoader {
             if node.kind() == "function_definition" {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     let name = &content[name_node.start_byte()..name_node.end_byte()];
-                    
+
                     // Check for pytest decorators
                     if let Some(decorators) = node.child_by_field_name("decorators") {
-                        let decorator_text = &content[decorators.start_byte()..decorators.end_byte()];
-                        
+                        let decorator_text =
+                            &content[decorators.start_byte()..decorators.end_byte()];
+
                         if decorator_text.contains("@pytest.fixture") {
                             fixtures.push(name.to_string());
                         }
-                        
-                        if decorator_text.contains("@pytest.hookimpl") || name.starts_with("pytest_") {
+
+                        if decorator_text.contains("@pytest.hookimpl")
+                            || name.starts_with("pytest_")
+                        {
                             hooks.push(name.to_string());
                         }
                     } else if name.starts_with("pytest_") {
@@ -168,7 +182,7 @@ impl ConftestLoader {
     fn extract_plugin_names(&self, assignment: &str) -> Vec<String> {
         // Simplified plugin name extraction
         let mut plugins = Vec::new();
-        
+
         // Look for strings in the assignment
         let re = regex::Regex::new(r#"["']([^"']+)["']"#).unwrap();
         for cap in re.captures_iter(assignment) {
@@ -176,7 +190,7 @@ impl ConftestLoader {
                 plugins.push(plugin_name.as_str().to_string());
             }
         }
-        
+
         plugins
     }
 
@@ -197,7 +211,11 @@ impl ConftestLoader {
         Ok(plugins)
     }
 
-    fn load_conftest_plugin(&self, py: Python, conftest_file: ConftestFile) -> Result<ConftestPluginWrapper> {
+    fn load_conftest_plugin(
+        &self,
+        py: Python,
+        conftest_file: ConftestFile,
+    ) -> Result<ConftestPluginWrapper> {
         // Execute conftest.py in Python
         let module = PyModule::from_code(
             py,
@@ -295,12 +313,12 @@ impl Plugin for ConftestPluginWrapper {
 
     fn register_hooks(&self, registry: &mut HookRegistry) -> Result<()> {
         let file_path = self.file.path.clone();
-        
+
         // Register each hook found in the conftest file
         for hook_name in &self.file.hooks {
             let hook_name_clone = hook_name.clone();
             let file_path_clone = file_path.clone();
-            
+
             registry.add_hook(&hook_name, move |data: &HookData| -> Result<HookResult> {
                 // Execute the Python hook function
                 Python::with_gil(|py| -> Result<HookResult> {
@@ -334,8 +352,10 @@ mod tests {
     fn test_conftest_discovery() {
         let temp_dir = TempDir::new().unwrap();
         let conftest_path = temp_dir.path().join("conftest.py");
-        
-        std::fs::write(&conftest_path, r#"
+
+        std::fs::write(
+            &conftest_path,
+            r#"
 import pytest
 
 @pytest.fixture
@@ -346,11 +366,15 @@ def pytest_configure(config):
     pass
 
 pytest_plugins = ["pytest_html", "pytest_cov"]
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         let loader = ConftestLoader::new();
-        let conftest_files = loader.discover_conftest_files(&[temp_dir.path().to_path_buf()]).unwrap();
-        
+        let conftest_files = loader
+            .discover_conftest_files(&[temp_dir.path().to_path_buf()])
+            .unwrap();
+
         assert_eq!(conftest_files.len(), 1);
         assert_eq!(conftest_files[0].fixtures.len(), 1);
         assert_eq!(conftest_files[0].fixtures[0], "sample_fixture");
@@ -365,17 +389,19 @@ pytest_plugins = ["pytest_html", "pytest_cov"]
         let root_conftest = temp_dir.path().join("conftest.py");
         let sub_dir = temp_dir.path().join("tests");
         let sub_conftest = sub_dir.join("conftest.py");
-        
+
         std::fs::create_dir(&sub_dir).unwrap();
         std::fs::write(&root_conftest, "# root conftest").unwrap();
         std::fs::write(&sub_conftest, "# sub conftest").unwrap();
 
         let loader = ConftestLoader::new();
-        loader.discover_conftest_files(&[temp_dir.path().to_path_buf()]).unwrap();
-        
+        loader
+            .discover_conftest_files(&[temp_dir.path().to_path_buf()])
+            .unwrap();
+
         let test_file = sub_dir.join("test_example.py");
         let chain = loader.get_conftest_chain(&test_file);
-        
+
         assert_eq!(chain.len(), 2);
         assert!(chain[0].path.ends_with("conftest.py"));
         assert!(chain[1].path.ends_with("tests/conftest.py"));

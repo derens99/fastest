@@ -1,12 +1,12 @@
-pub mod ultra_fast;
-pub mod python_runtime;
 pub mod capture;
+pub mod python_runtime;
+pub mod ultra_fast;
 
-use serde::{Deserialize, Serialize};
-use std::time::Duration;
 use crate::discovery::TestItem;
 use crate::error::Result;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::time::Duration;
 
 /// Result of running a test
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,11 +20,12 @@ pub struct TestResult {
     pub stderr: String,
 }
 
-pub use ultra_fast::UltraFastExecutor;
+pub use capture::{CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo};
 pub use python_runtime::{PythonRuntime, RuntimeConfig};
-pub use capture::{CaptureManager, CaptureConfig, CaptureResult, ExceptionInfo};
+pub use ultra_fast::UltraFastExecutor;
 
 // Legacy compatibility wrappers
+// TODO: Consider removing these if no longer needed - they all delegate to UltraFastExecutor
 
 /// OptimizedExecutor - wrapper for backwards compatibility
 pub struct OptimizedExecutor(UltraFastExecutor);
@@ -33,19 +34,19 @@ impl OptimizedExecutor {
     pub fn new(_num_workers: Option<usize>, verbose: bool) -> Self {
         Self(UltraFastExecutor::new(verbose))
     }
-    
+
     pub fn with_coverage(self, _source_dirs: Vec<PathBuf>) -> Self {
         Self(self.0.with_coverage(_source_dirs))
     }
-    
+
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
-    
+
     pub fn execute_with_fixtures(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
-    
+
     pub fn execute_with_cache(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
@@ -61,7 +62,7 @@ impl SimpleExecutor {
     pub fn new(verbose: bool) -> Self {
         Self(UltraFastExecutor::new(verbose))
     }
-    
+
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
@@ -74,7 +75,7 @@ impl BatchExecutor {
     pub fn new() -> Self {
         Self(UltraFastExecutor::new(false))
     }
-    
+
     pub fn execute_tests(&self, tests: Vec<TestItem>) -> Vec<TestResult> {
         self.0.execute_tests(tests)
     }
@@ -93,7 +94,7 @@ impl ParallelExecutor {
     pub fn new(_num_workers: Option<usize>, verbose: bool) -> Self {
         Self(UltraFastExecutor::new(verbose))
     }
-    
+
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
@@ -106,7 +107,7 @@ impl LightningExecutor {
     pub fn new(verbose: bool) -> Self {
         Self(UltraFastExecutor::new(verbose))
     }
-    
+
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         self.0.execute(tests)
     }
