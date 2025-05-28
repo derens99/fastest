@@ -1,14 +1,14 @@
 pub mod ast;
 pub mod regex;
+pub mod rustpython;
 pub mod tree_sitter_impl;
 pub mod tree_sitter_parser;
-pub mod rustpython;
 
 // Re-export common types
 pub use ast::AstParser;
 pub use regex::{parse_test_file, TestFunction};
-pub use tree_sitter_parser::TreeSitterParser;
 pub use rustpython::RustPythonParser;
+pub use tree_sitter_parser::TreeSitterParser;
 
 // Parser selection enum
 #[derive(Debug, Clone, Copy)]
@@ -51,7 +51,8 @@ pub fn parse_fixtures_and_tests(
         }
         ParserType::RustPython => {
             let parser = RustPythonParser::new();
-            parser.parse_file(path)
+            parser
+                .parse_file(path)
                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
         }
     }

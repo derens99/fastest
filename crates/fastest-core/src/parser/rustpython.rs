@@ -10,10 +10,7 @@ impl RustPythonParser {
         Self
     }
 
-    pub fn parse_file(
-        &self,
-        path: &Path,
-    ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
+    pub fn parse_file(&self, path: &Path) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
         let content = std::fs::read_to_string(path)?;
         self.parse_content(&content)
     }
@@ -67,7 +64,7 @@ impl RustPythonParser {
         tests: &mut Vec<TestFunction>,
     ) {
         let decorators = self.extract_decorators_from_stmt(func_def);
-        
+
         // Check if it's a fixture
         if decorators.iter().any(|d| d.contains("fixture")) {
             let fixture = self.parse_fixture(func_def, &decorators);
@@ -75,7 +72,7 @@ impl RustPythonParser {
                 fixtures.push(fixture);
             }
         }
-        
+
         // Check if it's a test
         if func_def.name.to_string().starts_with("test_") {
             let test = TestFunction {
@@ -98,7 +95,7 @@ impl RustPythonParser {
         tests: &mut Vec<TestFunction>,
     ) {
         let decorators = self.extract_decorators_from_async_stmt(async_func_def);
-        
+
         // Check if it's a test
         if async_func_def.name.to_string().starts_with("test_") {
             let test = TestFunction {
@@ -114,14 +111,19 @@ impl RustPythonParser {
     }
 
     fn extract_decorators_from_stmt(&self, func_def: &ast::StmtFunctionDef) -> Vec<String> {
-        func_def.decorator_list
+        func_def
+            .decorator_list
             .iter()
             .map(|decorator| self.expr_to_string(decorator))
             .collect()
     }
 
-    fn extract_decorators_from_async_stmt(&self, async_func_def: &ast::StmtAsyncFunctionDef) -> Vec<String> {
-        async_func_def.decorator_list
+    fn extract_decorators_from_async_stmt(
+        &self,
+        async_func_def: &ast::StmtAsyncFunctionDef,
+    ) -> Vec<String> {
+        async_func_def
+            .decorator_list
             .iter()
             .map(|decorator| self.expr_to_string(decorator))
             .collect()
@@ -141,7 +143,7 @@ impl RustPythonParser {
                     .map(|arg| self.expr_to_string(arg))
                     .collect::<Vec<_>>()
                     .join(", ");
-                
+
                 let kwargs = call
                     .keywords
                     .iter()
@@ -154,7 +156,7 @@ impl RustPythonParser {
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
-                
+
                 let all_args = if args.is_empty() {
                     kwargs
                 } else if kwargs.is_empty() {
@@ -162,19 +164,17 @@ impl RustPythonParser {
                 } else {
                     format!("{}, {}", args, kwargs)
                 };
-                
+
                 format!("{}({})", func_name, all_args)
             }
-            ast::Expr::Constant(constant) => {
-                match &constant.value {
-                    ast::Constant::Str(s) => format!("\"{}\"", s),
-                    ast::Constant::Int(i) => i.to_string(),
-                    ast::Constant::Float(f) => f.to_string(),
-                    ast::Constant::Bool(b) => b.to_string(),
-                    ast::Constant::None => "None".to_string(),
-                    _ => "?".to_string(),
-                }
-            }
+            ast::Expr::Constant(constant) => match &constant.value {
+                ast::Constant::Str(s) => format!("\"{}\"", s),
+                ast::Constant::Int(i) => i.to_string(),
+                ast::Constant::Float(f) => f.to_string(),
+                ast::Constant::Bool(b) => b.to_string(),
+                ast::Constant::None => "None".to_string(),
+                _ => "?".to_string(),
+            },
             ast::Expr::List(list) => {
                 let items = list
                     .elts
@@ -194,7 +194,10 @@ impl RustPythonParser {
                 format!("({})", items)
             }
             ast::Expr::Dict(dict) => {
-                let items = dict.keys.iter().zip(&dict.values)
+                let items = dict
+                    .keys
+                    .iter()
+                    .zip(&dict.values)
                     .map(|(k, v)| {
                         if let Some(key) = k {
                             format!("{}: {}", self.expr_to_string(key), self.expr_to_string(v))
@@ -212,22 +215,22 @@ impl RustPythonParser {
 
     fn extract_parameters(&self, args: &ast::Arguments) -> Vec<String> {
         let mut params = Vec::new();
-        
+
         // Regular args
         for arg in &args.args {
             params.push(arg.def.arg.to_string());
         }
-        
+
         // *args
         if let Some(vararg) = &args.vararg {
             params.push(format!("*{}", vararg.arg));
         }
-        
+
         // **kwargs
         if let Some(kwarg) = &args.kwarg {
             params.push(format!("**{}", kwarg.arg));
         }
-        
+
         params
     }
 
@@ -242,14 +245,19 @@ impl RustPythonParser {
         // Parse fixture decorator for scope and autouse
         for decorator in decorators {
             if decorator.contains("fixture") {
-                if decorator.contains("scope=\"session\"") || decorator.contains("scope='session'") {
+                if decorator.contains("scope=\"session\"") || decorator.contains("scope='session'")
+                {
                     scope = "session".to_string();
-                } else if decorator.contains("scope=\"module\"") || decorator.contains("scope='module'") {
+                } else if decorator.contains("scope=\"module\"")
+                    || decorator.contains("scope='module'")
+                {
                     scope = "module".to_string();
-                } else if decorator.contains("scope=\"class\"") || decorator.contains("scope='class'") {
+                } else if decorator.contains("scope=\"class\"")
+                    || decorator.contains("scope='class'")
+                {
                     scope = "class".to_string();
                 }
-                
+
                 if decorator.contains("autouse=True") {
                     autouse = true;
                 }
@@ -314,4 +322,4 @@ def setup_module():
         assert_eq!(fixtures[0].scope, "module");
         assert!(fixtures[0].autouse);
     }
-} 
+}

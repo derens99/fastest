@@ -1,8 +1,8 @@
 use crate::discovery::TestItem;
 use crate::error::Result;
+use rustpython_parser::ast;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use rustpython_parser::ast;
 
 /// Represents a parametrized test case
 #[derive(Debug, Clone)]
@@ -21,7 +21,9 @@ pub struct ParamSet {
 }
 
 /// Parse parametrize decorator using rustpython AST
-pub fn parse_parametrize_decorator_ast(decorator_expr: &ast::Expr) -> Option<(Vec<String>, Vec<ParamSet>)> {
+pub fn parse_parametrize_decorator_ast(
+    decorator_expr: &ast::Expr,
+) -> Option<(Vec<String>, Vec<ParamSet>)> {
     // Check if this is a parametrize call
     if let ast::Expr::Call(call) = decorator_expr {
         let func_name = expr_to_string(&call.func);
@@ -53,21 +55,30 @@ pub fn parse_parametrize_decorator_ast(decorator_expr: &ast::Expr) -> Option<(Ve
     }
 }
 
-fn parse_param_list(elts: &[ast::Expr], param_names: &[String], keywords: &[ast::Keyword]) -> Vec<ParamSet> {
+fn parse_param_list(
+    elts: &[ast::Expr],
+    param_names: &[String],
+    keywords: &[ast::Keyword],
+) -> Vec<ParamSet> {
     let mut param_sets = Vec::new();
-    
+
     // Check for ids= keyword
     let ids = keywords.iter().find_map(|kw| {
         if kw.arg.as_deref() == Some("ids") {
             if let ast::Expr::List(list) = &kw.value {
-                Some(list.elts.iter().filter_map(|e| {
-                    if let ast::Expr::Constant(c) = e {
-                        if let ast::Constant::Str(s) = &c.value {
-                            return Some(s.clone());
-                        }
-                    }
-                    None
-                }).collect::<Vec<_>>())
+                Some(
+                    list.elts
+                        .iter()
+                        .filter_map(|e| {
+                            if let ast::Expr::Constant(c) = e {
+                                if let ast::Constant::Str(s) = &c.value {
+                                    return Some(s.clone());
+                                }
+                            }
+                            None
+                        })
+                        .collect::<Vec<_>>(),
+                )
             } else {
                 None
             }
@@ -161,7 +172,12 @@ fn parse_pytest_param(call: &ast::ExprCall, expected_params: usize) -> Option<Pa
     }
 
     if values.len() == expected_params {
-        Some(ParamSet { id, values, marks, is_xfail })
+        Some(ParamSet {
+            id,
+            values,
+            marks,
+            is_xfail,
+        })
     } else {
         None
     }
@@ -201,9 +217,9 @@ fn ast_expr_to_json_value(expr: &ast::Expr) -> Value {
                     Value::String(i.to_string())
                 }
             }
-            ast::Constant::Float(f) => {
-                serde_json::Number::from_f64(*f).map(Value::Number).unwrap_or(Value::Null)
-            }
+            ast::Constant::Float(f) => serde_json::Number::from_f64(*f)
+                .map(Value::Number)
+                .unwrap_or(Value::Null),
             ast::Constant::Bool(b) => Value::Bool(*b),
             ast::Constant::None => Value::Null,
             _ => Value::Null,
@@ -226,9 +242,9 @@ fn ast_expr_to_json_value(expr: &ast::Expr) -> Value {
                                 Value::String(format!("-{}", i))
                             }
                         }
-                        ast::Constant::Float(f) => {
-                            serde_json::Number::from_f64(-f).map(Value::Number).unwrap_or(Value::Null)
-                        }
+                        ast::Constant::Float(f) => serde_json::Number::from_f64(-f)
+                            .map(Value::Number)
+                            .unwrap_or(Value::Null),
                         _ => Value::Null,
                     }
                 } else {
@@ -291,7 +307,6 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
         .trim_matches('\'');
     let mut values_and_ids_str = content_in_paren[first_comma_pos + 1..].trim();
 
-
     let param_names: Vec<String> = param_names_str
         .split(',')
         .map(|s| s.trim().to_string())
@@ -320,15 +335,13 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
     } else {
         values_list_str
     };
-    
+
     if !values_list_str.starts_with('[') || !values_list_str.ends_with(']') {
         return None;
     }
     let values_list_content = &values_list_str[1..values_list_str.len() - 1];
 
-
     let item_strings = split_param_list_into_item_strings(values_list_content)?;
-    
 
     let mut parsed_param_sets = Vec::new();
     for (idx, item_str) in item_strings.iter().enumerate() {
@@ -348,7 +361,6 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 }
 
 fn split_param_list_into_item_strings(list_content_str: &str) -> Option<Vec<String>> {
-    
     let mut items = Vec::new();
     let mut current_item_str = String::new();
     let mut paren_depth = 0;
@@ -421,7 +433,7 @@ fn split_param_list_into_item_strings(list_content_str: &str) -> Option<Vec<Stri
             items.push(cleaned);
         }
     }
-    
+
     Some(items)
 }
 
@@ -472,7 +484,6 @@ fn strip_inline_comment(s: &str) -> String {
 }
 
 fn parse_one_parameter_set(item_str: &str, param_names: &[String]) -> Option<ParamSet> {
-    
     let num_params = param_names.len();
     let trimmed_item = item_str.trim();
 
@@ -681,7 +692,6 @@ fn extract_pytest_param_marks(marks_str: &str) -> (Vec<String>, bool) {
 
 // Renamed from parse_tuple_values for clarity
 fn parse_comma_separated_values(cs_str: &str) -> Option<Vec<Value>> {
-    
     let mut values = Vec::new();
     let mut current_value_str = String::new();
     let mut paren_depth = 0;
@@ -835,7 +845,6 @@ fn parse_comma_separated_values(cs_str: &str) -> Option<Vec<Value>> {
 }
 
 fn parse_single_value(value_str: &str) -> Option<Value> {
-    
     let trimmed = value_str.trim();
     if trimmed.is_empty() {
         return None;
@@ -878,17 +887,16 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
             // Empty dict
             return Some(Value::Object(serde_json::Map::new()));
         }
-        
-        
+
         // Parse key-value pairs
         let mut map = serde_json::Map::new();
-        
+
         // Split by comma but respect nesting
         let mut current_pair = String::new();
         let mut depth = 0;
         let mut in_string = false;
         let mut string_char = ' ';
-        
+
         for ch in inner_content.chars() {
             match ch {
                 '\'' | '"' => {
@@ -914,7 +922,7 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
                     if let Some(colon_pos) = pair_str.find(':') {
                         let key_part = pair_str[..colon_pos].trim();
                         let value_part = pair_str[colon_pos + 1..].trim();
-                        
+
                         // Parse the key (remove quotes if present)
                         let key = if (key_part.starts_with('"') && key_part.ends_with('"'))
                             || (key_part.starts_with('\'') && key_part.ends_with('\''))
@@ -923,7 +931,7 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
                         } else {
                             key_part.to_string()
                         };
-                        
+
                         // Parse the value
                         if let Some(value) = parse_single_value(value_part) {
                             map.insert(key, value);
@@ -934,14 +942,14 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
                 _ => current_pair.push(ch),
             }
         }
-        
+
         // Process the last pair
         let pair_str = current_pair.trim();
         if !pair_str.is_empty() {
             if let Some(colon_pos) = pair_str.find(':') {
                 let key_part = pair_str[..colon_pos].trim();
                 let value_part = pair_str[colon_pos + 1..].trim();
-                
+
                 // Parse the key (remove quotes if present)
                 let key = if (key_part.starts_with('"') && key_part.ends_with('"'))
                     || (key_part.starts_with('\'') && key_part.ends_with('\''))
@@ -950,15 +958,14 @@ fn parse_single_value(value_str: &str) -> Option<Value> {
                 } else {
                     key_part.to_string()
                 };
-                
+
                 // Parse the value
                 if let Some(value) = parse_single_value(value_part) {
                     map.insert(key, value);
                 }
             }
         }
-        
-        
+
         return Some(Value::Object(map));
     }
 
@@ -995,7 +1002,6 @@ fn extract_ids_from_list_str(ids_list_str: &str) -> Option<Vec<String>> {
 
 /// Expand a test function with parametrize decorators into multiple test items
 pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Result<Vec<TestItem>> {
-    
     let mut expanded_tests = Vec::new();
     let mut param_info_list: Vec<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> = Vec::new();
 
