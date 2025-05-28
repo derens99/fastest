@@ -51,7 +51,7 @@ libloading = "0.8"       # Dynamic plugin loading
 async-trait = "0.1"      # Async trait support
 sysinfo = "0.30"         # System information
 uuid = { version = "1.0", features = ["v4"] }  # UUID generation
-pyo3 = { version = "0.19", features = ["auto-initialize", "vendored"] }  # Python integration
+pyo3 = { version = "0.19", features = ["auto-initialize"] }  # Python integration
 
 # Phase 3: Advanced Features dependencies
 git2 = "0.18"                     # Git integration for incremental testing
