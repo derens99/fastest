@@ -19,6 +19,7 @@ pub mod plugin;
 pub mod plugin_compatibility;
 pub mod reporter;
 pub mod timeout;
+pub mod update;
 pub mod utils;
 pub mod watch;
 
@@ -82,6 +83,9 @@ pub use plugin_compatibility::{
     parse_plugin_args, AsyncioManager, CoverageManager, MockManager, PluginCompatibilityConfig,
     PluginCompatibilityManager, XdistManager,
 };
+
+// Re-export update types
+pub use update::{UpdateChecker, check_for_updates};
 
 // Version from Cargo.toml
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

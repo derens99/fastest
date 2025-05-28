@@ -31,7 +31,7 @@ def get_version():
             data = tomli.load(f)
             return data["project"]["version"]
     except:
-        return "0.1.0"
+        return "0.2.0"
 
 setup(
     name="fastest-runner",

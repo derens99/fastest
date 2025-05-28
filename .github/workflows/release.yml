@@ -3,84 +3,361 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'  # Semantic versioning tags like v0.2.0
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 0.2.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
+  # Create GitHub Release
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
     outputs:
       upload_url: ${{ steps.release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
     steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for changelog
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+            echo "Creating release for manually specified version: $VERSION"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            echo "Creating release for tag version: $VERSION"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Generate Release Notes
+        id: release_notes
+        run: |
+          # Get the previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "Previous tag: $PREV_TAG"
+          
+          # Generate changelog
+          if [[ -z "$PREV_TAG" ]]; then
+            echo "No previous tag found, this is the first release"
+            CHANGELOG="Initial release of Fastest - blazing fast Python test runner built in Rust"
+          else
+            echo "Generating changelog from $PREV_TAG to HEAD"
+            CHANGELOG=$(git log --pretty=format:"- %s" $PREV_TAG..HEAD | grep -v "^- chore:" | head -20 || echo "See commit history for changes")
+          fi
+          
+          # Store changelog for release body
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         id: release
         uses: softprops/action-gh-release@v1
         with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
-          generate_release_notes: true
-          
-  build-release:
-    name: Build Release
+          generate_release_notes: false
+          body: |
+            ## 🚀 Fastest v${{ steps.get_version.outputs.version }}
+
+            ### What's Changed
+            ${{ steps.release_notes.outputs.changelog }}
+
+            ### Installation Methods
+
+            #### 🍺 Homebrew (macOS/Linux)
+            ```bash
+            brew tap derens99/fastest
+            brew install fastest
+            ```
+
+            #### 📦 Direct Download (All Platforms)
+            **macOS/Linux:**
+            ```bash
+            curl -L https://raw.githubusercontent.com/derens99/fastest/main/install.sh | bash
+            ```
+
+            **Windows:**
+            ```powershell
+            irm https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
+            ```
+
+            #### 🐍 Python Package
+            ```bash
+            pip install fastest-runner
+            ```
+
+            #### 📦 Cargo (Rust)
+            ```bash
+            cargo install fastest-cli
+            ```
+
+            ### Update Existing Installation
+            ```bash
+            fastest update
+            ```
+
+            ### Verify Installation
+            ```bash
+            fastest --version
+            ```
+
+            ---
+            **Full Changelog**: https://github.com/derens99/fastest/compare/${{ steps.release_notes.outputs.prev_tag }}...v${{ steps.get_version.outputs.version }}
+
+  # Build binaries for multiple platforms
+  build-binaries:
+    name: Build ${{ matrix.target }}
     needs: create-release
-    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
         include:
+          # Linux
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            artifact: fastest-linux-x64
+            artifact_name: fastest
+            asset_name: fastest-linux-amd64
+            
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact_name: fastest
+            asset_name: fastest-linux-arm64
+            use_cross: true
+            
+          # macOS
           - os: macos-latest
             target: x86_64-apple-darwin
-            artifact: fastest-macos-x64
+            artifact_name: fastest
+            asset_name: fastest-darwin-amd64
+            
           - os: macos-latest
             target: aarch64-apple-darwin
-            artifact: fastest-macos-arm64
+            artifact_name: fastest
+            asset_name: fastest-darwin-arm64
+            
+          # Windows
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            artifact: fastest-windows-x64.exe
-            
+            artifact_name: fastest.exe
+            asset_name: fastest-windows-amd64.exe
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.use_cross == true
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build binary
+        run: |
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
+        shell: bash
+
+      - name: Prepare artifacts
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+          
+          # Create archive based on OS
+          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
+            # Windows: Create ZIP
+            7z a -tzip ../../../${{ matrix.asset_name }}.zip ${{ matrix.artifact_name }}
+            cd ../../..
+            # Generate checksum
+            certutil -hashfile ${{ matrix.asset_name }}.zip SHA256 > ${{ matrix.asset_name }}.zip.sha256
+          else
+            # Unix: Create tar.gz
+            tar -czf ../../../${{ matrix.asset_name }}.tar.gz ${{ matrix.artifact_name }}
+            cd ../../..
+            # Generate checksum
+            shasum -a 256 ${{ matrix.asset_name }}.tar.gz > ${{ matrix.asset_name }}.tar.gz.sha256
+          fi
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.create-release.outputs.version }}
+          files: |
+            ${{ matrix.asset_name }}.*
+
+  # Build and publish Python wheels
+  build-wheels:
+    name: Build Python wheels on ${{ matrix.os }}
+    needs: create-release
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update version in pyproject.toml
+        shell: bash
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            sed -i "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          else
+            sed -i.bak "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+          fi
+          
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.16.2
+        env:
+          CIBW_BUILD: cp38-* cp39-* cp310-* cp311-* cp312-*
+          CIBW_SKIP: "*-musllinux_*"
+          CIBW_ENVIRONMENT_MACOS: MACOSX_DEPLOYMENT_TARGET=10.14
+
+      - name: Upload wheels
+        uses: actions/upload-artifact@v3
+        with:
+          name: wheels
+          path: ./wheelhouse/*.whl
+
+  # Publish to PyPI
+  publish-pypi:
+    name: Publish to PyPI
+    needs: [create-release, build-wheels]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update version
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          sed -i "s/version = \".*\"/version = \"$VERSION\"/" pyproject.toml
+
+      - name: Build source distribution
+        run: pipx run build --sdist
+
+      - name: Download wheels
+        uses: actions/download-artifact@v3
+        with:
+          name: wheels
+          path: dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+  # Publish to crates.io
+  publish-crates:
+    name: Publish to crates.io
+    runs-on: ubuntu-latest
+    needs: create-release
     steps:
       - uses: actions/checkout@v4
       
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-          
-      - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-        
-      - name: Package
-        shell: bash
+
+      - name: Update version in Cargo.toml files
         run: |
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp target/${{ matrix.target }}/release/fastest.exe ${{ matrix.artifact }}
-          else
-            cp target/${{ matrix.target }}/release/fastest ${{ matrix.artifact }}
-          fi
+          VERSION="${{ needs.create-release.outputs.version }}"
+          # Update workspace version
+          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" Cargo.toml
+          # The workspace members will inherit the version
           
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
-        with:
-          files: ${{ matrix.artifact }}
-          
-  publish-crate:
-    name: Publish to crates.io
-    runs-on: ubuntu-latest
-    needs: build-release
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      
       - name: Publish fastest-core
         run: cargo publish -p fastest-core --token ${{ secrets.CRATES_TOKEN }}
+        continue-on-error: true
         
       - name: Wait for crates.io
         run: sleep 30
         
       - name: Publish fastest-cli
         run: cargo publish -p fastest-cli --token ${{ secrets.CRATES_TOKEN }}
+        continue-on-error: true
+
+  # Update version manifest for the update command
+  update-version-manifest:
+    name: Update version manifest
+    needs: [create-release, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main
+
+      - name: Create version manifest
+        run: |
+          VERSION="${{ needs.create-release.outputs.version }}"
+          mkdir -p .github
+          cat > .github/version.json << EOF
+          {
+            "latest": "$VERSION",
+            "minimum": "0.1.0",
+            "versions": {
+              "$VERSION": {
+                "date": "$(date -u +%Y-%m-%d)",
+                "downloads": {
+                  "linux-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-linux-amd64.tar.gz",
+                  "linux-arm64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-linux-arm64.tar.gz",
+                  "darwin-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-darwin-amd64.tar.gz",
+                  "darwin-arm64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-darwin-arm64.tar.gz",
+                  "windows-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-windows-amd64.zip"
+                },
+                "checksums": {
+                  "linux-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-linux-amd64.tar.gz.sha256",
+                  "linux-arm64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-linux-arm64.tar.gz.sha256",
+                  "darwin-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-darwin-amd64.tar.gz.sha256",
+                  "darwin-arm64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-darwin-arm64.tar.gz.sha256",
+                  "windows-amd64": "https://github.com/derens99/fastest/releases/download/v$VERSION/fastest-windows-amd64.zip.sha256"
+                }
+              }
+            }
+          }
+          EOF
+
+      - name: Commit version manifest
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add .github/version.json
+          git diff --staged --quiet || (git commit -m "chore: update version manifest to ${{ needs.create-release.outputs.version }}" && git push)
+
+  # Create Homebrew Formula  
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: [create-release, build-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update Homebrew Formula
+        env:
+          HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # This would typically update a homebrew tap repository
+          # For now, we'll just echo what would be done
+          echo "Would update homebrew formula for version ${{ needs.create-release.outputs.version }}"

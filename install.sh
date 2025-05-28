@@ -72,11 +72,21 @@ detect_platform() {
     echo "${arch}-${os}"
 }
 
-# Get the latest release version
+# Get the latest release version from version manifest
 get_latest_version() {
-    curl -s "https://api.github.com/repos/${REPO}/releases/latest" | \
-        grep '"tag_name"' | \
-        sed -E 's/.*"([^"]+)".*/\1/'
+    # Try version manifest first (faster and more reliable)
+    local manifest_version=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/.github/version.json" 2>/dev/null | \
+        grep '"latest"' | head -1 | \
+        sed -E 's/.*"latest"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    
+    if [[ -n "$manifest_version" ]]; then
+        echo "v${manifest_version}"
+    else
+        # Fallback to GitHub API
+        curl -s "https://api.github.com/repos/${REPO}/releases/latest" | \
+            grep '"tag_name"' | \
+            sed -E 's/.*"([^"]+)".*/\1/'
+    fi
 }
 
 # Download and install fastest
@@ -86,6 +96,17 @@ install_fastest() {
     
     info "Installing fastest ${version} for ${platform}..."
     
+    # Convert platform to asset naming convention
+    local asset_platform=""
+    case "$platform" in
+        x86_64-unknown-linux-gnu) asset_platform="linux-amd64";;
+        aarch64-unknown-linux-gnu) asset_platform="linux-arm64";;
+        x86_64-apple-darwin) asset_platform="darwin-amd64";;
+        aarch64-apple-darwin) asset_platform="darwin-arm64";;
+        x86_64-pc-windows-msvc) asset_platform="windows-amd64";;
+        *) error "Unsupported platform: $platform"; exit 1;;
+    esac
+    
     # Construct download URL
     local binary_name="fastest"
     local archive_ext="tar.gz"
@@ -94,7 +115,7 @@ install_fastest() {
         archive_ext="zip"
     fi
     
-    local url="https://github.com/${REPO}/releases/download/${version}/fastest-${platform}.${archive_ext}"
+    local url="https://github.com/${REPO}/releases/download/${version}/fastest-${asset_platform}.${archive_ext}"
     local archive_path="${TEMP_DIR}/fastest.${archive_ext}"
     
     # Download

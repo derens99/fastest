@@ -2,8 +2,8 @@ use clap::{Parser, Subcommand};
 use colored::*;
 use fastest_core::{
     default_cache_path, discover_tests, discover_tests_cached, executor::UltraFastExecutor,
-    filter_by_markers, parse_dev_args, parse_plugin_args, Config, DevExperienceConfig,
-    DiscoveryCache, PluginCompatibilityConfig,
+    filter_by_markers, check_for_updates, Config, DevExperienceConfig, DiscoveryCache, 
+    PluginCompatibilityConfig, UpdateChecker,
 };
 use indicatif::{ProgressBar, ProgressStyle};
 use std::path::PathBuf;
@@ -107,6 +107,13 @@ enum Commands {
 
     /// Show version information
     Version,
+
+    /// Update fastest to the latest version
+    Update {
+        /// Check for updates without installing
+        #[arg(long = "check")]
+        check_only: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
@@ -119,8 +126,13 @@ fn main() -> anyhow::Result<()> {
     match &cli.command {
         Some(Commands::Discover { format }) => discover_command(&cli, format),
         Some(Commands::Version) => version_command(),
+        Some(Commands::Update { check_only }) => update_command(&cli, *check_only),
         Some(Commands::Run { show_output }) => run_command(&cli, *show_output),
-        None => run_command(&cli, false),
+        None => {
+            // Check for updates on normal runs (non-intrusive)
+            let _ = check_for_updates();
+            run_command(&cli, false)
+        }
     }
 }
 
@@ -498,5 +510,26 @@ fn run_command(cli: &Cli, show_output: bool) -> anyhow::Result<()> {
 fn version_command() -> anyhow::Result<()> {
     println!("fastest {}", env!("CARGO_PKG_VERSION"));
     println!("The blazing fast Python test runner built with Rust");
+    Ok(())
+}
+
+fn update_command(cli: &Cli, check_only: bool) -> anyhow::Result<()> {
+    let checker = UpdateChecker::new();
+    
+    if check_only {
+        match checker.check_update()? {
+            Some(new_version) => {
+                println!("Current version: v{}", env!("CARGO_PKG_VERSION"));
+                println!("Latest version: v{}", new_version);
+                println!("\nAn update is available! Run 'fastest update' to install it.");
+            }
+            None => {
+                println!("You are running the latest version (v{})!", env!("CARGO_PKG_VERSION"));
+            }
+        }
+    } else {
+        checker.update(cli.verbose)?;
+    }
+    
     Ok(())
 }

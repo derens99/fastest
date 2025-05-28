@@ -51,9 +51,22 @@ function Get-Architecture {
     }
 }
 
-# Get latest version from GitHub
+# Get latest version from version manifest or GitHub
 function Get-LatestVersion {
     try {
+        # Try version manifest first (faster and more reliable)
+        $manifestUrl = "https://raw.githubusercontent.com/$Repo/main/.github/version.json"
+        try {
+            $manifest = Invoke-RestMethod -Uri $manifestUrl -ErrorAction SilentlyContinue
+            if ($manifest.latest) {
+                return "v$($manifest.latest)"
+            }
+        }
+        catch {
+            # Ignore and fall back to GitHub API
+        }
+        
+        # Fallback to GitHub API
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest"
         return $release.tag_name
     }
@@ -76,9 +89,13 @@ function Install-Fastest {
         Write-Info "Latest version: $Version"
     }
     
-    # Construct download URL
-    $platform = "$Architecture-pc-windows-msvc"
-    $url = "https://github.com/$Repo/releases/download/$Version/fastest-$platform.zip"
+    # Construct download URL with new asset naming
+    $assetPlatform = switch ($Architecture) {
+        "x86_64" { "windows-amd64" }
+        "aarch64" { "windows-arm64" }
+        default { Write-Error "Unsupported architecture: $Architecture"; exit 1 }
+    }
+    $url = "https://github.com/$Repo/releases/download/$Version/fastest-$assetPlatform.zip"
     
     Write-Info "Downloading fastest $Version for Windows $Architecture..."
     
