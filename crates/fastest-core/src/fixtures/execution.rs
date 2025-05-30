@@ -33,6 +33,10 @@ pub struct FixtureValue {
     pub scope: FixtureScope,
     pub teardown_code: Option<String>,
     pub created_at: std::time::SystemTime,
+    /// Last time this fixture was accessed (session tracking)
+    pub last_accessed: std::time::SystemTime,
+    /// Number of times the fixture value has been retrieved
+    pub access_count: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msgpack_value: Option<Vec<u8>>, // Cached MessagePack representation
 }
@@ -57,6 +61,8 @@ impl FixtureValue {
             scope,
             teardown_code: None,
             created_at: std::time::SystemTime::now(),
+            last_accessed: std::time::SystemTime::now(),
+            access_count: 0,
             msgpack_value: Some(bytes.to_vec()),
         })
     }
@@ -572,6 +578,8 @@ impl FixtureExecutor {
             scope: fixture.scope.clone(),
             teardown_code: self.extract_teardown_code(fixture)?,
             created_at: std::time::SystemTime::now(),
+            last_accessed: std::time::SystemTime::now(),
+            access_count: 0,
             msgpack_value: None,
         })
     }

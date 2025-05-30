@@ -528,7 +528,25 @@ def execute_test(test_data: dict):
         fixture_values = {{}}
         for fixture_name in test_data.get('fixtures', []):
             scope_id = test_data['id']  # Simplified scope ID
-            fixture_values[fixture_name] = fixture_manager.get_fixture_value(fixture_name, scope_id)
+            try:
+                # Try fixture manager first
+                fixture_values[fixture_name] = fixture_manager.get_fixture_value(fixture_name, scope_id)
+            except ValueError:
+                # Fixture not in manager, try to resolve from module
+                if hasattr(module, fixture_name):
+                    fixture_obj = getattr(module, fixture_name)
+                    # Check if it's a pytest fixture
+                    if hasattr(fixture_obj, '_pytestfixturefunction'):
+                        # Handle pytest fixtures - the actual function is in __wrapped__
+                        if hasattr(fixture_obj, '__wrapped__'):
+                            actual_func = fixture_obj.__wrapped__
+                            fixture_values[fixture_name] = actual_func()
+                        else:
+                            # Fallback: call the fixture object directly
+                            fixture_values[fixture_name] = fixture_obj()
+                    else:
+                        # Simple fixture function - just call it
+                        fixture_values[fixture_name] = fixture_obj()
         
         # Execute with capture
         with capture_manager.capture() as cap:

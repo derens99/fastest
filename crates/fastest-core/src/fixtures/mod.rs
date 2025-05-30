@@ -1,5 +1,6 @@
 pub mod builtin;
 pub mod execution;
+pub mod session;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
@@ -10,6 +11,7 @@ pub use builtin::{
     generate_builtin_fixture_code, get_builtin_fixture_metadata, is_builtin_fixture,
 };
 pub use execution::{generate_test_code_with_fixtures, FixtureExecutor};
+pub use session::{SessionFixtureManager, SessionFixture, SessionStats};
 
 /// Represents a test fixture instance
 #[derive(Debug, Clone)]

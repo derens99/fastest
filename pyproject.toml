@@ -45,6 +45,7 @@ keywords = [
 ]
 dependencies = [
     "requests>=2.32.3",
+    "msgpack>=1.0.0",
 ]
 
 [project.optional-dependencies]
