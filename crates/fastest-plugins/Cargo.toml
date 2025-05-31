@@ -1,0 +1,35 @@
+[package]
+name = "fastest-plugins"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Plugin system for Fastest test runner"
+
+[dependencies]
+# Core dependencies
+fastest-core = { path = "../fastest-core" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Plugin system
+inventory = "0.3"                   # Plugin discovery
+linkme = "0.3"                      # Static plugin linking
+libloading = "0.8"                  # Dynamic plugin loading
+async-trait = "0.1"                 # Async trait support
+uuid = { version = "1.0", features = ["v4"] }
+
+# Concurrency
+dashmap = "6.1"                     # Concurrent HashMap
+tokio = { version = "1.24", features = ["rt", "time", "sync"] }
+
+# Python integration for conftest.py
+pyo3 = { version = "0.19", features = ["auto-initialize"] }
+ignore = "0.4"                      # Fast directory walking
+regex = "1.11"                      # Regular expressions
+chrono = { version = "0.4", features = ["serde"] }  # Date/time handling
+
+[dev-dependencies]
+tempfile = "3.8"

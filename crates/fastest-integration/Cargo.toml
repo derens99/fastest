@@ -1,0 +1,39 @@
+[package]
+name = "fastest-integration"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "IDE integration and developer tools for Fastest"
+
+[dependencies]
+# Core dependencies
+fastest-core = { path = "../fastest-core" }
+fastest-execution = { path = "../fastest-execution" }
+fastest-plugins = { path = "../fastest-plugins" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Developer experience
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde_repr = "0.1"                  # Enum serialization
+sysinfo = "0.30"                    # System information
+dirs = "5.0"                        # Directory utilities
+num_cpus = "1.16"                   # CPU core detection
+colored = "2.1"                     # Colored terminal output
+chrono = { version = "0.4", features = ["serde"] }  # Date/time handling
+
+# Async runtime
+tokio = { version = "1.24", features = ["rt", "time", "macros"] }
+
+# Future LSP support (commented for now)
+# tower = "0.4"
+# tower-lsp = "0.20"
+# tokio-util = "0.7"
+# ropey = "1.6"
+
+[dev-dependencies]
+tempfile = "3.8"

@@ -1,0 +1,54 @@
+[package]
+name = "fastest-execution"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Fast Python test execution engine for Fastest"
+
+[dependencies]
+# Core dependencies
+fastest-core = { path = "../fastest-core" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+colored.workspace = true
+
+# Python integration
+pyo3 = { version = "0.19", features = ["auto-initialize"] }
+
+# Execution and parallelism
+rayon = "1.10"
+num_cpus.workspace = true
+crossbeam = "0.8"
+tokio = { version = "1.24", features = ["full"] }
+futures = "0.3"
+parking_lot = "0.12"
+tempfile = "3.2"
+which = "7.0"
+once_cell = "1.17"
+sysinfo = "0.30"
+memmap2 = "0.9"
+
+# Performance optimizations
+bumpalo = "3.14"                     # Arena allocation
+crossbeam-deque = "0.8"             # Work-stealing queues
+string-interner = "0.15"            # String deduplication
+ahash = "0.8"                       # Fast hasher
+mimalloc = { version = "0.1", default-features = false }
+smallvec = "1.11"                   # Stack vectors
+
+# JIT compilation (experimental)
+cranelift = "0.103"
+cranelift-jit = "0.103"
+cranelift-module = "0.103"
+cranelift-codegen = "0.103"
+target-lexicon = "0.12"
+
+# Additional dependencies for algorithms and serialization
+aho-corasick = "1.1"
+petgraph = "0.6"
+dashmap = "5.5"
+rmp-serde = "1.1"
+tracing = "0.1"
