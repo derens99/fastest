@@ -1,0 +1,68 @@
+[package]
+name = "fastest-advanced"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Advanced features for Fastest: coverage, incremental testing, and more"
+
+[dependencies]
+# Core dependencies
+fastest-core = { path = "../fastest-core" }
+fastest-execution = { path = "../fastest-execution" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Git integration for incremental testing
+git2 = "0.18"
+
+# Dependency graph management
+petgraph = "0.6"
+priority-queue = "2.0"
+
+# Performance and caching
+blake3 = "1.5"                      # Fast hashing
+memmap2 = "0.9"                     # Memory-mapped files
+flate2 = "1.0"                      # Compression
+lru = "0.12"                        # LRU cache
+rmp-serde = "1.3"                   # MessagePack serialization
+
+# File watching
+notify = "6.0"
+
+# Updates and packaging
+semver = "1.0"
+tar = "0.4"
+ureq = { version = "2.9", features = ["json"] }
+zip = "0.6"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# System utilities
+dirs = "5.0"
+
+# Code parsing
+tree-sitter = "0.22"
+tree-sitter-python = "0.21"
+
+# File system utilities
+walkdir = "2.4"
+
+# Hashing and crypto
+sha2 = "0.10"
+
+# Logging
+tracing = "0.1"
+
+# Async utilities  
+futures = "0.3"
+
+# Concurrency
+tokio = { version = "1.24", features = ["fs", "rt"] }
+parking_lot = "0.12"
+
+[dev-dependencies]
+tempfile = "3.8"

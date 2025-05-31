@@ -1,0 +1,24 @@
+[package]
+name = "fastest-reporting"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Rich test reporting and output formatting for Fastest"
+
+[dependencies]
+# Core dependencies
+fastest-core = { path = "../fastest-core" }
+fastest-execution = { path = "../fastest-execution" }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Output formatting
+colored.workspace = true
+indicatif.workspace = true
+similar = "2.4"                     # Diff output
+
+[dev-dependencies]
+tempfile = "3.8"

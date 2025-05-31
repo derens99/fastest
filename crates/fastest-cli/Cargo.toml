@@ -10,13 +10,23 @@ name = "fastest"
 path = "src/main.rs"
 
 [dependencies]
+# All Fastest crates
 fastest-core = { path = "../fastest-core" }
+fastest-execution = { path = "../fastest-execution" }
+fastest-reporting = { path = "../fastest-reporting" }
+fastest-plugins = { path = "../fastest-plugins" }
+fastest-advanced = { path = "../fastest-advanced" }
+fastest-integration = { path = "../fastest-integration" }
+
+# CLI dependencies
 clap = { version = "4.5", features = ["derive"] }
 colored = "2.1"
 indicatif = "0.17"
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+tokio = { version = "1.0", features = ["full"] }
+num_cpus = "1.16"
 
 [dev-dependencies]
 assert_cmd = "2.0"

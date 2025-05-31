@@ -1,4 +1,4 @@
-use crate::discovery::TestItem;
+use crate::test::discovery::TestItem;
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
