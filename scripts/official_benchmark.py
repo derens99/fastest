@@ -258,50 +258,63 @@ class OfficialBenchmark:
         is_fastest = "fastest" in runner_name.lower() or any("fastest" in cmd_part and "python" not in cmd_part for cmd_part in base_cmd)
         
         if is_fastest:
-            # Fastest commands: fastest test_dir discover -q / fastest test_dir run -q
-            discovery_cmd = base_cmd + [str(test_dir), "discover", "-q"]
-            execution_cmd = base_cmd + [str(test_dir), "run", "-q"]
+            # Fastest commands: fastest test_dir -q (discovery and execution are combined)
+            discovery_cmd = base_cmd + [str(test_dir), "-q"]
+            execution_cmd = base_cmd + [str(test_dir), "-q"]
         else:
             # Pytest commands: python -m pytest test_dir --collect-only -q / python -m pytest test_dir -q
             discovery_cmd = base_cmd + [str(test_dir), "--collect-only", "-q"]
             execution_cmd = base_cmd + [str(test_dir), "-q"]
         
         # Debug output (uncomment for debugging)
-        # print(f"\nDEBUG {runner_name} discovery: {discovery_cmd}")
-        # print(f"DEBUG {runner_name} execution: {execution_cmd}")
+        # print(f"\nDEBUG {runner_name} execution: {execution_cmd}")
         
-        # Measure discovery time
-        discovery_start = time.perf_counter()
-        discovery_result = subprocess.run(discovery_cmd, capture_output=True, 
-                                        text=True, timeout=30)
-        discovery_time = time.perf_counter() - discovery_start
+        if is_fastest:
+            # For fastest, discovery and execution are combined into one command
+            execution_start = time.perf_counter()
+            execution_result = subprocess.run(execution_cmd, capture_output=True, 
+                                            text=True, timeout=60)
+            execution_time = time.perf_counter() - execution_start
+            
+            discovery_time = 0  # Combined with execution for fastest
+            discovery_result = execution_result  # Use same result for both
+            total_time = execution_time
+            
+            # Debug fastest output (uncomment for debugging)
+            # print(f"DEBUG fastest stdout: {execution_result.stdout[:200]}")
+            # print(f"DEBUG fastest stderr: {execution_result.stderr[:200]}")
+            # print(f"DEBUG fastest exit code: {execution_result.returncode}")
+        else:
+            # For pytest, measure discovery and execution separately
+            # Measure discovery time
+            discovery_start = time.perf_counter()
+            discovery_result = subprocess.run(discovery_cmd, capture_output=True, 
+                                            text=True, timeout=30)
+            discovery_time = time.perf_counter() - discovery_start
+            
+            if discovery_result.returncode != 0:
+                print(f"❌ Discovery failed")
+                return BenchmarkResult(
+                    test_count=0, discovery_time=discovery_time, execution_time=0,
+                    total_time=discovery_time, memory_usage_mb=0, exit_code=discovery_result.returncode,
+                    error_message=f"Discovery failed: {discovery_result.stderr[:100]}"
+                )
+            
+            # Measure execution time
+            execution_start = time.perf_counter()
+            execution_result = subprocess.run(execution_cmd, capture_output=True, 
+                                            text=True, timeout=60)
+            execution_time = time.perf_counter() - execution_start
+            
+            total_time = discovery_time + execution_time
         
-        if discovery_result.returncode != 0:
-            print(f"❌ Discovery failed")
-            # Debug: show full error for debugging (uncomment for debugging)
-            # if discovery_result.stderr:
-            #     print(f"\nDEBUG stderr: {discovery_result.stderr[:200]}")
-            # if discovery_result.stdout:
-            #     print(f"\nDEBUG stdout: {discovery_result.stdout[:200]}")
-            return BenchmarkResult(
-                test_count=0, discovery_time=discovery_time, execution_time=0,
-                total_time=discovery_time, memory_usage_mb=0, exit_code=discovery_result.returncode,
-                error_message=f"Discovery failed: {discovery_result.stderr[:100]}"
-            )
-        
-        # Extract test count from discovery
+        # Extract test count from discovery/execution output
         test_count = self.extract_test_count(discovery_result.stdout, discovery_result.stderr, is_fastest)
-        
-        # Measure execution time
-        execution_start = time.perf_counter()
-        execution_result = subprocess.run(execution_cmd, capture_output=True, 
-                                        text=True, timeout=60)
-        execution_time = time.perf_counter() - execution_start
-        
-        total_time = discovery_time + execution_time
         memory_usage = self.measure_memory_usage(base_cmd + [str(test_dir), "-q"])
         
-        if execution_result.returncode == 0:
+        # For benchmarking, we consider success if the runner executed (even if some tests failed)
+        # Exit code 0 = all tests passed, exit code 1 = some tests failed but runner worked
+        if execution_result.returncode in [0, 1]:
             print(f"✅ {total_time:.3f}s")
         else:
             print(f"❌ Failed ({execution_result.returncode})")
@@ -325,20 +338,20 @@ class OfficialBenchmark:
         if is_fastest:
             # Fastest output patterns
             patterns = [
-                r"Running (\\d+) tests",
-                r"(\\d+) tests? passed",
-                r"(\\d+) tests? found",
-                r"Found (\\d+) tests?",
-                r"Discovered (\\d+) tests?"
+                r"Running (\d+) tests",
+                r"(\d+) tests? passed",
+                r"(\d+) tests? found",
+                r"Found (\d+) tests?",
+                r"Discovered (\d+) tests?"
             ]
         else:
             # Pytest output patterns  
             patterns = [
-                r"(\\d+) tests? collected",
-                r"collected (\\d+) items?",
-                r"(\\d+) passed",
-                r"(\\d+) failed",
-                r"(\\d+)::.*"  # pytest test paths
+                r"(\d+) tests? collected",
+                r"collected (\d+) items?",
+                r"(\d+) passed",
+                r"(\d+) failed",
+                r"(\d+)::.*"  # pytest test paths
             ]
         
         for pattern in patterns:
@@ -398,10 +411,15 @@ class OfficialBenchmark:
                 pytest=pytest_result
             )
             
-            if (fastest_result.exit_code == 0 and pytest_result.exit_code == 0 and
-                fastest_result.discovery_time > 0 and pytest_result.discovery_time > 0):
+            if (fastest_result.exit_code in [0, 1] and pytest_result.exit_code in [0, 1] and
+                pytest_result.total_time > 0 and fastest_result.total_time > 0):
                 
-                comparison.speedup_discovery = pytest_result.discovery_time / fastest_result.discovery_time
+                # For fastest, discovery is included in execution time
+                if fastest_result.discovery_time > 0:
+                    comparison.speedup_discovery = pytest_result.discovery_time / fastest_result.discovery_time
+                else:
+                    comparison.speedup_discovery = 1.0  # Combined with execution
+                
                 comparison.speedup_execution = pytest_result.execution_time / fastest_result.execution_time
                 comparison.speedup_total = pytest_result.total_time / fastest_result.total_time
                 

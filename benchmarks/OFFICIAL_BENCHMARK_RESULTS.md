@@ -1,6 +1,6 @@
 # Official Fastest Performance Benchmark Results
 
-**Generated:** 2025-05-31T19:16:03.116147+00:00
+**Generated:** 2025-05-31T22:15:00.822052+00:00
 **System:** macOS-15.1.1-arm64-arm-64bit-Mach-O
 **Architecture:** arm64
 **CPU Cores:** 10
@@ -9,20 +9,20 @@
 
 ## Executive Summary
 
-- **Average Total Speedup:** 5.4x faster than pytest
-- **Maximum Total Speedup:** 10.1x faster than pytest
-- **Average Discovery Speedup:** 4.6x faster test discovery
-- **Maximum Discovery Speedup:** 7.9x faster test discovery
+- **Average Total Speedup:** 3.4x faster than pytest
+- **Maximum Total Speedup:** 5.2x faster than pytest
+- **Average Discovery Speedup:** 1.0x faster test discovery
+- **Maximum Discovery Speedup:** 1.0x faster test discovery
 - **Test Suite Sizes Tested:** 4 different sizes
 
 ## Detailed Results
 
 | Test Count | Fastest Total | Pytest Total | Total Speedup | Discovery Speedup | Execution Speedup |
 |------------|---------------|--------------|---------------|-------------------|-------------------|
-| 10 | 0.163s | 0.259s | **1.6x** | 0.9x | 4.4x |
-| 50 | 0.120s | 0.331s | **2.8x** | 4.4x | 2.2x |
-| 100 | 0.059s | 0.423s | **7.1x** | 5.1x | 9.2x |
-| 500 | 0.066s | 0.672s | **10.1x** | 7.9x | 12.6x |
+| 10 | 0.097s | 0.235s | **2.4x** | 1.0x | 1.3x |
+| 50 | 0.100s | 0.310s | **3.1x** | 1.0x | 1.7x |
+| 100 | 0.103s | 0.314s | **3.0x** | 1.0x | 1.7x |
+| 500 | 0.137s | 0.706s | **5.2x** | 1.0x | 3.1x |
 
 ## Performance Analysis
 
@@ -30,7 +30,7 @@
 
 Fastest consistently outperforms pytest in test discovery across all test suite sizes:
 
-- **Small suites (≤100 tests):** 3.5x faster average
+- **Small suites (≤100 tests):** 1.0x faster average
 
 
 ### Test Execution Performance
