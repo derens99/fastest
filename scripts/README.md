@@ -61,6 +61,31 @@ python scripts/official_benchmark.py --output-dir custom_results/
 - Automatic speedup calculations
 - Publication-ready markdown reports
 
+### `generate_charts.py` ⭐
+**Professional performance visualization** that creates publication-ready charts from benchmark results.
+
+Generates multiple chart types including speedup comparisons, scaling analysis, and performance dashboards.
+
+**Usage:**
+```bash
+# Generate charts from latest benchmark results
+python scripts/generate_charts.py
+```
+
+**Outputs:**
+- `docs/images/performance_comparison.png` - Main speedup comparison
+- `docs/images/scaling_analysis.png` - Scaling behavior analysis  
+- `docs/images/performance_summary.png` - Comprehensive dashboard
+- SVG versions for web use
+
+**Features:**
+- Professional matplotlib styling
+- Multiple chart types (bar, line, pie, dashboard)
+- Automatic data loading from benchmark results
+- High-resolution output (300 DPI)
+- Both PNG and SVG formats
+- Publication-ready quality
+
 ### `compare_with_pytest.py`
 Detailed comparison tool for development and validation.
 
