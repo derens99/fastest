@@ -20,9 +20,8 @@ use std::io::{BufRead, BufReader, Write};
 use memmap2::{MmapOptions, MmapMut};
 use pyo3::{Python, PyObject};
 use serde::{Serialize, Deserialize};
-use parking_lot::RwLock;
 use rayon::prelude::*;
-use crossbeam::channel::{bounded, Sender, Receiver};
+use crossbeam::channel::bounded;
 
 use fastest_core::TestItem;
 use fastest_core::{Error, Result};
@@ -690,7 +689,7 @@ impl MassiveParallelExecutor {
 
 /// Entry point for subprocess workers
 pub fn run_massive_parallel_worker() -> Result<()> {
-    use std::io::{self, Read};
+    use std::io;
     use pyo3::Python;
     
     // Read subprocess data from stdin

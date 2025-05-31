@@ -18,12 +18,10 @@ pub mod native_transpiler;   // JIT compilation (stub)
 pub mod execution;           // Advanced fixture execution
 
 // Re-export the main execution module that was in mod.rs
-use fastest_core::{TestItem, Result};
 use serde::{Deserialize, Serialize};
 
 // Re-export main types
 pub use strategies::{DevExperienceConfig, PluginCompatibilityConfig};
-use std::path::PathBuf;
 use std::time::Duration;
 
 /// Result of running a test

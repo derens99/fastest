@@ -1,67 +1,66 @@
 # Fastest Documentation
 
-Welcome to the Fastest documentation! This directory contains comprehensive guides and references for using and contributing to Fastest.
+Welcome to the Fastest documentation! Fastest is a blazing-fast Python test runner built in Rust that's designed to be a drop-in replacement for pytest.
 
-## 📚 User Documentation
+## 🚀 Quick Start
 
-- **[Migration Guide](MIGRATION_GUIDE.md)** - Step-by-step guide for migrating from pytest to Fastest
-- **[Markers Guide](FASTEST_MARKERS.md)** - Complete guide to using test markers
-- **[Fixture System](FIXTURE_SYSTEM.md)** - Understanding and using fixtures
-- **[Parallel Execution Guide](parallel-execution-guide.md)** - Optimizing test execution with parallelism
-
-## 🛠️ Technical Documentation
-
-- **[Project Structure](PROJECT_STRUCTURE.md)** - Understanding the codebase organization
-- **[Architecture Overview](internal/ARCHITECTURE.md)** - Deep dive into Fastest's architecture
-- **[Roadmap](ROADMAP.md)** - Development roadmap and planned features
-
-## 🚀 Getting Started
-
-### Quick Start
 ```bash
-# Install Fastest
-pip install fastest
+# Install fastest
+curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
 
-# Run tests
+# Run your tests
 fastest tests/
 
-# With virtual environment
-source .venv/bin/activate
-fastest tests/
+# Or migrate from pytest
+fastest --help  # See all pytest-compatible options
 ```
 
-### Key Features
-- ⚡ 88x faster test discovery than pytest
-- 🏃 2.1x faster test execution
-- 🔄 Smart caching system
-- 🎯 Parallel execution support
-- 🔧 pytest compatibility for common features
+## 📚 Documentation
 
-## 📖 Guides by Topic
+### Getting Started
+- **[Installation Guide](INSTALLATION.md)** - Complete installation instructions for all platforms
+- **[Quickstart Guide](QUICKSTART.md)** - Get up and running in 5 minutes
+- **[Migration from pytest](MIGRATION_GUIDE.md)** - Step-by-step migration guide
 
-### For New Users
-1. Start with the [README](../README.md) for installation and basic usage
-2. Check [When to Use Fastest vs pytest](../README.md#-when-to-use-fastest-vs-pytest)
-3. Review the [Compatibility Matrix](../README.md#-pytest-compatibility)
+### Core Features
+- **[Performance Guide](PERFORMANCE.md)** - Understanding and optimizing performance
+- **[Test Markers](FASTEST_MARKERS.md)** - Using test markers and decorators
+- **[Fixture System](FIXTURE_SYSTEM.md)** - Working with fixtures
+- **[Parallel Execution](parallel-execution-guide.md)** - Optimizing parallel test runs
 
-### For Migration
-1. Read the [Migration Guide](MIGRATION_GUIDE.md)
-2. Understand [supported markers](FASTEST_MARKERS.md)
-3. Learn about [fixtures](FIXTURE_SYSTEM.md)
+### Advanced Topics
+- **[Testing Guide](TESTING.md)** - Testing your own code with fastest
+- **[Development Guide](DEVELOPMENT.md)** - Contributing to fastest
 
-### For Contributors
-1. Review [Project Structure](PROJECT_STRUCTURE.md)
-2. Understand the [Architecture](internal/ARCHITECTURE.md)
-3. Check the [Contributing Guide](../CONTRIBUTING.md)
+### Reference
+- **[Official Benchmark Results](OFFICIAL_BENCHMARK_RESULTS.md)** - Complete performance analysis and methodology
+- **[Project Structure](PROJECT_STRUCTURE.md)** - Understanding the codebase
+- **[Roadmap](ROADMAP.md)** - Future features and development plans
+- **[Changelog](CHANGELOG.md)** - Release history and changes
+- **[Release Process](RELEASE.md)** - How releases are made
 
-## 🤝 Getting Help
+## 🎯 Key Benefits
 
-- **Issues**: [GitHub Issues](https://github.com/derens99/fastest/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/derens99/fastest/discussions)
-- **Documentation**: You're here! 📍
+- **⚡ 10-100x faster** test discovery than pytest
+- **🔄 Drop-in replacement** for pytest with 80%+ compatibility
+- **🚀 Intelligent execution** strategies based on test suite size
+- **💾 Smart caching** for faster subsequent runs
+- **🔧 Built in Rust** for maximum performance
 
-## 📅 Documentation Updates
+## 📊 Performance Highlights
 
-This documentation is continuously updated. Last major update: January 2024
+| Test Suite Size | Discovery Speed | Execution Speed |
+|----------------|-----------------|-----------------|
+| 10-20 tests    | 11-16x faster   | 2-3x faster     |
+| 50-100 tests   | 12-29x faster   | Similar speed   |
+| 500+ tests     | 19-141x faster  | 1.5-3x faster   |
 
-For the latest information, always refer to the [main repository](https://github.com/derens99/fastest). 
+## 🤝 Community
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/fastest/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/fastest/discussions)
+- **Contributing**: See [DEVELOPMENT.md](DEVELOPMENT.md)
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.

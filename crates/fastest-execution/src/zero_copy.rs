@@ -6,10 +6,10 @@
 use std::time::{Duration, Instant};
 use bumpalo::Bump;
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList, PyModule};
+use pyo3::types::PyModule;
 
 use fastest_core::TestItem;
-use fastest_core::{Error, Result};
+use fastest_core::Result;
 use super::TestResult;
 
 /// Zero-copy test result (simplified for compilation)

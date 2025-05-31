@@ -73,11 +73,12 @@ coverage.xml
 tmp/
 temp/
 
-# JSON files (except config)
+# Build and benchmark artifacts
 *.json
 !package.json
-!Cargo.toml
-!pyproject.toml
+comparison_results/
+debug_*.py
+*_debug.py
 
 # Test outputs
 test_output/

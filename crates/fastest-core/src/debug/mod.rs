@@ -3,7 +3,6 @@
 //! This module provides basic debugging configuration and types.
 //! Advanced debugging with test results is available in fastest-execution.
 
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

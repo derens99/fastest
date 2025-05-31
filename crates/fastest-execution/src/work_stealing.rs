@@ -3,15 +3,12 @@
 //! Lock-free work-stealing parallelism for large test suites.
 //! This is currently a working stub - full implementation will come later.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::thread;
-use crossbeam_deque::{Injector, Stealer, Worker};
 use num_cpus;
 
 use fastest_core::TestItem;
-use fastest_core::{Error, Result};
+use fastest_core::Result;
 use super::TestResult;
 
 /// Work-stealing execution statistics

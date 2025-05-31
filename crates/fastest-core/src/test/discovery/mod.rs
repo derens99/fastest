@@ -114,10 +114,6 @@ fn is_python_test_file(path: &Path) -> bool {
     }
 }
 
-/// Discover tests in a single file using Python AST parsing
-fn discover_tests_in_file(file_path: &Path, content: &str) -> Result<Vec<TestItem>> {
-    discover_tests_in_file_optimized(file_path, content)
-}
 
 /// Fast path: use thread-local tree-sitter parser (zero allocation overhead)
 fn discover_tests_in_file_tree_sitter(file_path: &Path, content: &str) -> Result<Vec<TestItem>> {
@@ -510,46 +506,6 @@ impl OptimizedTestDiscoveryVisitor {
         fixtures
     }
     
-    /// Count the number of test cases from parametrize decorators
-    fn count_parametrize_cases(&self, decorators: &[String]) -> usize {
-        let mut total_cases = 1;
-        
-        for decorator in decorators {
-            if decorator.contains("parametrize") {
-                if let Some(cases) = self.estimate_parametrize_cases(decorator) {
-                    total_cases *= cases;
-                }
-            }
-        }
-        
-        total_cases
-    }
-    
-    /// Estimate the number of cases from a parametrize decorator string
-    fn estimate_parametrize_cases(&self, decorator: &str) -> Option<usize> {
-        // Look for list literals in the decorator
-        if let Some(start) = decorator.find('[') {
-            if let Some(end) = decorator[start..].find(']') {
-                let list_content = &decorator[start+1..start+end];
-                // Count commas at the top level (not inside nested structures)
-                let mut depth: i32 = 0;
-                let mut count = 1;
-                
-                for ch in list_content.chars() {
-                    match ch {
-                        '(' | '[' | '{' => depth += 1,
-                        ')' | ']' | '}' => depth = depth.saturating_sub(1),
-                        ',' if depth == 0 => count += 1,
-                        _ => {}
-                    }
-                }
-                
-                return Some(count);
-            }
-        }
-        
-        None
-    }
     
     /// Create a unique test ID
     fn create_test_id(&self, function_name: &str, class_name: Option<&str>) -> String {
@@ -1230,38 +1186,6 @@ fn extract_class_name_from_line_simd(line: &str) -> Option<String> {
     }
 }
 
-/// Parse decorators for a test using file reading
-fn parse_decorators_simd(file_path: &Path, line_number: usize) -> Result<Vec<String>> {
-    let content = std::fs::read_to_string(file_path)
-        .map_err(|e| crate::error::Error::Discovery(format!("Failed to read file for decorators: {}", e)))?;
-    
-    let lines: Vec<&str> = content.lines().collect();
-    let mut decorators = Vec::new();
-    
-    if line_number > 0 {
-        let start_line = line_number - 1; // Convert to 0-indexed
-        
-        // Scan backwards for decorators
-        let mut i = start_line;
-        while i > 0 {
-            i -= 1;
-            let line = lines.get(i).unwrap_or(&"").trim();
-            
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-            
-            if line.starts_with('@') {
-                decorators.push(line.to_string());
-            } else if !line.contains('[') && !line.contains('(') {
-                break; // Stop at non-decorator line
-            }
-        }
-    }
-    
-    decorators.reverse(); // Restore original order
-    Ok(decorators)
-}
 
 #[cfg(test)]
 mod tests {

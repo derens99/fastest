@@ -12,7 +12,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use sysinfo::System;
 use bumpalo::Bump;
@@ -105,11 +105,6 @@ impl PluginCompatibilityManager {
         }).collect())
     }
 }
-use super::{
-    zero_copy::{ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results},
-    work_stealing::{WorkStealingExecutor, WorkStealingStats},
-    native_transpiler::{NativeTestExecutor, TranspilationStats},
-};
 
 /* -------------------------------------------------------------------------- */
 /*                    Revolutionary Single Strategy Architecture               */
@@ -126,7 +121,7 @@ const WORK_STEALING_THRESHOLD: usize = 500;
 
 /// System performance profile for adaptive execution
 #[derive(Debug, Clone)]
-struct SystemProfile {
+pub struct SystemProfile {
     cpu_cores: usize,
     available_memory_gb: f64,
     cpu_usage_percent: f32,

@@ -4,19 +4,57 @@
 [![CI](https://github.com/YOUR_USERNAME/fastest/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/fastest/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A blazing fast Python test runner built with Rust for maximum performance and reliability.
+A fast Python test runner built with Rust - 3.9x faster than pytest on average.
 
-## 🚀 Features
+## 🚀 Performance
 
-- **⚡ Blazing Fast**: 77x faster test discovery and 2.6x faster test execution than pytest
-- **🔄 Smart Caching**: Intelligent test discovery caching that persists across runs
-- **🎯 Parallel Execution**: Run tests in parallel with automatic CPU core detection
-- **🏃 Ultra-Optimized Executor**: New optimized test executor with batching and pre-compilation (default)
-- **🔍 Multiple Parsers**: Choose between regex (fast) or AST (accurate) test discovery
-- **🎨 Beautiful Output**: Clean, colorful terminal output with progress bars
-- **🔧 pytest Compatible**: Works with your existing pytest test suites
-- **📦 Zero Config**: Works out of the box with sensible defaults
-- **🎭 Parametrized Tests**: Full support for `@pytest.mark.parametrize` and `@fastest.mark.parametrize` (NEW!)
+**Real benchmark results** (verified on Apple M1 Max):
+
+| Test Count | Fastest | pytest | Speedup |
+|------------|---------|--------|---------|
+| 5 tests    | 0.047s  | 0.111s | **2.4x** |
+| 10 tests   | 0.030s  | 0.118s | **3.9x** |
+| 25 tests   | 0.030s  | 0.119s | **3.9x** |
+| 50 tests   | 0.030s  | 0.129s | **4.2x** |
+| 100 tests  | 0.032s  | 0.151s | **4.7x** |
+| 200 tests  | 0.045s  | 0.194s | **4.4x** |
+
+**Average speedup: 3.9x faster than pytest**
+
+## ✅ What Works
+
+### Core Functionality
+- **Fast test discovery and execution** - Rust-based performance
+- **Basic fixtures** - `tmp_path`, `capsys`, `monkeypatch`
+- **Function-based tests** - `def test_*()` patterns
+- **Async tests** - `async def test_*()` support  
+- **Basic parametrization** - `@pytest.mark.parametrize` (simple cases)
+- **Test filtering** - `-k` keyword and `-m` marker filtering
+- **Parallel execution** - `-n` flag with auto-detection
+- **Discovery caching** - Persistent test discovery cache
+- **Multiple output formats** - Pretty, JSON, count
+
+### Command Line Interface
+- Compatible with basic pytest flags: `-v`, `-q`, `-x`, `-k`, `-m`, `-n`
+- Additional commands: `discover`, `version`, `update`, `benchmark`
+- Honest help text that lists actual capabilities and limitations
+
+## ⚠️ Current Limitations
+
+### Not Yet Implemented
+- **Class-based tests** - `class Test*` execution has issues
+- **Complex parametrization** - Multi-parameter scenarios may fail
+- **Advanced fixtures** - Session/module scope, autouse, dependencies
+- **Pytest plugin ecosystem** - No support for pytest plugins
+- **Coverage integration** - No built-in coverage reporting
+- **Watch mode** - No file watching capability
+- **Complex mark expressions** - Limited marker filtering
+
+### Known Issues
+- Parametrized tests may not receive parameters correctly
+- Class method execution sometimes fails
+- Some fixtures may not inject properly
+- Limited error context in failure reporting
 
 ## 📦 Installation
 
@@ -32,370 +70,184 @@ curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | 
 irm https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 ```
 
-### Other Installation Methods
+### Other Methods
 
-**Via pip:**
-```bash
-pip install fastest-runner
-```
-
-**Via Homebrew (macOS):**
-```bash
-brew tap derens99/fastest
-brew install fastest
-```
-
-**Via Cargo (requires Rust):**
+**Via Cargo:**
 ```bash
 cargo install fastest-cli
 ```
 
-**Via Docker:**
+**From Source:**
 ```bash
-docker run --rm -v $(pwd):/workspace ghcr.io/derens99/fastest tests/
+git clone https://github.com/derens99/fastest.git
+cd fastest
+cargo build --release
+./target/release/fastest --help
 ```
 
-See the [installation guide](docs/INSTALLATION.md) for more options and troubleshooting.
+## 🎯 Usage
 
-## 🎯 Quick Start
-
+### Basic Commands
 ```bash
-# Run all tests in the current directory
+# Run all tests
 fastest
 
-# Run tests in a specific directory
-fastest tests/
+# Run specific tests
+fastest tests/test_simple.py
 
-# Run tests matching a pattern
-fastest -k test_login
+# Run with filters
+fastest -k "test_login"
+fastest -m "not slow"
 
-# Run tests in parallel with auto-detected workers
-fastest -n 0  # 0 means auto-detect (default)
-
-# Use different optimization levels
-fastest --optimizer standard  # Use standard executor
-fastest --optimizer optimized  # Use optimized executor (default)
+# Parallel execution
+fastest -n 4  # 4 workers
+fastest -n 0  # auto-detect workers
 
 # Verbose output
 fastest -v
+
+# JSON output for scripts
+fastest -o json
+
+# Discover tests without running
+fastest discover
 ```
 
-## 📊 Benchmarks
+### Example Test File
+```python
+# test_example.py - This will work well
+import pytest
 
-Fastest significantly outperforms pytest in both test discovery and execution:
+def test_simple():
+    assert 1 + 1 == 2
 
-### Test Discovery
-- **Fastest**: 5.2ms (77x faster! 🚀)
-- **pytest**: 402ms
+def test_with_fixture(tmp_path):
+    test_file = tmp_path / "test.txt"
+    test_file.write_text("hello")
+    assert test_file.read_text() == "hello"
 
-### Test Execution
-- **Fastest**: 38ms (2.6x faster ⚡)
-- **pytest**: 98ms
+@pytest.mark.parametrize("x,y,expected", [
+    (1, 2, 3),
+    (2, 3, 5),
+])
+def test_addition(x, y, expected):
+    assert x + y == expected
 
-*Benchmarks performed on a 10-core Apple M1 Max CPU with real test suites.*
-
-## 🤔 When to Use Fastest vs pytest
-
-### Use Fastest when:
-- **Speed is critical**: Large test suites that take minutes with pytest
-- **CI/CD optimization**: Reduce pipeline times and costs
-- **Rapid development**: Fast feedback loops during development
-- **Simple test suites**: Standard unit tests without complex fixtures
-
-### Use pytest when:
-- **Plugin ecosystem needed**: Extensive pytest plugin requirements
-- **Complex fixtures**: Advanced fixture scoping and dependencies
-- **Custom configuration**: Complex pytest.ini or pyproject.toml setups
-
-### Migration Path
-1. **Start with parallel adoption**: Use Fastest for quick local runs, pytest for CI
-2. **Gradual migration**: Move simple test modules first
-3. **Full migration**: Once Fastest supports your required features
-
-📖 See our [detailed migration guide](docs/MIGRATION_GUIDE.md) for step-by-step instructions.
-
-## 🔧 Configuration
-
-Fastest works with zero configuration, but you can customize its behavior:
-
-### Command Line Options
-```bash
-fastest --help
-
-Options:
-  -k, --filter <PATTERN>      Filter tests by pattern
-  -n, --workers <N>           Number of parallel workers (0 = auto-detect)
-  -x, --fail-fast            Stop on first failure
-  -v, --verbose              Verbose output
-  --parser <TYPE>            Parser type: "regex" (default) or "ast"
-  --optimizer <TYPE>         Optimizer type: "standard" or "optimized" (default)
-  --no-cache                 Disable test discovery cache
+async def test_async():
+    assert True
 ```
 
-### Requirements
+## 🎯 When to Use Fastest
 
-- Python 3.8+ (must be available as `python` in PATH or use a virtual environment)
-- Rust 1.70+ (for building from source)
+### ✅ Good fit for:
+- **Simple test suites** with function-based tests
+- **Performance-critical CI/CD** where speed matters
+- **Basic pytest patterns** without complex fixtures
+- **New projects** that can work within current limitations
+- **Quick local test runs** during development
 
-### Using with Virtual Environments
+### ❌ Better to use pytest for:
+- **Complex test suites** with extensive fixture usage
+- **Projects using pytest plugins** (pytest-mock, pytest-cov, etc.)
+- **Class-based test organization** (until we fix this)
+- **Advanced parametrization** needs
+- **Production systems** requiring 100% pytest compatibility
 
-Fastest works seamlessly with Python virtual environments. If you're having issues with Python not being found, activate your virtual environment before running fastest:
+## 🛠️ Development Status
 
-```bash
-# Create and activate a virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Now run fastest
-fastest
-```
-
-## 🏆 Real-World Performance
-
-### Django Test Suite
-- **Tests**: 100 tests
-- **pytest**: 425ms
-- **Fastest**: 150ms (2.83x faster)
-
-### Large Test Suite
-- **Tests**: 1,000 tests  
-- **pytest**: 1.2s
-- **Fastest**: 450ms (2.7x faster)
-
-### Memory Usage
-- **pytest**: 30MB
-- **Fastest**: 15MB (50% less)
-
-*Results from actual production codebases. Your results may vary based on test complexity and hardware.*
-
-## 🏗️ Architecture
-
-Fastest is built with a modular architecture combining Rust's performance with Python's ecosystem:
-
-```
-fastest/
-├── crates/
-│   ├── fastest-core/      # Core test discovery and execution engine
-│   └── fastest-cli/       # Command-line interface
-└── python/
-    └── fastest/          # Python bindings
-```
-
-### Key Components:
-- **Discovery Engine**: Fast regex-based or accurate AST-based test discovery
-- **Execution Engine**: Optimized parallel test runner with intelligent batching
-- **Cache System**: Persistent discovery cache for instant subsequent runs
-- **Process Pool**: Reusable process pool for reduced overhead
-
-## 📋 pytest Compatibility
-
-### ✅ Production Ready Features
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Basic test discovery | ✅ | `def test_*`, `class Test*` patterns |
-| Class-based tests | ✅ | `class Test*` with proper instantiation |
-| Async tests | ✅ | `async def test_*` with asyncio support |
-| Markers | ✅ | `@pytest.mark.skip`, `@pytest.mark.xfail`, `@pytest.mark.parametrize` |
-| Basic fixtures | ✅ | `capsys`, `tmp_path`, `monkeypatch` |
-| Test filtering | ✅ | `-k` pattern matching |
-| Marker expressions | ✅ | `-m "not slow"` filtering |
-| Parallel execution | ✅ | `-n` flag with automatic worker detection |
-| Fail fast | ✅ | `-x` flag |
-| **Parametrized tests** | ✅ | `@pytest.mark.parametrize` with full argument support |
-| Configuration files | ✅ | `pyproject.toml`, `pytest.ini`, `setup.cfg` |
-| Multiple output formats | ✅ | Terminal, JSON, JUnit XML |
-
-### 🚧 In Development (v0.2.0)
-| Feature | Status | Target | Priority |
-|---------|--------|--------|----------|
-| Session-scoped fixtures | 🚧 | Q1 2024 | High |
-| Advanced fixture dependencies | 🚧 | Q1 2024 | High |
-| Coverage integration | 🚧 | Q1 2024 | High |
-| Plugin compatibility layer | 🚧 | Q2 2024 | Critical |
-| Advanced assertion introspection | 🚧 | Q2 2024 | Medium |
-
-### 🔮 Future Features (v0.3.0+)
-| Feature | Status | Target | Priority |
-|---------|--------|--------|----------|
-| Pytest plugin compatibility | 📋 | Q2 2024 | Critical |
-| IDE/LSP integration | 📋 | Q3 2024 | Medium |
-| Distributed testing | 📋 | Q3 2024 | Low |
-| Doctests support | 📋 | Q4 2024 | Low |
-| Custom collectors | 📋 | TBD | Low |
-
-## 🗺️ Roadmap & Project Status
-
-### 📊 Current Status: **Partially Ready for Production** 
-
-**Readiness Score: 7/10** ⭐⭐⭐⭐⭐⭐⭐
+### Project Health: **7/10** ⭐⭐⭐⭐⭐⭐⭐
 
 | Aspect | Score | Status |
 |--------|-------|--------|
-| **Performance** | 10/10 | ✅ Revolutionary (2-141x faster than pytest) |
-| **Core Features** | 8/10 | ✅ Solid test discovery and execution |
-| **pytest Compatibility** | 6/10 | ⚠️ Basic features work, advanced features limited |
-| **Plugin Ecosystem** | 4/10 | ⚠️ Limited third-party plugin support |
-| **Documentation** | 7/10 | ✅ Good but can improve |
+| **Performance** | 10/10 | ✅ Significantly faster than pytest |
+| **Basic Features** | 8/10 | ✅ Core functionality works well |
+| **pytest Compatibility** | 5/10 | ⚠️ Limited to simple patterns |
+| **Reliability** | 6/10 | ⚠️ Some execution edge cases |
+| **Documentation** | 8/10 | ✅ Honest and comprehensive |
 
-### 🎯 Adoption Recommendations
+### Honest Assessment
+Fastest excels at **performance** and handles **simple to moderate** Python test suites very well. It's not a drop-in replacement for pytest in complex scenarios, but it delivers significant speed improvements for straightforward testing needs.
 
-#### ✅ **Ready for Production:**
-- **New projects** that can work within current feature limitations
-- **Performance-critical CI/CD** pipelines needing faster test execution  
-- **Teams prioritizing speed** over complete pytest ecosystem compatibility
-- **Simple to moderate test suites** with basic fixtures and parametrization
+## 📈 Benchmark Yourself
 
-#### ⚠️ **Evaluate for Production:**
-- **Large existing pytest codebases** (migration effort required)
-- **Projects with moderate fixture usage** (function/module scope)
-- **Teams comfortable with limited plugin ecosystem**
+Run your own performance comparison:
 
-#### ❌ **Wait for Future Versions:**
-- **Projects heavily dependent on pytest plugins** (pytest-mock, pytest-cov, etc.)
-- **Codebases using complex fixture patterns** (session scope, autouse fixtures)
-- **Teams requiring 100% pytest compatibility**
+```bash
+# Build release version
+cargo build --release
 
-### 🚀 Development Roadmap
+# Run benchmark script
+python benchmarks/real_benchmark.py
 
-#### **Phase 1: Core Foundation** ✅ **COMPLETED**
-*Released in v0.1.x*
+# Quick benchmark command
+fastest benchmark --iterations 10
+```
 
-- ✅ Revolutionary test discovery (11-141x faster than pytest)
-- ✅ Ultra-fast test execution (2.4x faster than pytest) 
-- ✅ PyO3-based Python integration
-- ✅ Basic pytest compatibility (functions, classes, async tests)
-- ✅ Parametrized test support
-- ✅ Basic fixtures (tmp_path, capsys, monkeypatch)
-- ✅ Multi-format output (terminal, JSON, JUnit XML)
-- ✅ Parallel execution with auto-detection
+Results are saved to `benchmarks/benchmark_results.json`.
 
-#### **Phase 2: Essential Compatibility** 🚧 **IN PROGRESS**
-*Target: v0.2.0 - Q1 2024*
+## 🗺️ Roadmap
 
-**High Priority:**
-- 🚧 Session-scoped fixtures implementation
-- 🚧 Advanced fixture dependencies and autouse behavior
-- 🚧 Coverage integration (pytest-cov compatibility)
-- 🚧 Enhanced error reporting with assertion introspection
-- 🚧 Configuration system improvements
+### Current Focus (v0.2.x)
+- ✅ Real performance benchmarking
+- ✅ Honest feature documentation  
+- ✅ Simplified, working CLI
+- 🔄 Fix class-based test execution
+- 🔄 Improve parametrization reliability
 
-**Medium Priority:**
-- 🚧 More built-in fixtures (request, capfd, capsysbinary)
-- 🚧 Improved marker system with custom markers
-- 🚧 Better error messages and debugging support
+### Future Plans (v0.3.x)
+- Session/module scoped fixtures
+- Better pytest plugin compatibility
+- Coverage integration
+- Watch mode
+- Advanced error reporting
 
-#### **Phase 3: Plugin Ecosystem** 📋 **PLANNED**
-*Target: v0.3.0 - Q2 2024*
+### Long-term Vision (v1.0)
+- Full pytest compatibility for common patterns
+- Extensive plugin ecosystem support
+- IDE/LSP integration
+- Distributed testing capabilities
 
-**Critical Features:**
-- 📋 Pytest plugin compatibility layer
-- 📋 Plugin API for third-party extensions
-- 📋 Support for popular plugins (pytest-mock, pytest-django, pytest-asyncio)
-- 📋 Hook system for test collection and execution customization
+## 🧪 Testing
 
-**Additional Features:**
-- 📋 IDE integration (LSP server)
-- 📋 Advanced reporting formats (HTML, Coverage reports)
-- 📋 Improved CLI with more pytest flags
+The project includes comprehensive benchmarks and tests:
 
-#### **Phase 4: Complete Replacement** 📋 **FUTURE**
-*Target: v1.0.0 - Q3-Q4 2024*
+```bash
+# Run core tests
+cargo test
 
-**Advanced Features:**
-- 📋 100% pytest command-line compatibility
-- 📋 Distributed testing capabilities
-- 📋 Doctests support
-- 📋 Advanced pytest features (custom collectors, advanced fixtures)
-- 📋 Performance monitoring and optimization suggestions
-- 📋 Cloud execution and distributed testing
+# Run Python integration tests  
+fastest tests/
 
-### 📈 Performance Validation
+# Run benchmarks
+python benchmarks/real_benchmark.py
 
-**Verified in Production:**
-- ✅ **Discovery**: 11-141x faster than pytest (real benchmarks)
-- ✅ **Execution**: 2.4x faster in practice (Django test suite: 716 tests)
-- ✅ **Memory**: 50% more efficient than pytest
-- ✅ **Compatibility**: 99.7% success rate on real test suites
-
-### 📊 Project Health
-
-#### Test Coverage
-![Coverage](https://codecov.io/gh/derens99/fastest/branch/main/graph/badge.svg)
-
-**Comprehensive Testing:**
-- ✅ Unit tests for all core functionality
-- ✅ Integration tests for CLI commands  
-- ✅ End-to-end tests with real Python test suites (Django, Flask)
-- ✅ Performance benchmarks and regression tests
-- ✅ Cross-platform testing (Linux, macOS, Windows)
-
-#### Continuous Integration
-**Testing Matrix:**
-- **Operating Systems**: Linux, macOS, Windows
-- **Python Versions**: 3.8, 3.9, 3.10, 3.11, 3.12, 3.13
-- **Rust Versions**: stable, beta, nightly
-- **Real-world Validation**: Django test suite (716 tests), Flask applications
-
-### 📚 Documentation & Resources
-
-**Getting Started:**
-- [Installation Guide](docs/INSTALLATION.md) - Complete installation instructions
-- [Quick Start Guide](docs/QUICKSTART.md) - Get running in 5 minutes
-- [Migration Guide](docs/MIGRATION_GUIDE.md) - Step-by-step pytest migration
-
-**Advanced Usage:**
-- [Configuration Guide](docs/CONFIG.md) - Advanced configuration options
-- [Performance Guide](docs/PERFORMANCE.md) - Optimization tips and tricks
-- [Plugin Development](docs/PLUGINS.md) - Creating custom plugins
-
-**Development:**
-- [Development Guide](docs/DEVELOPMENT.md) - Set up development environment
-- [Architecture Guide](docs/ARCHITECTURE.md) - Technical architecture overview
-- [Contributing Guide](CONTRIBUTING.md) - How to contribute
-
-### 🏆 Recognition & Metrics
-
-**Community Adoption:**
-- 🌟 **GitHub Stars**: Growing open-source community
-- 📦 **Downloads**: Increasing adoption in CI/CD pipelines
-- 🐛 **Issues**: Responsive issue resolution (avg 2-3 days)
-- 💬 **Discussions**: Active community support and feature requests
-
-**Industry Validation:**
-- ✅ Production use in multiple companies
-- ✅ CI/CD integration success stories
-- ✅ Performance improvements driving adoption
-- ✅ Positive developer experience feedback
+# Test with real projects
+fastest /path/to/your/project/tests/
+```
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+Contributions welcome! Areas where help is needed:
 
-### Quick Start for Contributors
-```bash
-# Clone and setup
-git clone https://github.com/YOUR_USERNAME/fastest.git
-cd fastest
-make dev-setup
+1. **Class-based test execution** - Fix method discovery and execution
+2. **Parametrization improvements** - Better parameter injection
+3. **Fixture system** - Session/module scope support
+4. **pytest plugin compatibility** - Common plugin support
+5. **Error handling** - Better failure reporting and context
 
-# Run tests
-make test
-
-# Format and lint
-make check
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License - see [LICENSE](LICENSE) file.
 
 ## 🙏 Acknowledgments
 
-- Built with [PyO3](https://pyo3.rs/) for seamless Python-Rust integration
-- Inspired by the pytest project and the Rust community
-- Tree-sitter for accurate Python AST parsing
-- Special thanks to all contributors
+- Built with [PyO3](https://pyo3.rs/) for Python-Rust integration
+- Inspired by the pytest project
+- Tree-sitter for Python AST parsing
+- Thanks to all contributors and testers
 
 ---
 
-**Note**: Fastest is actively maintained and under continuous development. Feel free to report issues or request features! 
+**Note**: Fastest is in active development. It works well for simple to moderate test suites and delivers significant performance improvements. For complex pytest usage, consider a gradual migration approach or use alongside pytest for different testing scenarios.
