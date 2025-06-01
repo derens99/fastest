@@ -14,7 +14,7 @@ use std::time::{Duration, Instant};
 use std::collections::HashMap;
 use bumpalo::Bump;
 use pyo3::prelude::*;
-use pyo3::types::{PyModule, PyDict, PyList};
+// use pyo3::types::{PyModule, PyDict, PyList}; // Unused imports
 use string_interner::{DefaultStringInterner, DefaultSymbol};
 use parking_lot::{Mutex, RwLock};
 

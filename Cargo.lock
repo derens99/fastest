@@ -865,7 +865,6 @@ dependencies = [
  "rustpython-parser",
  "serde",
  "serde_json",
- "sha2",
  "smallvec",
  "tempfile",
  "thiserror",
@@ -873,6 +872,7 @@ dependencies = [
  "tree-sitter",
  "tree-sitter-python",
  "walkdir",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -882,6 +882,7 @@ dependencies = [
  "ahash",
  "aho-corasick",
  "anyhow",
+ "blake3",
  "bumpalo",
  "colored",
  "cranelift",
@@ -893,15 +894,21 @@ dependencies = [
  "dashmap 5.5.3",
  "fastest-core",
  "futures",
+ "lazy_static",
+ "memchr",
  "memmap2",
  "mimalloc",
+ "num-traits",
  "num_cpus",
  "once_cell",
  "parking_lot",
  "petgraph",
  "pyo3",
  "rayon",
+ "regex",
  "rmp-serde",
+ "rustpython-ast",
+ "rustpython-parser",
  "serde",
  "serde_json",
  "smallvec",
@@ -3763,6 +3770,12 @@ dependencies = [
  "libc",
  "rustix",
 ]
+
+[[package]]
+name = "xxhash-rust"
+version = "0.8.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fdd20c5420375476fbd4394763288da7eb0cc0b8c11deed431a91562af7335d3"
 
 [[package]]
 name = "yoke"

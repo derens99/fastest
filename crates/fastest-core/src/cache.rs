@@ -3,7 +3,7 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -159,37 +159,19 @@ impl DiscoveryCache {
 
     /// Ultra-fast content hash using xxHash (4x faster than SHA256) with file size checks
     fn calculate_content_hash_fast(&self, path: &Path) -> Result<String> {
-        use std::hash::{Hash, Hasher};
-        use std::collections::hash_map::DefaultHasher;
-        
-        // First check: file size + mtime for super-fast cache hits
-        let metadata = std::fs::metadata(path)?;
-        let size = metadata.len();
-        let mtime = metadata.modified()?.duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default();
-        
-        // For small files (< 64KB), use fast non-cryptographic hash
-        if size < 65536 {
-            let content = std::fs::read(path)?;
-            let mut hasher = DefaultHasher::new();
-            content.hash(&mut hasher);
-            size.hash(&mut hasher);
-            mtime.hash(&mut hasher);
-            return Ok(format!("{:016x}", hasher.finish()));
-        }
-        
-        // For larger files, use streaming with larger buffers
-        self.calculate_content_hash_streaming(path)
+        // For all files, use streaming xxHash for speed and memory efficiency
+        self.calculate_content_hash_streaming_xxhash(path)
     }
-    
-    /// Streaming hash calculation optimized for large files
-    fn calculate_content_hash_streaming(&self, path: &Path) -> Result<String> {
-        use sha2::{Digest, Sha256};
+
+    /// Streaming hash calculation optimized for all files using xxHash
+    fn calculate_content_hash_streaming_xxhash(&self, path: &Path) -> Result<String> {
+        use xxhash_rust::xxh3::Xxh3; // Using xxh3 for good performance
+        use std::io::Read;
 
         let mut file = File::open(path)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0; 32768]; // 4x larger buffer for better I/O performance
+        let mut hasher = Xxh3::new();
+        let mut buffer = [0; 32768]; // 32KB buffer
 
-        // Stream file content through hasher
         loop {
             let n = file.read(&mut buffer)?;
             if n == 0 {
@@ -198,7 +180,7 @@ impl DiscoveryCache {
             hasher.update(&buffer[..n]);
         }
 
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(format!("{:x}", hasher.digest()))
     }
 
     /// Compare SystemTime with tolerance for filesystem precision differences

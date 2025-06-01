@@ -136,7 +136,7 @@ def create_scaling_chart(data, output_dir):
     plt.savefig(output_dir / 'scaling_analysis.svg', bbox_inches='tight')
     plt.close()
 
-def create_summary_chart(speedups, test_counts, output_dir):
+def create_summary_chart(speedups, test_counts, data, output_dir):
     """Create a summary performance dashboard"""
     fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
     
@@ -156,25 +156,30 @@ def create_summary_chart(speedups, test_counts, output_dir):
     ax1.grid(True, alpha=0.3)
     
     # Chart 2: Performance categories
-    categories = ['Small\n(≤50 tests)', 'Medium\n(100 tests)', 'Large\n(500+ tests)']
-    cat_speedups = [np.mean(speedups[:2]), speedups[2], speedups[3]]
+    categories = ['Small\n(≤50 tests)', 'Medium\n(100-500 tests)', 'Large\n(500+ tests)']
+    if len(speedups) >= 3:
+        cat_speedups = [
+            np.mean(speedups[:3]),  # First 3 for small
+            np.mean(speedups[3:5]) if len(speedups) > 4 else speedups[3] if len(speedups) > 3 else speedups[-1],  # Middle for medium
+            np.mean(speedups[5:]) if len(speedups) > 5 else speedups[-1]  # Last for large
+        ]
+    else:
+        cat_speedups = speedups[:3] + [0] * (3 - len(speedups))
     
     colors_cat = ['#FFD700', '#FF6347', '#9932CC']
     ax2.pie(cat_speedups, labels=categories, autopct='%1.1fx', startangle=90,
             colors=colors_cat, textprops={'fontweight': 'bold'})
     ax2.set_title('🎯 Performance by Category', fontweight='bold')
     
-    # Chart 3: Time savings
-    time_saved = []
-    pytest_times = [0.235, 0.310, 0.314, 0.706]  # From benchmark results
-    fastest_times = [0.097, 0.100, 0.103, 0.137]
-    
-    for pt, ft in zip(pytest_times, fastest_times):
-        time_saved.append(pt - ft)
+    # Chart 3: Time savings (using actual benchmark data)
+    comparisons = data['comparisons']
+    fastest_times = [c['fastest']['total_time'] for c in comparisons if c.get('speedup_total')]
+    pytest_times = [c['pytest']['total_time'] for c in comparisons if c.get('speedup_total')]
+    time_saved = [pt - ft for pt, ft in zip(pytest_times, fastest_times)]
     
     ax3.bar(range(len(test_counts)), time_saved, color='#32CD32', alpha=0.8)
     for i, ts in enumerate(time_saved):
-        ax3.text(i, ts + 0.01, f'{ts:.2f}s', ha='center', va='bottom', fontweight='bold')
+        ax3.text(i, ts + max(time_saved) * 0.02, f'{ts:.2f}s', ha='center', va='bottom', fontweight='bold')
     
     ax3.set_title('⏱️ Time Saved per Run', fontweight='bold')
     ax3.set_xticks(range(len(test_counts)))
@@ -219,7 +224,7 @@ def main():
     create_scaling_chart(data, output_dir)
     
     print("🎯 Creating summary dashboard...")
-    create_summary_chart(speedups, test_counts, output_dir)
+    create_summary_chart(speedups, test_counts, data, output_dir)
     
     # Print summary
     avg_speedup = np.mean(speedups)

@@ -12,9 +12,7 @@
 use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 use crossbeam::deque::{Injector, Stealer, Worker};
-use crossbeam::utils::Backoff;
 use parking_lot::{RwLock, Mutex};
 
 #[cfg(target_arch = "x86_64")]
@@ -23,7 +21,6 @@ use std::arch::x86_64::*;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use fastest_core::TestItem;
-use super::TestResult;
 
 /// Ultra-high-performance timeout manager with lock-free operations
 pub struct UltraFastTimeoutManager {

@@ -28,7 +28,7 @@ smallvec = "1.11"                   # Stack-allocated vectors
 # Basic utilities
 once_cell = "1.17"                  # Lazy statics
 toml = "0.8"                        # Config parsing
-sha2 = "0.10"                       # Hashing for caching
+xxhash-rust = { version = "0.8.7", features = ["xxh3"] } # Fast non-cryptographic hashing
 dirs = "5.0"                        # Directory utilities
 rayon = "1.8"                       # Parallel processing
 

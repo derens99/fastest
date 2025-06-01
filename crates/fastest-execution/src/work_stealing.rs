@@ -10,11 +10,11 @@
 //! - Adaptive worker scaling based on system load
 //! - Zero-allocation hot paths with thread-local storage
 
-use std::sync::atomic::{AtomicUsize, AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::thread::{self, JoinHandle};
-use std::collections::VecDeque;
+// use std::collections::VecDeque; // Unused import
 use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::utils::Backoff;
 use num_cpus;
