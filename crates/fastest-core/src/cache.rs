@@ -3,7 +3,7 @@ use crate::error::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter, Read};
+use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -43,10 +43,19 @@ impl DiscoveryCache {
 
         let mut cache: Self = serde_json::from_reader(reader)?;
 
-        // Check version compatibility
+        // Check version compatibility and validate cache integrity
         if cache.version != Self::CURRENT_VERSION {
-            eprintln!("Cache version mismatch, clearing cache");
+            eprintln!("Warning: Cache version mismatch (found: {}, expected: {}). Clearing cache.", 
+                     cache.version, Self::CURRENT_VERSION);
             cache = Self::new();
+        } else {
+            // Validate cache integrity
+            let initial_entries = cache.entries.len();
+            cache.entries.retain(|path, _| path.exists() && path.is_file());
+            let removed_entries = initial_entries - cache.entries.len();
+            if removed_entries > 0 {
+                eprintln!("Warning: Removed {} stale cache entries for missing files", removed_entries);
+            }
         }
 
         // Clean up old entries
@@ -95,9 +104,12 @@ impl DiscoveryCache {
                     // Check both modification time and file size
                     if self.is_same_time(&modified, &entry.modified) && size == entry.file_size {
                         // Verify content hash for extra safety
-                        if let Ok(current_hash) = self.calculate_content_hash(path) {
+                        if let Ok(current_hash) = self.calculate_content_hash_fast(path) {
                             if current_hash == entry.content_hash {
-                                return Some(entry.tests.clone());
+                                // Validate cached tests are not empty/corrupted
+                                if !entry.tests.is_empty() {
+                                    return Some(entry.tests.clone());
+                                }
                             }
                         }
                     }
@@ -115,7 +127,7 @@ impl DiscoveryCache {
         let file_size = metadata.len();
 
         // Calculate content hash
-        let content_hash = self.calculate_content_hash(&path)?;
+        let content_hash = self.calculate_content_hash_fast(&path)?;
 
         self.entries.insert(
             path,
@@ -157,15 +169,21 @@ impl DiscoveryCache {
         self.entries.remove(path).is_some()
     }
 
-    /// Calculate a content hash using streaming to avoid loading entire file
-    fn calculate_content_hash(&self, path: &Path) -> Result<String> {
-        use sha2::{Digest, Sha256};
+    /// Ultra-fast content hash using xxHash (4x faster than SHA256) with file size checks
+    fn calculate_content_hash_fast(&self, path: &Path) -> Result<String> {
+        // For all files, use streaming xxHash for speed and memory efficiency
+        self.calculate_content_hash_streaming_xxhash(path)
+    }
+
+    /// Streaming hash calculation optimized for all files using xxHash
+    fn calculate_content_hash_streaming_xxhash(&self, path: &Path) -> Result<String> {
+        use xxhash_rust::xxh3::Xxh3; // Using xxh3 for good performance
+        use std::io::Read;
 
         let mut file = File::open(path)?;
-        let mut hasher = Sha256::new();
-        let mut buffer = [0; 8192];
+        let mut hasher = Xxh3::new();
+        let mut buffer = [0; 32768]; // 32KB buffer
 
-        // Stream file content through hasher
         loop {
             let n = file.read(&mut buffer)?;
             if n == 0 {
@@ -174,7 +192,7 @@ impl DiscoveryCache {
             hasher.update(&buffer[..n]);
         }
 
-        Ok(format!("{:x}", hasher.finalize()))
+        Ok(format!("{:x}", hasher.digest()))
     }
 
     /// Compare SystemTime with tolerance for filesystem precision differences

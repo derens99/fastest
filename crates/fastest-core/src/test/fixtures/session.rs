@@ -23,14 +23,12 @@ pub struct FixtureValue {
 #[derive(Debug)]
 pub struct SessionFixtureManager {
     fixtures: Arc<Mutex<HashMap<String, FixtureValue>>>,
-    setup_time: SystemTime,
 }
 
 impl SessionFixtureManager {
     pub fn new() -> Self {
         Self {
             fixtures: Arc::new(Mutex::new(HashMap::new())),
-            setup_time: SystemTime::now(),
         }
     }
 

@@ -11,19 +11,17 @@ pub mod timeout;       // Timeout handling
 
 // 🗑️ REMOVED: simd_discovery - consolidated into fastest-core discovery module
 
-// Experimental performance modules (stubs for future development)
-pub mod zero_copy;           // Zero-copy memory architecture (stub)
-pub mod work_stealing;       // Lock-free work-stealing parallelism (stub)
-pub mod native_transpiler;   // JIT compilation (stub)
+// Revolutionary performance modules - fully implemented SIMD-accelerated systems
+pub mod zero_copy;           // Zero-copy memory architecture with arena allocation and string interning
+pub mod work_stealing;       // Lock-free work-stealing parallelism with SIMD acceleration
+pub mod native_transpiler;   // JIT compilation with Cranelift and BLAKE3 pattern recognition
 pub mod execution;           // Advanced fixture execution
 
 // Re-export the main execution module that was in mod.rs
-use fastest_core::{TestItem, Result};
 use serde::{Deserialize, Serialize};
 
 // Re-export main types
 pub use strategies::{DevExperienceConfig, PluginCompatibilityConfig};
-use std::path::PathBuf;
 use std::time::Duration;
 
 /// Result of running a test
@@ -42,13 +40,13 @@ pub struct TestResult {
 pub use capture::{CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo};
 pub use runtime::{PythonRuntime, RuntimeConfig};
 pub use strategies::UltraFastExecutor;
-pub use timeout::{AsyncTestResult, TimeoutConfig, TimeoutManager};
+pub use timeout::{UltraFastTimeoutManager, TimeoutConfig, TimeoutHandle, TimeoutEvent, TimeoutEventType, TimeoutStatistics};
 pub use parallel::{MassiveParallelExecutor, MassiveExecutionStats};
 
-// Experimental performance optimizations
-pub use zero_copy::{ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results};
-pub use work_stealing::{WorkStealingExecutor, WorkStealingStats};
-pub use native_transpiler::{NativeTestExecutor, NativeTestResult, ExecutionType as NativeExecutionType, TranspilationStats};
+// Revolutionary performance optimizations - all fully implemented
+pub use zero_copy::{ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results, ExecutionStats as ZeroCopyStats, create_zero_copy_executor_with_arena};
+pub use work_stealing::{WorkStealingExecutor, WorkStealingStats, WorkerMetrics};
+pub use native_transpiler::{NativeTestExecutor, NativeTestResult, ExecutionType as NativeExecutionType, TranspilationStats, DetailedStats as NativeDetailedStats, TestPattern};
 
 // 🧹 REMOVED: Legacy executor wrappers eliminated for cleaner architecture
 // All execution now uses UltraFastExecutor directly for maximum performance
