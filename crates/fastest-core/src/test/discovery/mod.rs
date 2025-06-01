@@ -1,7 +1,7 @@
-//! Revolutionary SIMD-Accelerated Test Discovery Module
+//! Test Discovery Module
 //! 
-//! Ultra-fast test discovery combining SIMD vectorization with AST parsing fallback.
-//! Performance: 15-25x faster discovery with memory-mapped files and Aho-Corasick.
+//! Fast test discovery combining multiple parsing strategies with AST parsing fallback.
+//! Uses safe file I/O with SIMD-accelerated pattern matching.
 
 use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,6 @@ use once_cell::sync::Lazy;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use regex::Regex;
 use crate::test::parser::Parser as TsParser;
-use memmap2::MmapOptions;
 use smallvec::SmallVec;
 use std::time::Instant;
 use std::collections::HashMap;
@@ -35,86 +34,19 @@ pub struct TestItem {
     pub name: String,
 }
 
-/// 🚀 REVOLUTIONARY UNIFIED DISCOVERY - Single-pass processing for 10x speedup
+/// Fast test discovery using a reliable single strategy
 pub fn discover_tests(paths: &[PathBuf]) -> Result<Vec<TestItem>> {
-    // Revolutionary single-pass unified discovery
-    match discover_tests_unified_single_pass(paths) {
-        Ok(tests) => Ok(tests),
-        Err(_) => {
-            // Fallback to SIMD-accelerated discovery
-            eprintln!("⚠️  Unified discovery failed, using SIMD fallback");
-            match discover_tests_simd_accelerated(paths) {
-                Ok(tests) => Ok(tests),
-                Err(_) => {
-                    eprintln!("⚠️  SIMD discovery failed, using traditional AST parsing");
-                    discover_tests_with_filtering(paths, false)
-                }
-            }
-        }
-    }
+    // Use the proven AST-based discovery with parallel processing
+    discover_tests_with_filtering(paths, false)
 }
 
-/// 🚀 REVOLUTIONARY UNIFIED SINGLE-PASS DISCOVERY - 10x faster than current implementation
-fn discover_tests_unified_single_pass(paths: &[PathBuf]) -> Result<Vec<TestItem>> {
-    let start_time = Instant::now();
-    
-    // Initialize unified processor with all optimization patterns
-    let unified_processor = UnifiedTestProcessor::new()?;
-    
-    // Collect test files using intelligent filtering
-    let test_files = collect_test_files_simd_optimized(paths);
-    
-    eprintln!("🚀 UNIFIED Discovery: Processing {} files with single-pass optimization", test_files.len());
-    
-    // Process files in parallel using unified single-pass algorithm
-    let tests: Result<Vec<_>> = test_files
-        .par_iter()
-        .map(|path| unified_processor.process_file_single_pass(path))
-        .collect();
-    
-    let all_tests: Vec<TestItem> = tests?.into_iter().flatten().collect();
-    
-    eprintln!("🚀 UNIFIED Discovery complete: {} tests found in {:.3}s ({:.0} files/sec, 10x faster!)", 
-             all_tests.len(), 
-             start_time.elapsed().as_secs_f64(),
-             test_files.len() as f64 / start_time.elapsed().as_secs_f64());
-    
-    Ok(all_tests)
-}
 
-/// Ultra-fast SIMD-accelerated discovery implementation (fallback)
-fn discover_tests_simd_accelerated(paths: &[PathBuf]) -> Result<Vec<TestItem>> {
-    let start_time = Instant::now();
-    
-    // Initialize SIMD pattern matcher with optimized patterns
-    let simd_patterns = create_simd_patterns()?;
-    
-    // Collect test files using intelligent filtering
-    let test_files = collect_test_files_simd_optimized(paths);
-    
-    eprintln!("🚀 SIMD Discovery: Processing {} files with vector acceleration", test_files.len());
-    
-    // Process files in parallel using memory-mapped SIMD acceleration
-    let tests: Result<Vec<_>> = test_files
-        .par_iter()
-        .map(|path| discover_tests_in_file_simd_optimized(path, &simd_patterns))
-        .collect();
-    
-    let all_tests: Vec<TestItem> = tests?.into_iter().flatten().collect();
-    
-    eprintln!("🚀 SIMD Discovery complete: {} tests found in {:.3}s ({:.0} files/sec)", 
-             all_tests.len(), 
-             start_time.elapsed().as_secs_f64(),
-             test_files.len() as f64 / start_time.elapsed().as_secs_f64());
-    
-    Ok(all_tests)
-}
 
-/// Discover tests in the given paths with ultra-optimized parallel processing
+/// Discover tests in the given paths with parallel processing
 pub fn discover_tests_with_filtering(paths: &[PathBuf], apply_performance_filtering: bool) -> Result<Vec<TestItem>> {
     let _ = apply_performance_filtering; // currently unused but kept for API compatibility
 
-    // Collect all test files first using fast ignore walker
+    // Collect all test files first using ignore walker
     let test_files: Vec<PathBuf> = collect_test_files(paths);
     
     // Early exit for empty collections
@@ -122,17 +54,17 @@ pub fn discover_tests_with_filtering(paths: &[PathBuf], apply_performance_filter
         return Ok(Vec::new());
     }
 
-    // Use optimized batching for better cache locality and reduced thread overhead
+    // Use batching for better cache locality and reduced thread overhead
     let chunk_size = std::cmp::max(1, test_files.len() / rayon::current_num_threads());
     
-    // Process files in parallel with memory-mapped I/O and content caching
+    // Process files in parallel
     let tests: Result<Vec<_>> = test_files
         .par_chunks(chunk_size)
         .map(|chunk| {
             let mut batch_results = Vec::with_capacity(chunk.len() * 4); // Assume avg 4 tests per file
             
             for path in chunk {
-                match discover_tests_in_file_optimized_v2(path) {
+                match discover_tests_in_file(path) {
                     Ok(mut file_tests) => batch_results.append(&mut file_tests),
                     Err(_) => continue, // Skip files that can't be processed
                 }
@@ -160,29 +92,19 @@ fn is_python_test_file(path: &Path) -> bool {
 }
 
 
-/// Ultra-optimized single-file test discovery with memory mapping and caching
-fn discover_tests_in_file_optimized_v2(file_path: &Path) -> Result<Vec<TestItem>> {
-    // Memory-map file for zero-copy reading (massive performance gain)
-    let file = std::fs::File::open(file_path)
-        .map_err(|e| crate::error::Error::Discovery(format!("Failed to open {}: {}", file_path.display(), e)))?;
+/// Single-file test discovery
+fn discover_tests_in_file(file_path: &Path) -> Result<Vec<TestItem>> {
+    // Read file content safely - test files are typically small enough that memory mapping isn't necessary
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| crate::error::Error::Discovery(format!("Failed to read {}: {}", file_path.display(), e)))?;
     
-    let mmap = unsafe {
-        MmapOptions::new()
-            .map(&file)
-            .map_err(|e| crate::error::Error::Discovery(format!("Failed to mmap {}: {}", file_path.display(), e)))?
-    };
-    
-    // Convert mmap to string once
-    let content = std::str::from_utf8(&mmap)
-        .map_err(|e| crate::error::Error::Discovery(format!("Invalid UTF-8 in {}: {}", file_path.display(), e)))?;
-    
-    // Use the existing optimized tree-sitter path with pre-loaded content
-    discover_tests_in_file_tree_sitter_cached(file_path, content)
+    // Use tree-sitter path with pre-loaded content
+    discover_tests_in_file_tree_sitter_cached(file_path, &content)
 }
 
-/// Fast path: use thread-local tree-sitter parser with intelligent caching
+/// Use thread-local tree-sitter parser with caching
 fn discover_tests_in_file_tree_sitter_cached(file_path: &Path, content: &str) -> Result<Vec<TestItem>> {
-    // Use thread-local parser for maximum performance (eliminates parser creation overhead)
+    // Use thread-local parser to eliminate parser creation overhead
     let tests = with_thread_local_parser(|parser| {
         let (_, tests) = parser.parse_content(content)?;
         Ok(tests)
@@ -713,7 +635,7 @@ enum TestPatternType {
 
 /// Hyper-optimized test file collection with work-stealing and NUMA awareness
 fn collect_test_files_simd_optimized(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let _start = Instant::now();
+    let start = Instant::now();
     
     // Use work-stealing with NUMA-aware thread pools for maximum throughput
     let files: Vec<PathBuf> = paths
@@ -822,17 +744,9 @@ fn is_python_test_file_simd_optimized(path: &Path) -> bool {
 
 /// SIMD-accelerated test discovery in a single file
 fn discover_tests_in_file_simd_optimized(file_path: &Path, patterns: &SIMDPatterns) -> Result<Vec<TestItem>> {
-    // Memory-map file for zero-copy reading (massive performance gain)
-    let file = std::fs::File::open(file_path)
-        .map_err(|e| crate::error::Error::Discovery(format!("Failed to open {}: {}", file_path.display(), e)))?;
-    
-    let mmap = unsafe {
-        MmapOptions::new()
-            .map(&file)
-            .map_err(|e| crate::error::Error::Discovery(format!("Failed to mmap {}: {}", file_path.display(), e)))?
-    };
-    
-    let file_content = &mmap[..];
+    // Read file content safely - test files are typically small enough that memory mapping isn't necessary
+    let file_content = std::fs::read(file_path)
+        .map_err(|e| crate::error::Error::Discovery(format!("Failed to read {}: {}", file_path.display(), e)))?;
     
     // Update statistics
     if let Ok(mut stats) = patterns.pattern_stats.lock() {
@@ -841,7 +755,7 @@ fn discover_tests_in_file_simd_optimized(file_path: &Path, patterns: &SIMDPatter
     }
     
     // SIMD-accelerated pattern matching on memory-mapped content
-    let test_locations = find_test_patterns_simd_vectorized(file_path, file_content, patterns)?;
+    let test_locations = find_test_patterns_simd_vectorized(file_path, &file_content, patterns)?;
     
     // Convert locations to TestItem structs with parametrize expansion
     convert_simd_locations_to_test_items(test_locations)
@@ -883,10 +797,8 @@ fn collect_test_files(paths: &[PathBuf]) -> Vec<PathBuf> {
     files
 }
 
-/// 🚀 ULTRA-FAST parametrize case counting with state machine optimization
+/// Count parametrize cases using state machine parsing
 fn helper_count_parametrize_cases(decorators: &[String]) -> usize {
-    static PARAMETRIZE_CACHE: std::sync::LazyLock<std::sync::Mutex<HashMap<String, usize>>> = std::sync::LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
-    
     let mut total_cases = 1;
     
     for decorator in decorators {
@@ -894,27 +806,14 @@ fn helper_count_parametrize_cases(decorators: &[String]) -> usize {
             continue;
         }
         
-        // Check cache first with HashMap for speed
-        if let Ok(cache) = PARAMETRIZE_CACHE.lock() {
-            if let Some(&cached_count) = cache.get(decorator) {
-                total_cases *= cached_count;
-                continue;
-            }
-        }
-        
-        // Use ultra-fast state machine parser instead of regex
+        // Use state machine parser - fast enough without caching
         let cases = helper_estimate_parametrize_cases_state_machine(decorator.as_bytes());
         total_cases *= cases;
-        
-        // Update cache
-        if let Ok(mut cache) = PARAMETRIZE_CACHE.lock() {
-            cache.insert(decorator.clone(), cases);
-        }
     }
     total_cases
 }
 
-/// 🚀 REVOLUTIONARY state machine parametrize parser - 5x faster than regex
+/// State machine parametrize parser
 fn helper_estimate_parametrize_cases_state_machine(decorator_bytes: &[u8]) -> usize {
     let mut state = ParametrizeParseState::SearchingOpen;
     let mut bracket_depth = 0;
@@ -1353,32 +1252,26 @@ impl UnifiedTestProcessor {
     
     /// 🚀 REVOLUTIONARY SINGLE-PASS FILE PROCESSING - Eliminates ALL redundancy
     fn process_file_single_pass(&self, file_path: &Path) -> Result<Vec<TestItem>> {
-        // Memory-map file for zero-copy reading
-        let file = std::fs::File::open(file_path)
-            .map_err(|e| crate::error::Error::Discovery(format!("Failed to open {}: {}", file_path.display(), e)))?;
-        
-        let mmap = unsafe {
-            MmapOptions::new()
-                .map(&file)
-                .map_err(|e| crate::error::Error::Discovery(format!("Failed to mmap {}: {}", file_path.display(), e)))?
-        };
+        // Read file content safely
+        let file_content = std::fs::read(file_path)
+            .map_err(|e| crate::error::Error::Discovery(format!("Failed to read {}: {}", file_path.display(), e)))?;
         
         // Update statistics
         {
             let mut stats = self.stats.lock().unwrap();
             stats.files_processed += 1;
-            stats.bytes_scanned += mmap.len();
+            stats.bytes_scanned += file_content.len();
         }
         
         // Single-pass unified processing: patterns + decorators + metadata extraction
-        let unified_data = self.extract_all_data_single_pass(&mmap, file_path)?;
+        let unified_data = self.extract_all_data_single_pass(&file_content, file_path)?;
         
         // Convert to TestItems with zero additional I/O
         self.build_test_items_from_unified_data(unified_data, file_path)
     }
     
     /// Extract all required data in a single memory scan
-    fn extract_all_data_single_pass(&self, content: &[u8], file_path: &Path) -> Result<UnifiedTestData> {
+    fn extract_all_data_single_pass(&self, content: &[u8], _file_path: &Path) -> Result<UnifiedTestData> {
         let mut test_functions = Vec::new();
         let mut decorator_map: HashMap<usize, Vec<String>> = HashMap::new();
         let mut class_context: Option<String> = None;
@@ -1386,7 +1279,8 @@ impl UnifiedTestProcessor {
         
         // Single-pass line processing with zero allocations
         for (line_number, line) in zero_alloc_lines(content) {
-            let line_str = unsafe { std::str::from_utf8_unchecked(line) }; // Safe because we validate UTF-8 files
+            let line_str = std::str::from_utf8(line)
+                .map_err(|e| crate::error::Error::Discovery(format!("Invalid UTF-8 in file: {}", e)))?;
             let trimmed = line_str.trim();
             
             // Handle decorators

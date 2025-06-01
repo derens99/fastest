@@ -43,10 +43,19 @@ impl DiscoveryCache {
 
         let mut cache: Self = serde_json::from_reader(reader)?;
 
-        // Check version compatibility
+        // Check version compatibility and validate cache integrity
         if cache.version != Self::CURRENT_VERSION {
-            eprintln!("Cache version mismatch, clearing cache");
+            eprintln!("Warning: Cache version mismatch (found: {}, expected: {}). Clearing cache.", 
+                     cache.version, Self::CURRENT_VERSION);
             cache = Self::new();
+        } else {
+            // Validate cache integrity
+            let initial_entries = cache.entries.len();
+            cache.entries.retain(|path, _| path.exists() && path.is_file());
+            let removed_entries = initial_entries - cache.entries.len();
+            if removed_entries > 0 {
+                eprintln!("Warning: Removed {} stale cache entries for missing files", removed_entries);
+            }
         }
 
         // Clean up old entries
@@ -97,7 +106,10 @@ impl DiscoveryCache {
                         // Verify content hash for extra safety
                         if let Ok(current_hash) = self.calculate_content_hash_fast(path) {
                             if current_hash == entry.content_hash {
-                                return Some(entry.tests.clone());
+                                // Validate cached tests are not empty/corrupted
+                                if !entry.tests.is_empty() {
+                                    return Some(entry.tests.clone());
+                                }
                             }
                         }
                     }
