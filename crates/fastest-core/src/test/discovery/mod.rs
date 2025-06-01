@@ -1746,7 +1746,8 @@ def not_a_test():
     pass
 "#;
 
-        let tests = discover_tests_in_file(Path::new("test_example.py"), content).unwrap();
+        let _content = content; // Preserve for future use
+        let tests = discover_tests_in_file(Path::new("test_example.py")).unwrap();
         
         // Should discover 7 base tests + 2 extra for parametrized (3 total)
         assert_eq!(tests.len(), 9);
@@ -1796,7 +1797,8 @@ class TestCaseExample(unittest.TestCase):
         pass
 "#;
 
-        let tests = discover_tests_in_file(Path::new("test_example.py"), content).unwrap();
+        let _content = content; // Preserve for future use
+        let tests = discover_tests_in_file(Path::new("test_example.py")).unwrap();
         
         // Should not discover tests from unittest.TestCase classes
         assert_eq!(tests.len(), 0);

@@ -1,17 +1,16 @@
-//! 🚀 REVOLUTIONARY NATIVE JIT TRANSPILATION ENGINE
+//! Native JIT transpilation engine (disabled for security)
 //!
-//! Ultra-high-performance JIT compilation system that transpiles simple Python tests to
-//! native machine code using Cranelift for 50-100x performance improvements.
+//! JIT compilation system that would transpile simple Python tests to
+//! native machine code using Cranelift. Currently disabled for security reasons.
 //!
-//! Key innovations:
-//! - Real-time Python AST parsing and optimization
+//! Planned features:
+//! - Python AST parsing and optimization
 //! - Cranelift JIT compilation to native x64/ARM machine code
-//! - Zero-overhead test execution with direct native calls
-//! - Intelligent pattern recognition for transpilable test patterns
+//! - Pattern recognition for transpilable test patterns
 //! - Automatic fallback to PyO3 for complex tests
-//! - Advanced caching system with code versioning
+//! - Caching system with code versioning
 //!
-//! Performance gains: 50-100x speedup for simple assertion tests
+//! Note: JIT compilation is currently disabled for security and uses safe PyO3 execution instead.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};

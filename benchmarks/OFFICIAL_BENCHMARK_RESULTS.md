@@ -1,6 +1,6 @@
 # Official Fastest Performance Benchmark Results
 
-**Generated:** 2025-06-01T05:21:40.601247+00:00
+**Generated:** 2025-06-01T05:31:48.334046+00:00
 **System:** macOS-15.1.1-arm64-arm-64bit-Mach-O
 **Architecture:** arm64
 **CPU Cores:** 10
@@ -9,24 +9,24 @@
 
 ## Executive Summary
 
-- **Average Total Speedup:** 5.9x faster than pytest
-- **Maximum Total Speedup:** 13.2x faster than pytest
+- **Average Total Speedup:** 5.8x faster than pytest
+- **Maximum Total Speedup:** 13.4x faster than pytest
 - **Average Discovery Speedup:** 19.0x faster test discovery
-- **Maximum Discovery Speedup:** 39.5x faster test discovery
+- **Maximum Discovery Speedup:** 39.7x faster test discovery
 - **Test Suite Sizes Tested:** 8 different sizes
 
 ## Detailed Results
 
 | Test Count | Fastest Total | Pytest Total | Total Speedup | Discovery Speedup | Execution Speedup |
 |------------|---------------|--------------|---------------|-------------------|-------------------|
-| 10 | 0.110s | 0.265s | **2.4x** | 8.9x | 1.6x |
-| 20 | 0.115s | 0.312s | **2.7x** | 11.8x | 1.8x |
-| 50 | 0.121s | 0.377s | **3.1x** | 11.6x | 2.2x |
-| 100 | 0.119s | 0.317s | **2.7x** | 13.4x | 1.6x |
-| 200 | 0.124s | 0.402s | **3.3x** | 16.1x | 2.0x |
-| 500 | 0.080s | 0.678s | **8.5x** | 21.8x | 5.9x |
-| 1,000 | 0.106s | 1.151s | **10.9x** | 28.7x | 7.8x |
-| 2,000 | 0.160s | 2.121s | **13.2x** | 39.5x | 9.5x |
+| 10 | 0.132s | 0.263s | **2.0x** | 9.2x | 1.2x |
+| 20 | 0.112s | 0.301s | **2.7x** | 11.2x | 1.8x |
+| 50 | 0.113s | 0.374s | **3.3x** | 12.0x | 2.4x |
+| 100 | 0.118s | 0.329s | **2.8x** | 14.2x | 1.6x |
+| 200 | 0.124s | 0.407s | **3.3x** | 15.3x | 2.0x |
+| 500 | 0.079s | 0.696s | **8.8x** | 22.3x | 6.2x |
+| 1,000 | 0.108s | 1.135s | **10.5x** | 28.3x | 7.5x |
+| 2,000 | 0.159s | 2.125s | **13.4x** | 39.7x | 9.6x |
 
 ## Performance Analysis
 
@@ -35,7 +35,7 @@
 Fastest consistently outperforms pytest in test discovery across all test suite sizes:
 
 - **Small suites (≤100 tests):** 10.8x faster average
-- **Large suites (>500 tests):** 34.1x faster average
+- **Large suites (>500 tests):** 34.0x faster average
 
 ### Test Execution Performance
 

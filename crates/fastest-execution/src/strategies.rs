@@ -1,12 +1,12 @@
-//! Revolutionary Ultra-Fast Python Test Executor
+//! Fast Python Test Executor
 //! Public API preserved: `UltraFastExecutor::new(verbose).execute(tests)`
 //!
-//! 🚀 BREAKTHROUGH ARCHITECTURE:
-//! • Single ultra-optimized execution strategy for ALL test sizes
-//! • Eliminates ALL worker IPC overhead (root cause of slowness)
+//! Key features:
+//! • Optimized execution strategy for different test sizes
+//! • Eliminates worker IPC overhead for better performance
 //! • PyO3 in-process execution with threading for parallelism
-//! • 2.37x faster than pytest consistently across all suite sizes
-//! • Dramatically simplified codebase with predictable performance
+//! • Improved performance compared to pytest across test suite sizes
+//! • Simplified codebase with predictable performance
 
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
@@ -461,70 +461,11 @@ impl UltraFastPythonEngine {
             return Ok(Vec::new());
         }
 
-        let mut native_executor = match crate::native_transpiler::NativeTestExecutor::new() {
-            Ok(exec) => exec,
-            Err(e) => {
-                eprintln!("Error creating NativeTestExecutor: {:?}. Falling back to UltraInProcess.", e);
-                return self.execute_ultra_inprocess(_py, tests, 1, verbose);
-            }
-        };
-
-        let mut results = Vec::with_capacity(tests.len());
-
-        for test_item in tests {
-            let test_code_to_execute = match get_test_function_code(test_item, verbose) {
-                Ok(code) => code,
-                Err(fetch_err) => {
-                    if verbose {
-                        eprintln!("   [N-JIT] Failed to fetch code for test '{}': {}. Using placeholder.", test_item.id, fetch_err);
-                    }
-                    // Fallback placeholder if code fetching fails
-                    format!("assert 1 == 1 # Placeholder due to fetch error: {}", fetch_err)
-                }
-            };
-            
-            if verbose && test_code_to_execute.contains("Placeholder due to fetch error") { // only print if it's the error placeholder
-                eprintln!("   🔬 N-JIT: Processing test '{}' with ERROR placeholder code: '{}'", test_item.id, test_code_to_execute.lines().next().unwrap_or(""));
-            } else if verbose {
-                 eprintln!("   🔬 N-JIT: Processing test '{}' with fetched/placeholder code (first line): '{}'", test_item.id, test_code_to_execute.lines().next().unwrap_or(""));
-            }
-
-            match native_executor.execute_native_or_fallback(test_item, &test_code_to_execute) {
-                Ok(native_result) => {
-                    if verbose {
-                        eprintln!("     ✅ N-JIT Result for '{}': {:?}, Type: {:?}, Speedup: {:.1}x", 
-                                 native_result.test_id, 
-                                 if native_result.passed { "PASSED" } else { "FAILED" }, 
-                                 native_result.execution_type, 
-                                 native_result.speedup_factor);
-                    }
-                    results.push(TestResult::from(native_result));
-                }
-                Err(e) => {
-                    eprintln!("Error during NativeTestExecutor for test '{}': {:?}. Creating fallback result.", test_item.id, e);
-                    results.push(TestResult {
-                        test_id: test_item.id.clone(),
-                        passed: false,
-                        duration: Duration::from_secs(0),
-                        error: Some(format!("Native execution failed: {}", e)),
-                        output: "FAILED (NATIVE EXECUTION ERROR)".to_string(),
-                        stdout: String::new(),
-                        stderr: String::new(),
-                    });
-                }
-            }
-        }
-        
+        // Disable dangerous JIT compilation - use safe PyO3 execution instead
         if verbose {
-            let stats = native_executor.get_detailed_stats();
-            eprintln!("   📊 Native JIT Batch Stats: JITed: {}, Optimized: {}, Fallback: {}, Avg Speedup: {:.1}x",
-                stats.transpilation_stats.tests_native_jit, 
-                stats.transpilation_stats.tests_native_optimized, 
-                stats.transpilation_stats.tests_pyo3_fallback,
-                stats.transpilation_stats.average_speedup);
+            eprintln!("Using safe PyO3 execution (JIT disabled for security)");
         }
-
-        Ok(results)
+        return self.execute_ultra_inprocess(_py, tests, 1, verbose);
     }
     
     /// 🚀 BURST EXECUTION: Revolutionary strategy for 21-100 tests (eliminates ALL overhead)
