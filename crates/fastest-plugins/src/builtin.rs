@@ -207,6 +207,8 @@ fn expand_parametrized_item(item: &serde_json::Value) -> Vec<serde_json::Value> 
                         let param_values = &args[1];
 
                         if let Some(values_array) = param_values.as_array() {
+                            // Debug output removed - controlled by verbose flag in execution engine
+                            
                             return values_array
                                 .iter()
                                 .enumerate()

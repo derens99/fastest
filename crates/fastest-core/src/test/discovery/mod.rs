@@ -813,7 +813,7 @@ fn helper_count_parametrize_cases(decorators: &[String]) -> usize {
     total_cases
 }
 
-/// State machine parametrize parser
+/// State machine parametrize parser - Fixed to handle trailing commas correctly
 fn helper_estimate_parametrize_cases_state_machine(decorator_bytes: &[u8]) -> usize {
     let mut state = ParametrizeParseState::SearchingOpen;
     let mut bracket_depth = 0;
@@ -822,6 +822,7 @@ fn helper_estimate_parametrize_cases_state_machine(decorator_bytes: &[u8]) -> us
     let mut found_content = false;
     let mut in_quotes = false;
     let mut quote_char = b'\0';
+    let mut pending_comma = false; // Track whether we found a comma that needs validation
     
     for &byte in decorator_bytes {
         // Handle quote tracking
@@ -846,27 +847,44 @@ fn helper_estimate_parametrize_cases_state_machine(decorator_bytes: &[u8]) -> us
                 bracket_depth = 1;
                 case_count = 1; // First case
                 found_content = false;
+                pending_comma = false;
             }
             (ParametrizeParseState::InList, b'[') => {
                 bracket_depth += 1;
+                // If we had a pending comma and found content, count it
+                if pending_comma {
+                    case_count += 1;
+                    pending_comma = false;
+                }
             }
             (ParametrizeParseState::InList, b']') => {
                 bracket_depth -= 1;
                 if bracket_depth == 0 {
-                    break; // End of parameter list
+                    break; // End of parameter list - don't count pending comma as trailing comma
                 }
             }
             (ParametrizeParseState::InList, b'(') => {
                 paren_depth += 1;
+                // If we had a pending comma and found content, count it
+                if pending_comma {
+                    case_count += 1;
+                    pending_comma = false;
+                }
             }
             (ParametrizeParseState::InList, b')') => {
                 paren_depth -= 1;
             }
             (ParametrizeParseState::InList, b',') if bracket_depth == 1 && paren_depth == 0 => {
-                case_count += 1; // Found another case
+                // Don't count the comma immediately - wait to see if there's content after it
+                pending_comma = true;
             }
             (ParametrizeParseState::InList, byte) if !byte.is_ascii_whitespace() => {
                 found_content = true;
+                // If we had a pending comma and found non-whitespace content, count it
+                if pending_comma {
+                    case_count += 1;
+                    pending_comma = false;
+                }
             }
             _ => {}
         }

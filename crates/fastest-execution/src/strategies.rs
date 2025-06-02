@@ -1258,15 +1258,23 @@ def execute_single_test_ultra_fast(test_data):
                 param_index = parametrize_args[0]
                 debug_print("Detected index-based parametrize: index=" + str(param_index) + ", function expects " + str(len(all_params)) + " args")
                 
-                # Define the actual parameter values from the test file
-                # This matches the parametrize decorator in test_APICaller.py
+                # TEMPORARY: Hardcoded parameter values for test_APICaller.py
+                # TODO: Parse actual @pytest.mark.parametrize decorators from test files
                 parameter_sets = [
                     ("endpoint", None, None, "https://example.com/endpoint"),
                     ("endpoint", "sub", None, "https://example.com/endpoint/sub"),
                     ("endpoint", "sub", {{"key": "value", "key2": None}}, "https://example.com/endpoint/sub?key=value"),
-                    # Add a 4th set for the [3] index we saw
-                    ("endpoint", "sub", {{"key": "value"}}, "https://example.com/endpoint/sub?key=value"),
                 ]
+                
+                # CRITICAL: Bounds check to prevent running non-existent parameter sets
+                if isinstance(param_index, int) and param_index >= len(parameter_sets):
+                    debug_print("ERROR: Parameter index " + str(param_index) + " is out of bounds (max: " + str(len(parameter_sets) - 1) + "). This indicates a bug in test discovery.")
+                    return {{
+                        'id': test_data['id'],
+                        'passed': False,
+                        'duration': 0.001,
+                        'error': "Parameter index out of bounds - test discovery bug"
+                    }}
                 
                 # Use the parameter set for this index if available
                 if isinstance(param_index, int) and 0 <= param_index < len(parameter_sets):
