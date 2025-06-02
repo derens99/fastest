@@ -13,6 +13,11 @@ python benchmarks/quick_benchmark_demo.py
 
 # Simple benchmark
 python benchmarks/simple_benchmark.py
+
+# Class-based testing benchmarks
+python benchmarks/benchmark_class_based.py       # Comprehensive class-based testing
+python benchmarks/benchmark_class_fixtures.py   # Class fixture performance
+python benchmarks/benchmark_class_inheritance.py # Inheritance patterns
 ```
 
 ## Benchmark Scripts
@@ -36,6 +41,14 @@ python benchmarks/simple_benchmark.py
 - **`benchmark_scale.py`** - Tests performance scaling from small to large test suites.
 
 - **`validate_performance_claims.py`** - Validates specific performance claims made in documentation.
+
+### Class-Based Testing Benchmarks
+
+- **`benchmark_class_based.py`** - Comprehensive benchmark for class-based test execution, fixture sharing, and lifecycle management. Tests class instance management, setup/teardown methods, and performance comparison with function-based tests.
+
+- **`benchmark_class_fixtures.py`** - Focused benchmark for class fixture performance and correctness. Tests fixture creation efficiency, sharing behavior, @classmethod fixtures, and memory optimization.
+
+- **`benchmark_class_inheritance.py`** - Specialized benchmark for class inheritance patterns. Tests simple inheritance, multiple inheritance, abstract base classes, deep inheritance chains, and Method Resolution Order (MRO) complexity.
 
 ### Utility Scripts
 

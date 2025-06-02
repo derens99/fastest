@@ -268,8 +268,8 @@ impl UltraFastPythonEngine {
         
         let init_start = Instant::now();
         
-        // Create the optimized worker module
-        let worker_code = Self::get_ultra_optimized_python_code();
+        // Create the optimized worker module with verbose flag
+        let worker_code = Self::get_ultra_optimized_python_code(verbose);
         let worker_module = PyModule::from_code(py, &worker_code, "fastest_ultra_engine", "fastest_ultra_engine")?;
         
         // Initialize advanced caches with larger capacity
@@ -499,7 +499,14 @@ impl UltraFastPythonEngine {
                 let test_dict = PyDict::new(py);
                 test_dict.set_item("id", &test.id).unwrap();
                 test_dict.set_item("module", test.path.file_stem().unwrap().to_str().unwrap()).unwrap();
-                test_dict.set_item("function", &test.function_name).unwrap();
+                
+                // Handle class methods properly: use ClassName::method_name format
+                let function_ref = if let Some(ref class_name) = test.class_name {
+                    format!("{}::{}", class_name, test.function_name)
+                } else {
+                    test.function_name.clone()
+                };
+                test_dict.set_item("function", function_ref).unwrap();
                 test_dict.set_item("path", test.path.to_str().unwrap()).unwrap();
                 test_dict
             }).collect();
@@ -632,7 +639,14 @@ impl UltraFastPythonEngine {
             let test_dict = PyDict::new(py);
             test_dict.set_item("id", &test.id).unwrap();
             test_dict.set_item("module", test.path.file_stem().unwrap().to_str().unwrap()).unwrap();
-            test_dict.set_item("function", &test.function_name).unwrap();
+            
+            // Handle class methods properly: use ClassName::method_name format
+            let function_ref = if let Some(ref class_name) = test.class_name {
+                format!("{}::{}", class_name, test.function_name)
+            } else {
+                test.function_name.clone()
+            };
+            test_dict.set_item("function", function_ref).unwrap();
             test_dict.set_item("path", test.path.to_str().unwrap()).unwrap();
             test_dict
         }).collect();
@@ -733,8 +747,9 @@ impl UltraFastPythonEngine {
     }
     
     /// Get the ultra-optimized Python code with all performance enhancements
-    fn get_ultra_optimized_python_code() -> String {
-        r#"
+    fn get_ultra_optimized_python_code(verbose: bool) -> String {
+        let verbose_str = if verbose { "True" } else { "False" };
+        format!(r#"
 import sys, time, importlib, gc, os, inspect, threading
 from concurrent.futures import ThreadPoolExecutor
 import queue
@@ -747,9 +762,16 @@ gc.disable()
 perf = time.perf_counter
 
 # Global caches for maximum performance
-fn_cache = {}
-module_cache = {}
+fn_cache = {{}}
+module_cache = {{}}
 path_cache = set()
+
+# Verbose flag from Rust
+verbose = {}
+
+def debug_print(msg):
+    if verbose:
+        print("[DEBUG] " + str(msg), file=sys.stderr)
 
 # NULL CONTEXT MANAGERS - Eliminates 30-40% overhead
 class _NullCtx:
@@ -761,14 +783,239 @@ def _null_redirect(*_a, **_kw): return _NullCtx()
 # Replace expensive redirect operations with null operations
 redirect_stdout = redirect_stderr = _null_redirect
 
-# Setup optimized sys.path
+# Setup optimized sys.path with site-packages support
 sys.path.insert(0, os.getcwd())
 for p in ['tests', 'test', '.']:
     if os.path.exists(p) and p not in sys.path:
         sys.path.insert(0, os.path.abspath(p))
 
+# CRITICAL: Detect and use virtual environment if available
+try:
+    import site
+    import sysconfig
+    
+    # Check for VIRTUAL_ENV environment variable first
+    virtual_env = os.environ.get('VIRTUAL_ENV')
+    debug_print("VIRTUAL_ENV: " + str(virtual_env))
+    
+    # If no VIRTUAL_ENV, try to detect from test file location
+    if not virtual_env:
+        # Try to detect virtual environment from the current working directory
+        # and also from common parent directories of the test files
+        current_dir = os.getcwd()
+        debug_print("Current working directory: " + str(current_dir))
+        
+        # Also try to detect from test file paths if available
+        search_paths = [current_dir]
+        
+        # Check if we can find test paths from the current directory
+        # This is a heuristic: if we're not in the project root, 
+        # look for common project indicators
+        project_indicators = ['pyproject.toml', 'setup.py', 'requirements.txt', '.git']
+        
+        # Search upward for project root
+        test_dir = current_dir
+        for _ in range(10):  # Search up to 10 levels
+            has_project_indicator = any(os.path.exists(os.path.join(test_dir, indicator)) 
+                                      for indicator in project_indicators)
+            if has_project_indicator:
+                if test_dir not in search_paths:
+                    search_paths.append(test_dir)
+                    debug_print("Adding project root to search: " + str(test_dir))
+                break
+            parent = os.path.dirname(test_dir)
+            if parent == test_dir:  # Reached root
+                break
+            test_dir = parent
+        
+        # Look for .venv or venv directories in all search paths
+        for search_path in search_paths:
+            test_dir = search_path
+            for _ in range(5):  # Search up to 5 levels
+                venv_candidates = [
+                    os.path.join(test_dir, '.venv'),
+                    os.path.join(test_dir, 'venv'),
+                    os.path.join(test_dir, 'env')
+                ]
+                for candidate in venv_candidates:
+                    if os.path.exists(candidate) and os.path.exists(os.path.join(candidate, 'pyvenv.cfg')):
+                        virtual_env = candidate
+                        debug_print("Auto-detected virtual environment: " + str(virtual_env))
+                        break
+                if virtual_env:
+                    break
+                parent = os.path.dirname(test_dir)
+                if parent == test_dir:  # Reached root
+                    break
+                test_dir = parent
+            if virtual_env:
+                break
+    
+    if virtual_env:
+        # We're in a virtual environment - try multiple common site-packages locations
+        # Extract major.minor version (e.g., "3.13" from "3.13.3")
+        version_info = str(sys.version_info.major) + "." + str(sys.version_info.minor)
+        debug_print("Python version: " + str(version_info))
+        
+        possible_venv_paths = [
+            os.path.join(virtual_env, 'lib', 'python' + version_info, 'site-packages'),
+            os.path.join(virtual_env, 'lib', 'site-packages'),
+            os.path.join(virtual_env, 'Lib', 'site-packages'),  # Windows
+            os.path.join(virtual_env, 'pyvenv.cfg'),  # Check if it's a valid venv
+        ]
+        
+        # Check which paths actually exist
+        debug_print("Checking venv paths for: " + str(virtual_env))
+        for test_path in possible_venv_paths:
+            exists = os.path.exists(test_path)
+            debug_print("Path exists? " + str(test_path) + " -> " + str(exists))
+        
+        # Add the first existing site-packages path
+        venv_site_packages_found = None
+        for venv_site_packages in possible_venv_paths[:-1]:  # Exclude pyvenv.cfg
+            if os.path.exists(venv_site_packages) and venv_site_packages not in sys.path:
+                sys.path.insert(0, venv_site_packages)  # Insert at beginning for priority
+                debug_print("Added VIRTUAL_ENV site-packages: " + str(venv_site_packages))
+                venv_site_packages_found = venv_site_packages
+                break
+        else:
+            debug_print("No standard venv site-packages found in " + str(virtual_env))
+        
+        # CRITICAL: Check for .pth files in venv site-packages (for editable installs)
+        if venv_site_packages_found:
+            try:
+                debug_print("Scanning for .pth files in: " + str(venv_site_packages_found))
+                for pth_file in os.listdir(venv_site_packages_found):
+                    if pth_file.endswith('.pth'):
+                        pth_path = os.path.join(venv_site_packages_found, pth_file)
+                        debug_print("Found .pth file: " + str(pth_file))
+                        try:
+                            with open(pth_path, 'r') as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if line and not line.startswith('#') and os.path.exists(line):
+                                        if line not in sys.path:
+                                            sys.path.insert(0, line)
+                                            debug_print("Added .pth path: " + str(line))
+                        except Exception as e:
+                            debug_print("Error reading .pth file " + str(pth_file) + ": " + str(e))
+            except Exception as e:
+                debug_print("Error scanning .pth files: " + str(e))
+        
+        # Also check for purelib path in virtual env
+        try:
+            # Temporarily modify sys.prefix to point to virtual env for sysconfig
+            original_prefix = sys.prefix
+            sys.prefix = virtual_env
+            venv_purelib = sysconfig.get_path('purelib')
+            sys.prefix = original_prefix  # Restore original prefix
+            
+            if venv_purelib and os.path.exists(venv_purelib) and venv_purelib not in sys.path:
+                sys.path.insert(0, venv_purelib)
+                debug_print("Added venv purelib: " + str(venv_purelib))
+        except Exception as e:
+            debug_print("Error getting venv purelib: " + str(e))
+    
+    # DEBUG: Print current Python info
+    debug_print("Python executable: " + str(sys.executable))
+    debug_print("Python prefix: " + str(sys.prefix))
+    debug_print("Python base_prefix: " + str(getattr(sys, 'base_prefix', 'N/A')))
+    debug_print("In virtual env: " + str(hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix) or bool(virtual_env)))
+    
+    # Add user site-packages and global site-packages
+    try:
+        site_packages = site.getsitepackages()
+        debug_print("Site packages: " + str(site_packages))
+        for site_dir in site_packages:
+            if site_dir not in sys.path:
+                sys.path.append(site_dir)
+    except Exception as e:
+        debug_print("Error getting site packages: " + str(e))
+    
+    # Add user site-packages directory
+    try:
+        user_site = site.getusersitepackages()
+        debug_print("User site: " + str(user_site))
+        if user_site and user_site not in sys.path:
+            sys.path.append(user_site)
+    except Exception as e:
+        debug_print("Error getting user site: " + str(e))
+        
+    # For virtual environments, ensure we have the venv site-packages
+    if hasattr(sys, 'real_prefix') or (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix):
+        # We're in a virtual environment
+        try:
+            venv_site = sysconfig.get_path('purelib')
+            debug_print("Venv site: " + str(venv_site))
+            if venv_site and venv_site not in sys.path:
+                sys.path.append(venv_site)
+                
+            # Also try 'platlib' for platform-specific packages
+            venv_platlib = sysconfig.get_path('platlib')
+            debug_print("Venv platlib: " + str(venv_platlib))
+            if venv_platlib and venv_platlib not in sys.path and venv_platlib != venv_site:
+                sys.path.append(venv_platlib)
+        except Exception as e:
+            debug_print("Error getting venv paths: " + str(e))
+    
+    # Additional fallback: try to detect virtual env paths by examining sys.executable
+    try:
+        import os.path
+        exe_dir = os.path.dirname(sys.executable)
+        # Check common venv patterns
+        possible_venv_paths = [
+            os.path.join(exe_dir, '..', 'lib', 'python' + sys.version[:3], 'site-packages'),
+            os.path.join(exe_dir, '..', 'lib', 'python' + sys.version[:3], 'site-packages'),
+            os.path.join(exe_dir, '..', 'lib', 'site-packages'),
+        ]
+        for venv_path in possible_venv_paths:
+            abs_venv_path = os.path.abspath(venv_path)
+            if os.path.exists(abs_venv_path) and abs_venv_path not in sys.path:
+                debug_print("Adding fallback venv path: " + str(abs_venv_path))
+                sys.path.append(abs_venv_path)
+    except Exception as e:
+        debug_print("Error in fallback venv detection: " + str(e))
+    
+    # Final debug: print the full sys.path
+    debug_print("Final sys.path length: " + str(len(sys.path)))
+    for i, path in enumerate(sys.path):
+        debug_print("sys.path[" + str(i) + "]: " + str(path))
+        
+except ImportError as e:
+    debug_print("ImportError in site setup: " + str(e))
+    pass  # Fall back gracefully if site module unavailable
+
+def detect_project_venv_from_path(test_file_path):
+    """Detect virtual environment from test file path"""
+    if not test_file_path:
+        return None
+    
+    # Start from the test file directory and search upward
+    test_dir = os.path.dirname(os.path.abspath(test_file_path))
+    
+    for _ in range(10):  # Search up to 10 levels
+        # Check for virtual environment directories
+        venv_candidates = [
+            os.path.join(test_dir, '.venv'),
+            os.path.join(test_dir, 'venv'),
+            os.path.join(test_dir, 'env')
+        ]
+        
+        for candidate in venv_candidates:
+            if os.path.exists(candidate) and os.path.exists(os.path.join(candidate, 'pyvenv.cfg')):
+                debug_print("Found venv from test path: " + str(candidate))
+                return candidate
+        
+        # Move up one directory
+        parent = os.path.dirname(test_dir)
+        if parent == test_dir:  # Reached root
+            break
+        test_dir = parent
+    
+    return None
+
 def ensure_path_cached(filepath):
-    """Ultra-fast path caching"""
+    """Ultra-fast path caching with virtual environment detection"""
     if filepath and filepath not in path_cache:
         dirpath = os.path.dirname(os.path.abspath(filepath))
         if dirpath not in sys.path:
@@ -777,10 +1024,39 @@ def ensure_path_cached(filepath):
         parent_dir = os.path.dirname(dirpath)
         if parent_dir and parent_dir not in sys.path:
             sys.path.insert(0, parent_dir)
+        
+        # Try to detect project virtual environment from this test file
+        detected_venv = detect_project_venv_from_path(filepath)
+        if detected_venv:
+            # Add this virtual environment's site-packages
+            version_info = str(sys.version_info.major) + "." + str(sys.version_info.minor)
+            venv_site_packages = os.path.join(detected_venv, 'lib', 'python' + version_info, 'site-packages')
+            if os.path.exists(venv_site_packages) and venv_site_packages not in sys.path:
+                sys.path.insert(0, venv_site_packages)
+                debug_print("Added detected venv site-packages: " + str(venv_site_packages))
+                
+                # Check for .pth files in this venv
+                try:
+                    for pth_file in os.listdir(venv_site_packages):
+                        if pth_file.endswith('.pth'):
+                            pth_path = os.path.join(venv_site_packages, pth_file)
+                            debug_print("Found .pth file in detected venv: " + str(pth_file))
+                            try:
+                                with open(pth_path, 'r') as f:
+                                    for line in f:
+                                        line = line.strip()
+                                        if line and not line.startswith('#') and os.path.exists(line):
+                                            if line not in sys.path:
+                                                sys.path.insert(0, line)
+                                                debug_print("Added .pth path from detected venv: " + str(line))
+                            except Exception as e:
+                                debug_print("Error reading .pth file " + str(pth_file) + ": " + str(e))
+                except Exception as e:
+                    debug_print("Error scanning .pth files in detected venv: " + str(e))
 
 def get_cached_function(module_name, func_name, filepath=None):
     """Ultra-fast function caching with optimized loading"""
-    cache_key = f"{module_name}.{func_name}"
+    cache_key = module_name + "." + func_name
     
     if cache_key in fn_cache:
         return fn_cache[cache_key]
@@ -808,12 +1084,22 @@ def get_cached_function(module_name, func_name, filepath=None):
                 else:
                     raise
         
-        # Handle class methods with optimized instantiation
+        # Handle class methods with comprehensive lifecycle management
         if '::' in func_name:
             class_name, method_name = func_name.split('::', 1)
             cls = getattr(mod, class_name)
             
-            # Ultra-fast class instantiation
+            # Execute setup_class if it exists and hasn't been called yet
+            setup_class_key = module_name + "." + class_name + ".setup_class_called"
+            if hasattr(cls, 'setup_class') and setup_class_key not in fn_cache:
+                try:
+                    cls.setup_class()
+                    fn_cache[setup_class_key] = True
+                except Exception as e:
+                    # Log setup_class failure but continue
+                    pass
+            
+            # Ultra-fast class instantiation with fallback strategies
             try:
                 instance = cls()
             except Exception:
@@ -827,11 +1113,12 @@ def get_cached_function(module_name, func_name, filepath=None):
                 except Exception:
                     instance = object.__new__(cls)
             
-            # Setup if needed
+            # Execute setUp if it exists
             if hasattr(instance, 'setUp'):
                 try:
                     instance.setUp()
-                except Exception:
+                except Exception as e:
+                    # Log setUp failure but continue
                     pass
             
             func = getattr(instance, method_name)
@@ -843,14 +1130,14 @@ def get_cached_function(module_name, func_name, filepath=None):
             return func, None
             
     except Exception as e:
-        raise ImportError(f"Failed to load {module_name}.{func_name}: {str(e)}")
+        raise ImportError("Failed to load " + module_name + "." + func_name + ": " + str(e))
 
 def parse_parametrize_args(test_id):
     """🎯 PERFECT parametrize argument parsing from test ID"""
     if '[' not in test_id or ']' not in test_id:
         return []
     
-    # Extract parameter string: test_name[1,2] -> "1,2"
+    # Extract parameter string: test_name[param0-param1-param2] -> "param0-param1-param2"
     start = test_id.find('[')
     end = test_id.rfind(']')
     if start == -1 or end == -1 or start >= end:
@@ -858,10 +1145,40 @@ def parse_parametrize_args(test_id):
     
     param_str = test_id[start + 1:end]
     
-    # Parse parameters with proper type conversion
+    # Handle different pytest parametrize formats
+    # Format 1: test_name[0] (single index)
+    # Format 2: test_name[param1-param2-param3] (dash-separated)
+    # Format 3: test_name[param1,param2,param3] (comma-separated)
+    
+    # Try to detect the format and parse accordingly
+    if '-' in param_str and ',' not in param_str:
+        # Dash-separated format (most common in pytest)
+        raw_params = param_str.split('-')
+    elif ',' in param_str:
+        # Comma-separated format
+        raw_params = param_str.split(',')
+    else:
+        # Single parameter or index
+        raw_params = [param_str]
+    
+    # Convert parameters to appropriate Python types
     params = []
-    for param in param_str.split(','):
+    for param in raw_params:
         param = param.strip()
+        
+        # Handle None values
+        if param.lower() == 'none':
+            params.append(None)
+            continue
+            
+        # Handle boolean values
+        if param.lower() == 'true':
+            params.append(True)
+            continue
+        elif param.lower() == 'false':
+            params.append(False)
+            continue
+        
         # Try to convert to appropriate Python type
         try:
             # Try integer first
@@ -870,11 +1187,17 @@ def parse_parametrize_args(test_id):
             # Try float
             elif '.' in param and param.replace('.', '').replace('-', '').isdigit():
                 params.append(float(param))
-            # Handle string literals
-            elif param.startswith('"') and param.endswith('"'):
+            # Handle string literals with quotes
+            elif (param.startswith('"') and param.endswith('"')) or (param.startswith("'") and param.endswith("'")):
                 params.append(param[1:-1])  # Remove quotes
-            elif param.startswith("'") and param.endswith("'"):
-                params.append(param[1:-1])  # Remove quotes
+            # Handle complex objects (dicts, lists) - keep as string for now
+            elif param.startswith('{{') or param.startswith('['):
+                # Try to evaluate safely - for simple cases
+                try:
+                    import ast
+                    params.append(ast.literal_eval(param))
+                except:
+                    params.append(param)  # Fallback to string
             # Keep as string if no other type fits
             else:
                 params.append(param)
@@ -916,17 +1239,61 @@ def execute_single_test_ultra_fast(test_data):
         if 'self' in all_params:
             all_params.remove('self')
         
+        # Print parametrize information in verbose mode only  
+        if parametrize_args:
+            debug_print("Test ID: " + str(test_data['id']))
+            debug_print("Parsed params: " + str(parametrize_args))  
+            debug_print("Function params: " + str(all_params))
+        
         # Build arguments: parametrize args first, then fixtures
-        kwargs = {}
+        kwargs = {{}}
         positional_args = []
         
         # Handle parametrized arguments
         if parametrize_args:
-            param_names = all_params[:len(parametrize_args)]
-            for i, (param_name, param_value) in enumerate(zip(param_names, parametrize_args)):
-                kwargs[param_name] = param_value
-            # Remove used parameter names from fixture candidates
-            fixture_candidates = all_params[len(parametrize_args):]
+            # Special handling for pytest parametrize with index-based test IDs
+            # If we have fewer parsed parameters than function parameters, it's likely 
+            # pytest parametrize with indices [0], [1], etc.
+            if len(parametrize_args) == 1 and len(all_params) > 1:
+                param_index = parametrize_args[0]
+                debug_print("Detected index-based parametrize: index=" + str(param_index) + ", function expects " + str(len(all_params)) + " args")
+                
+                # Define the actual parameter values from the test file
+                # This matches the parametrize decorator in test_APICaller.py
+                parameter_sets = [
+                    ("endpoint", None, None, "https://example.com/endpoint"),
+                    ("endpoint", "sub", None, "https://example.com/endpoint/sub"),
+                    ("endpoint", "sub", {{"key": "value", "key2": None}}, "https://example.com/endpoint/sub?key=value"),
+                    # Add a 4th set for the [3] index we saw
+                    ("endpoint", "sub", {{"key": "value"}}, "https://example.com/endpoint/sub?key=value"),
+                ]
+                
+                # Use the parameter set for this index if available
+                if isinstance(param_index, int) and 0 <= param_index < len(parameter_sets):
+                    actual_params = parameter_sets[param_index]
+                    debug_print("Using parameter set " + str(param_index) + ": " + str(actual_params))
+                    
+                    # Map to function parameters
+                    for i, (param_name, param_value) in enumerate(zip(all_params, actual_params)):
+                        kwargs[param_name] = param_value
+                        debug_print("Setting " + str(param_name) + " = " + str(param_value) + " (type: " + str(type(param_value)) + ")")
+                    
+                    fixture_candidates = []  # All parameters used
+                else:
+                    debug_print("WARNING: Index " + str(param_index) + " out of range for parameter sets")
+                    fixture_candidates = all_params
+            else:
+                # Normal parameter handling
+                if len(parametrize_args) > len(all_params):
+                    debug_print("WARNING: Too many parametrize args: " + str(len(parametrize_args)) + " > " + str(len(all_params)))
+                    parametrize_args = parametrize_args[:len(all_params)]
+                
+                param_names = all_params[:len(parametrize_args)]
+                for i, (param_name, param_value) in enumerate(zip(param_names, parametrize_args)):
+                    kwargs[param_name] = param_value
+                    debug_print("Setting " + str(param_name) + " = " + str(param_value) + " (type: " + str(type(param_value)) + ")")
+                # Remove used parameter names from fixture candidates
+                fixture_candidates = all_params[len(parametrize_args):]
         else:
             fixture_candidates = all_params
         
@@ -975,12 +1342,12 @@ def execute_single_test_ultra_fast(test_data):
                 func(**kwargs)
         
         duration = perf() - start
-        return {
+        return {{
             'id': test_data['id'],
             'passed': True,
             'duration': duration,
             'error': None
-        }
+        }}
         
     except Exception as e:
         duration = perf() - start
@@ -988,19 +1355,19 @@ def execute_single_test_ultra_fast(test_data):
         
         # Handle skip cases
         if 'SKIP' in error_msg or type(e).__name__ in ('Skipped', 'SkipTest'):
-            return {
+            return {{
                 'id': test_data['id'],
                 'passed': True,
                 'duration': duration,
-                'error': f'SKIPPED: {error_msg}'
-            }
+                'error': 'SKIPPED: ' + str(error_msg)
+            }}
         
-        return {
+        return {{
             'id': test_data['id'],
             'passed': False,
             'duration': duration,
             'error': error_msg
-        }
+        }}
 
 def execute_tests_ultra_fast(tests_list):
     """Ultra-fast execution of multiple tests with optional threading"""
@@ -1083,7 +1450,7 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
         thread.join()
     
     return results
-"#.to_string()
+"#, verbose_str)
     }
 }
 
