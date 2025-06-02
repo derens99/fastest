@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::Semaphore;
 use tracing::{debug, trace};
 
@@ -28,6 +28,424 @@ use fastest_core::TestItem;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule, PyList};
 // Removed pyo3-serde dependency - using manual conversion
+
+/// Class instance for shared class instances and lifecycle management
+#[derive(Debug, Clone)]
+struct ClassInstance {
+    /// Python class instance object
+    instance: PyObject,
+    /// Class name for identification
+    class_name: String,
+    /// Reference count for lifecycle management
+    ref_count: usize,
+    /// Setup/teardown state tracking
+    lifecycle_state: ClassLifecycleState,
+    /// Creation timestamp for cleanup
+    created_at: std::time::SystemTime,
+    /// Performance metrics
+    setup_time: Option<std::time::Duration>,
+    teardown_time: Option<std::time::Duration>,
+}
+
+/// Tracks the lifecycle state of class instances
+#[derive(Debug, Clone, PartialEq)]
+enum ClassLifecycleState {
+    /// Instance created but setup_class not called
+    Created,
+    /// setup_class completed successfully
+    SetupComplete,
+    /// teardown_class in progress
+    TeardownInProgress,
+    /// teardown_class completed, instance should be removed
+    TeardownComplete,
+    /// Error state - should be cleaned up
+    Error(String),
+}
+
+/// Class instance manager for shared class instances and lifecycle management
+#[derive(Debug)]
+struct ClassInstanceManager {
+    /// Shared class instances by class name and scope ID
+    class_instances: Arc<DashMap<String, ClassInstance>>,
+    /// Class-level setup/teardown tracking
+    class_lifecycle: Arc<DashMap<String, ClassLifecycleState>>,
+    /// @classmethod fixture cache
+    classmethod_fixtures: Arc<DashMap<String, PyObject>>,
+    /// Class instantiation strategies
+    instantiation_strategies: Vec<ClassInstantiationStrategy>,
+    /// Performance metrics for class operations
+    performance_metrics: Arc<Mutex<ClassPerformanceMetrics>>,
+}
+
+/// Different strategies for class instantiation
+#[derive(Debug, Clone)]
+enum ClassInstantiationStrategy {
+    /// Standard constructor call
+    Standard,
+    /// No-argument constructor
+    NoArgs,
+    /// Object.__new__ for complex cases
+    ObjectNew,
+    /// Custom instantiation with inspect
+    InspectBased,
+}
+
+/// Performance metrics for class-based fixtures
+#[derive(Debug, Default, Clone)]
+struct ClassPerformanceMetrics {
+    classes_instantiated: u64,
+    setup_class_calls: u64,
+    teardown_class_calls: u64,
+    classmethod_fixtures_created: u64,
+    classmethod_cache_hits: u64,
+    total_class_setup_time: std::time::Duration,
+    total_class_teardown_time: std::time::Duration,
+    instantiation_failures: u64,
+    lifecycle_errors: u64,
+}
+
+/// Enhanced fixture value with class-specific metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedFixtureValue {
+    pub base: FixtureValue,
+    /// For class-scoped fixtures: class name
+    pub class_name: Option<String>,
+    /// For @classmethod fixtures
+    pub is_classmethod: bool,
+    /// Class instance reference if applicable
+    #[serde(skip)]
+    pub class_instance_ref: Option<String>,
+}
+
+impl ClassInstanceManager {
+    fn new() -> Self {
+        Self {
+            class_instances: Arc::new(DashMap::new()),
+            class_lifecycle: Arc::new(DashMap::new()),
+            classmethod_fixtures: Arc::new(DashMap::new()),
+            instantiation_strategies: vec![
+                ClassInstantiationStrategy::Standard,
+                ClassInstantiationStrategy::NoArgs,
+                ClassInstantiationStrategy::ObjectNew,
+                ClassInstantiationStrategy::InspectBased,
+            ],
+            performance_metrics: Arc::new(Mutex::new(ClassPerformanceMetrics::default())),
+        }
+    }
+    
+    /// Get or create a class instance with smart instantiation
+    fn get_or_create_class_instance(
+        &self,
+        py: Python,
+        class_name: &str,
+        module_obj: &PyObject,
+    ) -> PyResult<ClassInstance> {
+        let start_time = std::time::Instant::now();
+        
+        // Check if instance already exists
+        if let Some(existing) = self.class_instances.get(class_name) {
+            let mut instance = existing.clone();
+            instance.ref_count += 1;
+            self.class_instances.insert(class_name.to_string(), instance.clone());
+            return Ok(instance);
+        }
+        
+        // Create new instance using smart instantiation strategies
+        let module: &PyModule = module_obj.downcast(py)?;
+        let class_obj = module.getattr(class_name)?;
+        
+        let instance_obj = self.create_instance_with_strategies(py, &class_obj, class_name)?;
+        
+        let setup_time = start_time.elapsed();
+        
+        let class_instance = ClassInstance {
+            instance: instance_obj.into(),
+            class_name: class_name.to_string(),
+            ref_count: 1,
+            lifecycle_state: ClassLifecycleState::Created,
+            created_at: std::time::SystemTime::now(),
+            setup_time: Some(setup_time),
+            teardown_time: None,
+        };
+        
+        // Execute setup_class if available
+        self.execute_setup_class(py, &class_instance)?;
+        
+        // Update performance metrics
+        if let Ok(mut metrics) = self.performance_metrics.lock() {
+            metrics.classes_instantiated += 1;
+            metrics.total_class_setup_time += setup_time;
+        }
+        
+        self.class_instances.insert(class_name.to_string(), class_instance.clone());
+        Ok(class_instance)
+    }
+    
+    /// Smart class instantiation with multiple fallback strategies
+    fn create_instance_with_strategies<'py>(
+        &self,
+        py: Python<'py>,
+        class_obj: &'py PyAny,
+        class_name: &str,
+    ) -> PyResult<&'py PyAny> {
+        for strategy in &self.instantiation_strategies {
+            match self.try_instantiation_strategy(py, class_obj, strategy) {
+                Ok(instance) => {
+                    trace!("Successfully instantiated {} using strategy {:?}", class_name, strategy);
+                    return Ok(instance);
+                },
+                Err(e) => {
+                    trace!("Instantiation strategy {:?} failed for {}: {}", strategy, class_name, e);
+                    continue;
+                }
+            }
+        }
+        
+        // Update error metrics
+        if let Ok(mut metrics) = self.performance_metrics.lock() {
+            metrics.instantiation_failures += 1;
+        }
+        
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+            format!("Failed to instantiate class {} with all strategies", class_name)
+        ))
+    }
+    
+    /// Try a specific instantiation strategy
+    fn try_instantiation_strategy<'py>(
+        &self,
+        py: Python<'py>,
+        class_obj: &'py PyAny,
+        strategy: &ClassInstantiationStrategy,
+    ) -> PyResult<&'py PyAny> {
+        match strategy {
+            ClassInstantiationStrategy::Standard => {
+                class_obj.call0()
+            },
+            ClassInstantiationStrategy::NoArgs => {
+                class_obj.call((), None)
+            },
+            ClassInstantiationStrategy::ObjectNew => {
+                let object_class = py.get_type::<pyo3::types::PyType>();
+                let new_method = object_class.getattr("__new__")?;
+                new_method.call1((class_obj,))
+            },
+            ClassInstantiationStrategy::InspectBased => {
+                // Use inspect to determine the best instantiation approach
+                let inspect_module = PyModule::import(py, "inspect")?;
+                let signature_fn = inspect_module.getattr("signature")?;
+                let init_method = class_obj.getattr("__init__")?;
+                
+                match signature_fn.call1((init_method,)) {
+                    Ok(sig) => {
+                        let parameters = sig.getattr("parameters")?;
+                        let param_count: usize = parameters.call_method0("__len__")?.extract()?;
+                        
+                        if param_count <= 1 { // Only 'self' parameter
+                            class_obj.call0()
+                        } else {
+                            // Try with minimal default arguments
+                            class_obj.call((), None)
+                        }
+                    },
+                    Err(_) => {
+                        // Fallback to no-args if signature inspection fails
+                        class_obj.call0()
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Execute setup_class method if available
+    fn execute_setup_class(&self, py: Python, class_instance: &ClassInstance) -> PyResult<()> {
+        let start_time = std::time::Instant::now();
+        
+        let instance_obj = class_instance.instance.as_ref(py);
+        
+        // Check for setup_class method
+        if instance_obj.hasattr("setup_class")? {
+            let setup_method = instance_obj.getattr("setup_class")?;
+            match setup_method.call0() {
+                Ok(_) => {
+                    let setup_time = start_time.elapsed();
+                    
+                    // Update lifecycle state
+                    self.class_lifecycle.insert(
+                        class_instance.class_name.clone(), 
+                        ClassLifecycleState::SetupComplete
+                    );
+                    
+                    // Update metrics
+                    if let Ok(mut metrics) = self.performance_metrics.lock() {
+                        metrics.setup_class_calls += 1;
+                        metrics.total_class_setup_time += setup_time;
+                    }
+                    
+                    trace!("setup_class completed for {} in {:?}", 
+                           class_instance.class_name, setup_time);
+                },
+                Err(e) => {
+                    let error_msg = format!("setup_class failed for {}: {}", 
+                                           class_instance.class_name, e);
+                    
+                    self.class_lifecycle.insert(
+                        class_instance.class_name.clone(), 
+                        ClassLifecycleState::Error(error_msg.clone())
+                    );
+                    
+                    if let Ok(mut metrics) = self.performance_metrics.lock() {
+                        metrics.lifecycle_errors += 1;
+                    }
+                    
+                    return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(error_msg));
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Execute teardown_class method if available
+    fn execute_teardown_class(&self, py: Python, class_name: &str) -> PyResult<()> {
+        let start_time = std::time::Instant::now();
+        
+        if let Some(class_instance) = self.class_instances.get(class_name) {
+            // Mark as teardown in progress
+            self.class_lifecycle.insert(
+                class_name.to_string(), 
+                ClassLifecycleState::TeardownInProgress
+            );
+            
+            let instance_obj = class_instance.instance.as_ref(py);
+            
+            // Check for teardown_class method
+            if instance_obj.hasattr("teardown_class")? {
+                let teardown_method = instance_obj.getattr("teardown_class")?;
+                match teardown_method.call0() {
+                    Ok(_) => {
+                        let teardown_time = start_time.elapsed();
+                        
+                        // Mark teardown complete
+                        self.class_lifecycle.insert(
+                            class_name.to_string(), 
+                            ClassLifecycleState::TeardownComplete
+                        );
+                        
+                        // Update metrics
+                        if let Ok(mut metrics) = self.performance_metrics.lock() {
+                            metrics.teardown_class_calls += 1;
+                            metrics.total_class_teardown_time += teardown_time;
+                        }
+                        
+                        trace!("teardown_class completed for {} in {:?}", class_name, teardown_time);
+                    },
+                    Err(e) => {
+                        let error_msg = format!("teardown_class failed for {}: {}", class_name, e);
+                        
+                        self.class_lifecycle.insert(
+                            class_name.to_string(), 
+                            ClassLifecycleState::Error(error_msg.clone())
+                        );
+                        
+                        if let Ok(mut metrics) = self.performance_metrics.lock() {
+                            metrics.lifecycle_errors += 1;
+                        }
+                        
+                        eprintln!("Warning: {}", error_msg);
+                    }
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Get or create a @classmethod fixture
+    fn get_or_create_classmethod_fixture(
+        &self,
+        py: Python,
+        fixture_name: &str,
+        class_name: &str,
+        fixture_fn: &PyAny,
+    ) -> PyResult<PyObject> {
+        let cache_key = format!("{}::{}", class_name, fixture_name);
+        
+        // Check cache first
+        if let Some(cached_value) = self.classmethod_fixtures.get(&cache_key) {
+            if let Ok(mut metrics) = self.performance_metrics.lock() {
+                metrics.classmethod_cache_hits += 1;
+            }
+            return Ok(cached_value.clone());
+        }
+        
+        // Execute @classmethod fixture
+        let class_instance = self.class_instances.get(class_name)
+            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
+                format!("Class instance not found for {}", class_name)
+            ))?;
+        
+        let class_obj = class_instance.instance.as_ref(py).get_type();
+        let result = fixture_fn.call1((class_obj,))?;
+        
+        // Cache the result
+        let result_obj: PyObject = result.into();
+        self.classmethod_fixtures.insert(cache_key, result_obj.clone());
+        
+        // Update metrics
+        if let Ok(mut metrics) = self.performance_metrics.lock() {
+            metrics.classmethod_fixtures_created += 1;
+        }
+        
+        Ok(result_obj)
+    }
+    
+    /// Cleanup class instances and related resources
+    fn cleanup_class_instances(&self, py: Python, class_scope_id: &str) -> Result<()> {
+        let instances_to_cleanup: Vec<String> = self.class_instances
+            .iter()
+            .filter(|entry| {
+                let class_name = entry.key();
+                // Clean up if it matches the scope or if ref_count is 0
+                class_name == class_scope_id || entry.value().ref_count == 0
+            })
+            .map(|entry| entry.key().clone())
+            .collect();
+        
+        for class_name in instances_to_cleanup {
+            if let Err(e) = self.execute_teardown_class(py, &class_name) {
+                eprintln!("Warning: Failed to execute teardown_class for {}: {}", class_name, e);
+            }
+            
+            // Remove from caches
+            self.class_instances.remove(&class_name);
+            self.class_lifecycle.remove(&class_name);
+            
+            // Remove related @classmethod fixtures
+            let classmethod_keys: Vec<String> = self.classmethod_fixtures
+                .iter()
+                .filter(|entry| entry.key().starts_with(&format!("{}::", class_name)))
+                .map(|entry| entry.key().clone())
+                .collect();
+            
+            for key in classmethod_keys {
+                self.classmethod_fixtures.remove(&key);
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Get performance metrics for monitoring
+    fn get_performance_metrics(&self) -> ClassPerformanceMetrics {
+        self.performance_metrics.lock()
+            .map(|guard| guard.clone())
+            .unwrap_or_else(|_| {
+                // If lock is poisoned, return default metrics
+                ClassPerformanceMetrics::default()
+            })
+    }
+}
 
 /// Represents a fixture value that can be cached
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -639,6 +1057,10 @@ pub struct FixtureExecutor {
     performance_tracker: Arc<std::sync::Mutex<PerformanceTracker>>,
     /// Generator teardown stack for PyO3 yield fixtures
     generator_teardown_stack: Arc<DashMap<String, Vec<(FixtureCacheKey, PyObject)>>>,
+    /// Class instance manager for comprehensive class-based fixture support
+    class_manager: Arc<ClassInstanceManager>,
+    /// Enhanced fixture cache for class-aware fixtures
+    enhanced_cache: Arc<DashMap<FixtureCacheKey, EnhancedFixtureValue>>,
 }
 
 impl FixtureExecutor {
@@ -669,6 +1091,8 @@ impl FixtureExecutor {
             python_runtime: Arc::new(std::sync::Mutex::new(python_runtime)),
             performance_tracker: Arc::new(std::sync::Mutex::new(PerformanceTracker::new())),
             generator_teardown_stack: Arc::new(DashMap::new()),
+            class_manager: Arc::new(ClassInstanceManager::new()),
+            enhanced_cache: Arc::new(DashMap::with_capacity(1000)),
         }
     }
 
@@ -743,7 +1167,7 @@ impl FixtureExecutor {
         Ok(fixture_values)
     }
 
-    /// Create batches of fixtures that can be executed in parallel
+    /// Create batches of fixtures that can be executed in parallel (enhanced with class awareness)
     fn create_fixture_batches(&self, required_fixtures: &[String]) -> Result<Vec<FixtureBatch>> {
         let ordered_fixtures = self
             .dependency_resolver
@@ -755,69 +1179,122 @@ impl FixtureExecutor {
 
         let mut fixture_levels: HashMap<String, usize> = HashMap::new();
         let mut max_level = 0;
+        let mut class_fixture_groups: HashMap<String, Vec<String>> = HashMap::new(); // class_name -> fixtures
 
+        // First pass: Group class-scoped fixtures by class and compute basic levels
         for fixture_name in &ordered_fixtures {
-            let deps = self
+            let fixture_info = self
                 .dependency_resolver
                 .fixture_registry
-                .get(fixture_name)
+                .get(fixture_name);
+                
+            let deps = fixture_info
                 .map(|f| f.dependencies.clone())
                 .unwrap_or_else(Vec::new);
 
             let mut current_level = 0;
             for dep_name in &deps {
-                // Dependencies must be in ordered_fixtures before the current fixture_name
-                // and thus should already have their levels computed.
                 if let Some(dep_level) = fixture_levels.get(dep_name) {
                     current_level = current_level.max(dep_level + 1);
-                } else {
-                    // This case should ideally not happen if ordered_fixtures is truly toposorted
-                    // and all dependencies are registered.
-                    // If it does, it might indicate an issue in resolve_dependencies or fixture registration.
-                    // For robustness, we could assign level 0 or return an error.
-                    // For now, let's assume valid toposorted input and dependencies are found.
-                    // If a dependency is not in fixture_levels, it means it's not in required_fixtures
-                    // or its transitive dependencies, which is an odd state but we'll assign it level 0 if forced.
-                    // However, a fixture in ordered_fixtures should have its deps processed if they were also in ordered_fixtures.
-                    // This implies the dep was NOT in ordered_fixtures, which is fine for batching this specific fixture.
-                    // The critical part is that all *required* dependencies for *this* fixture (which are in ordered_fixtures)
-                    // have their levels set.
                 }
             }
+            
+            // Handle class-scoped fixtures specially
+            if let Some(fixture) = fixture_info {
+                if fixture.scope == FixtureScope::Class {
+                    // Extract class name from fixture path or use a default grouping
+                    let class_key = self.extract_class_key_from_fixture(fixture);
+                    class_fixture_groups.entry(class_key)
+                        .or_insert_with(Vec::new)
+                        .push(fixture_name.clone());
+                    
+                    // Class fixtures should be at higher priority to ensure proper setup
+                    current_level += 10; // Ensure class fixtures are prioritized
+                }
+            }
+            
             fixture_levels.insert(fixture_name.clone(), current_level);
             max_level = max_level.max(current_level);
         }
 
+        // Second pass: Organize fixtures into batches with class awareness
         let mut level_to_fixtures: Vec<Vec<String>> = vec![Vec::new(); max_level + 1];
+        
+        // Process class fixture groups first to ensure proper batching
+        for (_class_key, class_fixtures) in class_fixture_groups {
+            if class_fixtures.len() > 1 {
+                // Multiple fixtures for same class should be in same batch when possible
+                let min_level = class_fixtures.iter()
+                    .filter_map(|name| fixture_levels.get(name))
+                    .min()
+                    .copied()
+                    .unwrap_or(0);
+                
+                // Place all class fixtures at the minimum level to batch them together
+                for fixture_name in class_fixtures {
+                    if min_level < level_to_fixtures.len() {
+                        level_to_fixtures[min_level].push(fixture_name);
+                    }
+                }
+            }
+        }
+        
+        // Process remaining fixtures
         for fixture_name in ordered_fixtures {
             if let Some(level) = fixture_levels.get(&fixture_name) {
-                level_to_fixtures[*level].push(fixture_name.clone());
-            } 
-            // Else: fixture was in ordered_fixtures but somehow not in fixture_levels. Should not happen.
+                // Check if this fixture was already added as part of a class group
+                let already_added = level_to_fixtures.iter()
+                    .any(|level_fixtures| level_fixtures.contains(&fixture_name));
+                
+                if !already_added && *level < level_to_fixtures.len() {
+                    level_to_fixtures[*level].push(fixture_name.clone());
+                }
+            }
         }
 
         let batches: Vec<FixtureBatch> = level_to_fixtures
             .into_iter()
             .filter(|fixtures_in_level| !fixtures_in_level.is_empty())
-            .enumerate() // Use enumerate to get the actual level for the FixtureBatch struct
+            .enumerate()
             .map(|(level, fixtures)| FixtureBatch {
                 fixtures,
-                level, // This is the actual dependency level
+                level,
             })
             .collect();
 
-        // Log batch information for debugging
+        // Enhanced logging with class awareness
         if !batches.is_empty() {
             debug!(
-                "Created {} fixture batches for parallel execution",
+                "Created {} fixture batches for parallel execution (class-aware)",
                 batches.len()
             );
             for (i, batch) in batches.iter().enumerate() {
-                trace!("  Batch {}: {} fixtures", i, batch.fixtures.len());
+                let class_fixtures: Vec<&String> = batch.fixtures.iter()
+                    .filter(|name| {
+                        self.dependency_resolver.fixture_registry.get(*name)
+                            .map_or(false, |f| f.scope == FixtureScope::Class)
+                    })
+                    .collect();
+                    
+                trace!("  Batch {}: {} fixtures ({} class-scoped)", 
+                       i, batch.fixtures.len(), class_fixtures.len());
             }
         }
 
         Ok(batches)
+    }
+    
+    /// Extract a class key from fixture for grouping class-scoped fixtures
+    fn extract_class_key_from_fixture(&self, fixture: &Fixture) -> String {
+        // Try to extract class name from fixture path or name
+        if let Some(file_name) = fixture.func_path.file_name() {
+            if let Some(name_str) = file_name.to_str() {
+                return format!("{}:{}", name_str, fixture.scope.clone() as u8);
+            }
+        }
+        
+        // Fallback to fixture name for grouping
+        format!("class_scope:{}", fixture.name)
     }
 
     /// Execute a batch of fixtures in parallel where possible
@@ -849,7 +1326,7 @@ impl FixtureExecutor {
         results.map(|vec| vec.into_iter().collect())
     }
 
-    /// Get or create a fixture value
+    /// Get or create a fixture value (enhanced with class management)
     fn get_or_create_fixture(&self, fixture_name: &str, test: &TestItem) -> Result<FixtureValue> {
         let fixture = self
             .dependency_resolver
@@ -859,20 +1336,36 @@ impl FixtureExecutor {
 
         let cache_key = FixtureCacheKey::for_test(fixture_name, test, fixture.scope.clone());
 
-        // Check cache first - DashMap allows concurrent reads
+        // Check enhanced cache first for class-aware fixtures
+        if let Some(enhanced_cached) = self.enhanced_cache.get(&cache_key) {
+            trace!("Enhanced cache hit for fixture: {} (class: {:?})", 
+                   fixture_name, enhanced_cached.class_name);
+            return Ok(enhanced_cached.base.clone());
+        }
+        
+        // Check regular cache for backward compatibility
         if let Some(cached_value) = self.cache.get(&cache_key) {
             trace!("Cache hit for fixture: {}", fixture_name);
             return Ok(cached_value.clone());
         }
 
-        // Create new fixture instance
-        let fixture_value = self.create_fixture_instance(fixture, test)?;
+        // Create new fixture instance with class awareness
+        let fixture_value = self.create_fixture_instance_enhanced(fixture, test)?;
 
-        // Cache if appropriate
+        // Cache based on scope with enhanced metadata
         if matches!(
             fixture.scope,
             FixtureScope::Class | FixtureScope::Module | FixtureScope::Session
         ) {
+            // Create enhanced fixture value for class-aware caching
+            let enhanced_value = EnhancedFixtureValue {
+                base: fixture_value.clone(),
+                class_name: test.class_name.clone(),
+                is_classmethod: self.is_classmethod_fixture(fixture_name),
+                class_instance_ref: test.class_name.clone(),
+            };
+            
+            self.enhanced_cache.insert(cache_key.clone(), enhanced_value);
             self.cache.insert(cache_key.clone(), fixture_value.clone());
 
             // Add to teardown stack if needed
@@ -886,6 +1379,218 @@ impl FixtureExecutor {
         }
 
         Ok(fixture_value)
+    }
+    
+    /// Enhanced fixture instance creation with class management
+    fn create_fixture_instance_enhanced(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
+        let _start_time = std::time::Instant::now();
+
+        // Handle class-scoped fixtures with special logic
+        if fixture.scope == FixtureScope::Class && test.class_name.is_some() {
+            return self.create_class_scoped_fixture(fixture, test);
+        }
+
+        // For non-class fixtures, use the original logic
+        self.create_fixture_instance(fixture, test)
+    }
+    
+    /// Create class-scoped fixture with proper class instance management
+    fn create_class_scoped_fixture(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
+        let start_time = std::time::Instant::now();
+        let class_name = test.class_name.as_ref()
+            .ok_or_else(|| anyhow!("Class name required for class-scoped fixture {}", fixture.name))?;
+
+        // Use PyO3 for class fixture execution when possible
+        let value = if self.can_use_pyo3_execution(fixture) {
+            self.execute_class_fixture_pyo3(fixture, test, class_name)?
+        } else {
+            // Fallback to subprocess execution
+            self.execute_class_fixture_subprocess(fixture, test, class_name)?
+        };
+
+        let duration = start_time.elapsed();
+        trace!("Created class-scoped fixture '{}' for class '{}' in {:?}", 
+               fixture.name, class_name, duration);
+
+        Ok(FixtureValue {
+            name: fixture.name.clone(),
+            value,
+            scope: fixture.scope.clone(),
+            teardown_code: self.extract_teardown_code(fixture)?,
+            created_at: std::time::SystemTime::now(),
+            last_accessed: std::time::SystemTime::now(),
+            access_count: 0,
+            msgpack_value: None,
+            generator_state: None,
+            execution_time: Some(duration),
+            memory_usage: None,
+            was_cached: false,
+        })
+    }
+    
+    /// Execute class-scoped fixture using PyO3 with class management
+    fn execute_class_fixture_pyo3(
+        &self,
+        fixture: &Fixture,
+        _test: &TestItem,
+        class_name: &str,
+    ) -> Result<serde_json::Value> {
+        Python::with_gil(|py| -> Result<serde_json::Value> {
+            let mut runtime = self.python_runtime.lock()
+                .map_err(|e| anyhow!("Failed to lock Python runtime: {}", e))?;
+
+            // Import the module containing the fixture
+            let module_obj = runtime.get_or_import_module(py, &fixture.func_path)
+                .map_err(|e| anyhow!("Failed to import module for class fixture '{}': {}", fixture.name, e))?;
+
+            // Get or create class instance
+            let class_instance = self.class_manager.get_or_create_class_instance(
+                py, class_name, &module_obj
+            ).map_err(|e| anyhow!("Failed to get class instance for {}: {}", class_name, e))?;
+
+            // Get the fixture function
+            let module: &PyModule = module_obj.downcast(py)
+                .map_err(|e| anyhow!("Module object is not a PyModule: {}", e))?;
+            let fixture_fn = module.getattr(&*fixture.name)
+                .map_err(|e| anyhow!("Class fixture '{}' not found in module: {}", fixture.name, e))?;
+
+            // Check if this is a @classmethod fixture
+            if self.is_classmethod_fixture(&fixture.name) {
+                let result_obj = self.class_manager.get_or_create_classmethod_fixture(
+                    py, &fixture.name, class_name, fixture_fn
+                ).map_err(|e| anyhow!("Failed to execute @classmethod fixture: {}", e))?;
+                
+                return runtime.python_to_json(py, &result_obj)
+                    .map_err(|e| anyhow!("Failed to convert @classmethod fixture result: {}", e));
+            }
+
+            // Regular class fixture - call with class instance
+            let kwargs = PyDict::new(py);
+            // Add 'self' parameter for instance methods
+            kwargs.set_item("self", class_instance.instance.as_ref(py))?;
+
+            let result = fixture_fn.call((), Some(kwargs))
+                .map_err(|e| anyhow!("Class fixture '{}' execution failed: {}", fixture.name, e))?;
+
+            runtime.python_to_json(py, &result.into())
+                .map_err(|e| anyhow!("Failed to convert class fixture result: {}", e))
+        })
+    }
+    
+    /// Execute class-scoped fixture using subprocess (fallback)
+    fn execute_class_fixture_subprocess(
+        &self,
+        fixture: &Fixture,
+        test: &TestItem,
+        class_name: &str,
+    ) -> Result<serde_json::Value> {
+        // Generate enhanced code for class fixtures
+        let execution_code = self.generate_class_fixture_execution_code(fixture, test, class_name)?;
+        
+        let mut command = std::process::Command::new("python");
+        command
+            .arg("-c")
+            .arg(&execution_code)
+            .env("FASTEST_CLASS_FIXTURE", "1")
+            .env("FASTEST_CLASS_NAME", class_name)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        
+        let output = command.output()
+            .map_err(|e| anyhow!("Failed to execute class fixture subprocess: {}", e))?;
+        
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(anyhow!(
+                "Class fixture '{}' execution failed: {}", 
+                fixture.name, stderr.trim()
+            ));
+        }
+        
+        self.parse_subprocess_output(&output.stdout, &fixture.name)
+    }
+    
+    /// Generate Python code for class fixture execution
+    fn generate_class_fixture_execution_code(
+        &self,
+        fixture: &Fixture,
+        _test: &TestItem,
+        class_name: &str,
+    ) -> Result<String> {
+        let mut code = String::with_capacity(2048);
+        
+        write!(
+            &mut code,
+            r#"
+import sys
+import json
+import os
+import inspect
+from pathlib import Path
+
+# Setup path for class fixture
+fixture_path = Path(r'{}')
+sys.path.insert(0, str(fixture_path.parent))
+
+# Import fixture module
+try:
+    module_name = fixture_path.stem
+    fixture_module = __import__(module_name)
+except ImportError as e:
+    print(json.dumps({{"error": f"Failed to import fixture module: {{e}}"}}))
+    sys.exit(1)
+
+# Get class and fixture function
+try:
+    test_class = getattr(fixture_module, '{}')
+    fixture_func = getattr(fixture_module, '{}')
+except AttributeError as e:
+    print(json.dumps({{"error": f"Failed to get class or fixture: {{e}}"}}))
+    sys.exit(1)
+
+# Handle class instantiation and setup
+try:
+    # Create class instance
+    class_instance = test_class()
+    
+    # Execute setup_class if available
+    if hasattr(class_instance, 'setup_class'):
+        class_instance.setup_class()
+    
+    # Execute the fixture
+    if inspect.ismethod(fixture_func) and hasattr(fixture_func, '__self__'):
+        # @classmethod fixture
+        result = fixture_func(test_class)
+    else:
+        # Instance method fixture
+        result = fixture_func(class_instance)
+    
+    print(json.dumps({{"value": result}}, default=str))
+    
+except Exception as e:
+    print(json.dumps({{"error": f"Class fixture execution failed: {{e}}"}}))
+    sys.exit(1)
+finally:
+    # Execute teardown_class if available
+    try:
+        if 'class_instance' in locals() and hasattr(class_instance, 'teardown_class'):
+            class_instance.teardown_class()
+    except Exception as e:
+        print(f"Warning: teardown_class failed: {{e}}", file=sys.stderr)
+"#,
+            fixture.func_path.display(),
+            class_name,
+            fixture.name
+        )?;
+        
+        Ok(code)
+    }
+    
+    /// Check if a fixture is a @classmethod fixture
+    fn is_classmethod_fixture(&self, fixture_name: &str) -> bool {
+        // This would ideally check the fixture metadata or decorators
+        // For now, use simple heuristics
+        fixture_name.contains("class") || fixture_name.ends_with("_cls")
     }
 
     /// Create a new fixture instance with optimized execution
@@ -1467,16 +2172,37 @@ except Exception as e:
         Ok(code)
     }
 
-    /// Comprehensive fixture cleanup with advanced teardown logic
+    /// Comprehensive fixture cleanup with advanced teardown logic (enhanced with class management)
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         let cleanup_start = std::time::Instant::now();
         
+        // Handle class-specific cleanup first
+        if scope == FixtureScope::Class {
+            Python::with_gil(|py| {
+                if let Err(e) = self.class_manager.cleanup_class_instances(py, scope_id) {
+                    eprintln!("Warning: Class instance cleanup failed for {}: {}", scope_id, e);
+                }
+            });
+        }
+        
         // Find fixtures to cleanup with proper ordering
         let mut keys_to_remove = Vec::new();
-        self.cache.iter().for_each(|entry| {
+        
+        // Check enhanced cache first
+        self.enhanced_cache.iter().for_each(|entry| {
             let key = entry.key();
             if key.scope == scope && (scope == FixtureScope::Session || key.scope_id == scope_id) {
                 keys_to_remove.push(key.clone());
+            }
+        });
+        
+        // Also check regular cache
+        self.cache.iter().for_each(|entry| {
+            let key = entry.key();
+            if key.scope == scope && (scope == FixtureScope::Session || key.scope_id == scope_id) {
+                if !keys_to_remove.contains(key) {
+                    keys_to_remove.push(key.clone());
+                }
             }
         });
 
@@ -1485,7 +2211,8 @@ except Exception as e:
             return Ok(());
         }
         
-        debug!("Cleaning up {} fixtures for scope {:?} with id '{}'", keys_to_remove.len(), scope, scope_id);
+        debug!("Cleaning up {} fixtures for scope {:?} with id '{}' (class-aware)", 
+               keys_to_remove.len(), scope, scope_id);
 
         // Execute PyO3 generator teardowns first (highest priority)
         self.execute_pyo3_generator_teardowns(scope_id)?;
@@ -1493,10 +2220,13 @@ except Exception as e:
         // Execute regular fixture teardowns
         self.execute_regular_fixture_teardowns(scope_id, &keys_to_remove)?;
         
-        // Remove fixtures from cache with performance tracking
+        // Remove fixtures from both caches with performance tracking
         let mut removed_count = 0;
         for key in &keys_to_remove {
             if self.cache.remove(key).is_some() {
+                removed_count += 1;
+            }
+            if self.enhanced_cache.remove(key).is_some() {
                 removed_count += 1;
             }
         }
@@ -1506,7 +2236,7 @@ except Exception as e:
         
         let cleanup_duration = cleanup_start.elapsed();
         debug!(
-            "Cleanup completed: removed {} fixtures in {:?} for scope {:?}", 
+            "Enhanced cleanup completed: removed {} fixtures in {:?} for scope {:?}", 
             removed_count, cleanup_duration, scope
         );
 
@@ -1906,7 +2636,7 @@ except Exception as e:
         debug!("Cache eviction completed: evicted {} entries", evicted_count);
     }
     
-    /// Get comprehensive performance metrics for monitoring and optimization
+    /// Get comprehensive performance metrics for monitoring and optimization (enhanced with class metrics)
     pub fn get_performance_metrics(&self) -> FixturePerformanceMetrics {
         let cache_stats = self.get_cache_stats();
         
@@ -1937,6 +2667,9 @@ except Exception as e:
             RuntimeStats::default()
         };
         
+        // Get class management metrics
+        let class_metrics = self.class_manager.get_performance_metrics();
+        
         FixturePerformanceMetrics {
             cache_stats,
             avg_pyo3_execution_time: avg_pyo3_time,
@@ -1948,6 +2681,16 @@ except Exception as e:
             python_execution_time: runtime_stats.total_execution_time,
             python_executions: runtime_stats.pyo3_executions,
             python_failures: runtime_stats.pyo3_failures,
+            // Add class metrics
+            classes_instantiated: class_metrics.classes_instantiated,
+            setup_class_calls: class_metrics.setup_class_calls,
+            teardown_class_calls: class_metrics.teardown_class_calls,
+            classmethod_fixtures_created: class_metrics.classmethod_fixtures_created,
+            classmethod_cache_hits: class_metrics.classmethod_cache_hits,
+            total_class_setup_time: class_metrics.total_class_setup_time,
+            total_class_teardown_time: class_metrics.total_class_teardown_time,
+            instantiation_failures: class_metrics.instantiation_failures,
+            lifecycle_errors: class_metrics.lifecycle_errors,
         }
     }
     
@@ -2044,7 +2787,7 @@ pub struct FixtureCacheStats {
     pub cache_hit_rate: f64,
 }
 
-/// Comprehensive performance metrics for fixture execution
+/// Comprehensive performance metrics for fixture execution (enhanced with class metrics)
 #[derive(Debug)]
 pub struct FixturePerformanceMetrics {
     pub cache_stats: FixtureCacheStats,
@@ -2057,6 +2800,16 @@ pub struct FixturePerformanceMetrics {
     pub python_execution_time: std::time::Duration,
     pub python_executions: u64,
     pub python_failures: u64,
+    // Enhanced class-based metrics
+    pub classes_instantiated: u64,
+    pub setup_class_calls: u64,
+    pub teardown_class_calls: u64,
+    pub classmethod_fixtures_created: u64,
+    pub classmethod_cache_hits: u64,
+    pub total_class_setup_time: std::time::Duration,
+    pub total_class_teardown_time: std::time::Duration,
+    pub instantiation_failures: u64,
+    pub lifecycle_errors: u64,
 }
 
 /// Health report for fixture execution system
