@@ -155,6 +155,7 @@ fn discover_tests_in_file_tree_sitter_cached(file_path: &Path, content: &str) ->
 }
 
 /// Replaces old rustpython-centric logic with tree-sitter fast path, falling back only on failure
+#[allow(dead_code)]
 fn discover_tests_in_file_optimized(file_path: &Path, content: &str) -> Result<Vec<TestItem>> {
     // Early exit: Quick scan for test patterns before expensive parsing
     if !has_potential_tests(content) {
@@ -196,11 +197,13 @@ fn discover_tests_in_file_optimized(file_path: &Path, content: &str) -> Result<V
 }
 
 /// Quick scan to check if file might contain tests before expensive parsing
+#[allow(dead_code)]
 fn has_potential_tests(content: &str) -> bool {
     POTENTIAL_TEST_MATCHER.is_match(content)
 }
 
 /// Optimized AST visitor with lazy line calculation
+#[allow(dead_code)]
 struct OptimizedTestDiscoveryVisitor {
     tests: Vec<TestItem>,
     file_path: PathBuf,
@@ -210,6 +213,7 @@ struct OptimizedTestDiscoveryVisitor {
 }
 
 #[derive(Clone)]
+#[allow(dead_code)]
 struct ClassContext {
     name: String,
     bases: Vec<String>,
@@ -508,6 +512,7 @@ static PYTEST_FILE_RE: Lazy<Regex> = Lazy::new(|| {
     Regex::new(r"(?i)^(test_.*|.*_test)\.py$").unwrap()
 });
 
+#[allow(dead_code)]
 static POTENTIAL_TEST_MATCHER: Lazy<AhoCorasick> = Lazy::new(|| {
     AhoCorasickBuilder::new()
         .ascii_case_insensitive(true)
@@ -520,9 +525,9 @@ static POTENTIAL_TEST_MATCHER: Lazy<AhoCorasick> = Lazy::new(|| {
         .unwrap()
 });
 
-/// 🚀 THREAD-LOCAL TREE-SITTER PARSER for zero allocation overhead
-/// Each thread maintains its own parser instance, eliminating creation overhead
 thread_local! {
+    /// 🚀 THREAD-LOCAL TREE-SITTER PARSER for zero allocation overhead
+    /// Each thread maintains its own parser instance, eliminating creation overhead
     static TREE_SITTER_PARSER: RefCell<Option<TsParser>> = RefCell::new(None);
 }
 
@@ -543,12 +548,14 @@ where
 }
 
 /// SIMD-accelerated pattern matching for ultra-fast test discovery
+#[allow(dead_code)]
 struct SIMDPatterns {
     automaton: AhoCorasick,
     pattern_stats: Arc<std::sync::Mutex<SIMDStats>>,
 }
 
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 struct SIMDStats {
     files_processed: usize,
     bytes_scanned: usize,
@@ -560,6 +567,7 @@ struct SIMDStats {
 }
 
 /// 🚀 Create REVOLUTIONARY optimized SIMD patterns with ultra-fast matching
+#[allow(dead_code)]
 fn create_simd_patterns() -> Result<SIMDPatterns> {
     // Revolutionary optimized patterns - reduced set for maximum performance
     let patterns = vec![
@@ -588,6 +596,7 @@ fn create_simd_patterns() -> Result<SIMDPatterns> {
 }
 
 /// 🚀 REVOLUTIONARY optimized SIMD pattern matcher using compile-time constants
+#[allow(dead_code)]
 static OPTIMIZED_PATTERNS: &[&[u8]] = &[
     b"def test_",       // Primary test function pattern
     b"async def test_", // Async test function pattern  
@@ -596,6 +605,7 @@ static OPTIMIZED_PATTERNS: &[&[u8]] = &[
 
 /// Ultra-fast pattern matching using optimized byte comparison
 #[inline(always)]
+#[allow(dead_code)]
 fn fast_pattern_match(line: &[u8]) -> Option<TestPatternType> {
     // Skip whitespace to find actual content start
     let mut start = 0;
@@ -627,6 +637,7 @@ fn fast_pattern_match(line: &[u8]) -> Option<TestPatternType> {
 
 /// Test pattern types for optimized processing
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[allow(dead_code)]
 enum TestPatternType {
     Function,
     AsyncFunction,
@@ -634,8 +645,9 @@ enum TestPatternType {
 }
 
 /// Hyper-optimized test file collection with work-stealing and NUMA awareness
+#[allow(dead_code)]
 fn collect_test_files_simd_optimized(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let start = Instant::now();
+    let _start = Instant::now();
     
     // Use work-stealing with NUMA-aware thread pools for maximum throughput
     let files: Vec<PathBuf> = paths
@@ -657,6 +669,7 @@ fn collect_test_files_simd_optimized(paths: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 /// Collect files from a single path with SIMD-optimized filtering
+#[allow(dead_code)]
 fn collect_files_from_path_simd(path: &PathBuf) -> Vec<PathBuf> {
     if path.is_file() {
         if is_python_test_file_simd_optimized(path) {
@@ -695,6 +708,7 @@ fn collect_files_from_path_simd(path: &PathBuf) -> Vec<PathBuf> {
 }
 
 /// 🚀 ULTRA-FAST test file detection with optimized pattern matching
+#[allow(dead_code)]
 fn is_python_test_file_simd_optimized(path: &Path) -> bool {
     // Early path component check to avoid expensive file_name() calls
     let path_str = path.as_os_str().to_string_lossy();
@@ -743,6 +757,7 @@ fn is_python_test_file_simd_optimized(path: &Path) -> bool {
 }
 
 /// SIMD-accelerated test discovery in a single file
+#[allow(dead_code)]
 fn discover_tests_in_file_simd_optimized(file_path: &Path, patterns: &SIMDPatterns) -> Result<Vec<TestItem>> {
     // Read file content safely - test files are typically small enough that memory mapping isn't necessary
     let file_content = std::fs::read(file_path)
@@ -894,6 +909,7 @@ fn helper_estimate_parametrize_cases_state_machine(decorator_bytes: &[u8]) -> us
 }
 
 /// Lightning-fast parametrize case estimation using pre-compiled regex patterns
+#[allow(dead_code)]
 fn helper_estimate_parametrize_cases_fast(decorator: &str) -> Option<usize> {
     // Pre-compiled regex patterns for common parametrize forms
     static SIMPLE_LIST_RE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
@@ -931,6 +947,7 @@ fn helper_estimate_parametrize_cases_fast(decorator: &str) -> Option<usize> {
 }
 
 /// Complex parametrize parsing for edge cases (original implementation)
+#[allow(dead_code)]
 fn helper_estimate_parametrize_cases_complex(decorator: &str) -> Option<usize> {
     // Find the parametrize list - handle multi-line decorators by normalizing whitespace
     if let Some(start_paren) = decorator.find("parametrize(") {
@@ -1030,6 +1047,7 @@ fn helper_estimate_parametrize_cases_complex(decorator: &str) -> Option<usize> {
 
 /// 🚀 ZERO-ALLOCATION LINE ITERATOR - Processes lines on-demand without heap allocations
 #[inline]
+#[allow(dead_code)]
 fn zero_alloc_lines(content: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {
     ZeroAllocLineIterator {
         content,
@@ -1039,6 +1057,7 @@ fn zero_alloc_lines(content: &[u8]) -> impl Iterator<Item = (usize, &[u8])> {
 }
 
 /// Ultra-fast zero-allocation line iterator
+#[allow(dead_code)]
 struct ZeroAllocLineIterator<'a> {
     content: &'a [u8],
     position: usize,
@@ -1088,6 +1107,7 @@ impl<'a> Iterator for ZeroAllocLineIterator<'a> {
 }
 
 /// SIMD-accelerated pattern matching on memory-mapped file content (ZERO ALLOCATION)
+#[allow(dead_code)]
 fn find_test_patterns_simd_vectorized(file_path: &Path, content: &[u8], patterns: &SIMDPatterns) -> Result<Vec<SIMDTestLocation>> {
     let mut test_locations = Vec::new();
     let mut current_class: Option<String> = None;
@@ -1140,6 +1160,7 @@ fn find_test_patterns_simd_vectorized(file_path: &Path, content: &[u8], patterns
 
 /// SIMD test location structure
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct SIMDTestLocation {
     file_path: PathBuf,
     line_number: usize,
@@ -1149,6 +1170,7 @@ struct SIMDTestLocation {
 }
 
 /// Extract class name from SIMD-matched line
+#[allow(dead_code)]
 fn extract_class_name_simd(line: &[u8], start_pos: usize) -> Option<String> {
     let after_class = &line[start_pos + 5..]; // Skip "class"
     
@@ -1170,6 +1192,7 @@ fn extract_class_name_simd(line: &[u8], start_pos: usize) -> Option<String> {
 }
 
 /// Extract test function name with pattern-specific offsets
+#[allow(dead_code)]
 fn extract_test_name_simd(line: &[u8], start_pos: usize, pattern_id: usize) -> Option<String> {
     let offset = match pattern_id {
         0 => 4,   // "def "
@@ -1206,6 +1229,7 @@ fn extract_test_name_simd(line: &[u8], start_pos: usize, pattern_id: usize) -> O
 }
 
 /// 🚀 REVOLUTIONARY UNIFIED TEST PROCESSOR - Single-pass processing with zero redundancy
+#[allow(dead_code)]
 struct UnifiedTestProcessor {
     /// Ultra-fast pattern matcher with optimized test detection
     pattern_matcher: AhoCorasick,
@@ -1218,12 +1242,14 @@ struct UnifiedTestProcessor {
 }
 
 /// Memory-efficient string interner
+#[allow(dead_code)]
 struct StringInterner {
     strings: Vec<String>,
     map: HashMap<String, u32>, // Using HashMap for speed
 }
 
 /// State machine for ultra-fast parametrize parsing
+#[allow(dead_code)]
 struct OptimizedParametrizeParser {
     // Pre-compiled patterns for common cases
     simple_patterns: Vec<&'static [u8]>,
@@ -1231,6 +1257,7 @@ struct OptimizedParametrizeParser {
 
 /// Comprehensive performance statistics
 #[derive(Debug, Default)]
+#[allow(dead_code)]
 struct UnifiedProcessorStats {
     files_processed: usize,
     bytes_scanned: usize,
@@ -1240,6 +1267,7 @@ struct UnifiedProcessorStats {
     memory_saved_bytes: usize,
 }
 
+#[allow(dead_code)]
 impl UnifiedTestProcessor {
     fn new() -> Result<Self> {
         // Build ultra-optimized pattern matcher with all test patterns
@@ -1394,12 +1422,14 @@ impl UnifiedTestProcessor {
 }
 
 /// Unified test data structure
+#[allow(dead_code)]
 struct UnifiedTestData {
     test_functions: Vec<UnifiedTestFunction>,
     decorator_map: HashMap<usize, Vec<String>>,
 }
 
 /// Compact test function representation
+#[allow(dead_code)]
 struct UnifiedTestFunction {
     name: String,
     line_number: usize,
@@ -1408,6 +1438,7 @@ struct UnifiedTestFunction {
     decorators: Vec<String>,
 }
 
+#[allow(dead_code)]
 impl StringInterner {
     fn new() -> Self {
         Self {
@@ -1428,6 +1459,7 @@ impl StringInterner {
     }
 }
 
+#[allow(dead_code)]
 impl OptimizedParametrizeParser {
     fn new() -> Self {
         Self {
@@ -1507,6 +1539,7 @@ enum ParametrizeParseState {
 }
 
 /// Fast class name extraction
+#[allow(dead_code)]
 fn extract_class_name_fast(line: &str) -> Option<String> {
     if let Some(start) = line.find("class ") {
         let after_class = &line[start + 6..];
@@ -1521,6 +1554,7 @@ fn extract_class_name_fast(line: &str) -> Option<String> {
 }
 
 /// Fast test function name extraction
+#[allow(dead_code)]
 fn extract_test_function_name_fast(line: &str) -> Option<String> {
     // Check for async def test_ or def test_
     let def_pos = if line.trim_start().starts_with("async def ") {
@@ -1550,6 +1584,7 @@ fn extract_test_function_name_fast(line: &str) -> Option<String> {
 }
 
 /// Convert SIMD locations to TestItem structs with full parametrize expansion (LEGACY FALLBACK)
+#[allow(dead_code)]
 fn convert_simd_locations_to_test_items(locations: Vec<SIMDTestLocation>) -> Result<Vec<TestItem>> {
     // Fast path: nothing to do
     if locations.is_empty() {
@@ -1644,6 +1679,7 @@ fn convert_simd_locations_to_test_items(locations: Vec<SIMDTestLocation>) -> Res
 }
 
 /// 🚀 ZERO-ALLOCATION BACKWARD LINE SCANNER - Finds class context without heap allocations
+#[allow(dead_code)]
 fn determine_class_context_simd_zero_alloc(
     content: &[u8],
     target_line_number: usize, 
@@ -1694,6 +1730,7 @@ fn determine_class_context_simd_zero_alloc(
 }
 
 /// Extract class name from class definition line
+#[allow(dead_code)]
 fn extract_class_name_from_line_simd(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.starts_with("class ") {

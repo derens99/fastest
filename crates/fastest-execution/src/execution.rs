@@ -39,11 +39,15 @@ struct ClassInstance {
     /// Reference count for lifecycle management
     ref_count: usize,
     /// Setup/teardown state tracking
+    #[allow(dead_code)]
     lifecycle_state: ClassLifecycleState,
     /// Creation timestamp for cleanup
+    #[allow(dead_code)]
     created_at: std::time::SystemTime,
     /// Performance metrics
+    #[allow(dead_code)]
     setup_time: Option<std::time::Duration>,
+    #[allow(dead_code)]
     teardown_time: Option<std::time::Duration>,
 }
 
@@ -574,6 +578,7 @@ impl FixtureCacheKey {
 }
 
 /// Pre-compiled Python code templates
+#[allow(dead_code)]
 static PYTHON_TEMPLATES: Lazy<HashMap<&'static str, &'static str>> = Lazy::new(|| {
     let mut templates = HashMap::new();
 

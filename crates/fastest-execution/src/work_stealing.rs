@@ -23,6 +23,7 @@ use num_cpus;
 use std::arch::x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
+#[allow(unused_imports)]
 use std::arch::aarch64::*;
 
 use fastest_core::TestItem;
@@ -100,10 +101,13 @@ pub struct WorkStealingExecutor {
 
 /// Thread-local storage for zero-allocation execution
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ThreadLocalStorage {
     /// Reusable result buffer - Using Mutex instead of RefCell for Send
+    #[allow(dead_code)]
     result_buffer: std::sync::Mutex<Vec<TestResult>>,
     /// Temporary work buffer for SIMD operations
+    #[allow(dead_code)]
     work_buffer: std::sync::Mutex<Vec<WorkUnit>>,
     /// Performance counters
     counters: std::sync::Mutex<WorkerMetrics>,

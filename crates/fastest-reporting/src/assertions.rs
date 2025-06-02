@@ -101,6 +101,7 @@ pub struct RewrittenAssertion {
 /// Main assertion rewriter
 pub struct AssertionRewriter {
     config: AssertionConfig,
+    #[allow(dead_code)]
     helpers: AssertionHelpers,
 }
 

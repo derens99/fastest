@@ -23,96 +23,135 @@ use serde::{Deserialize, Serialize};
 use fastest_core::TestItem;
 
 /// Ultra-high-performance timeout manager with lock-free operations
+#[allow(dead_code)]
 pub struct UltraFastTimeoutManager {
     /// Configuration for timeout behavior
+    #[allow(dead_code)]
     config: TimeoutConfig,
     /// Lock-free timeout tracking
+    #[allow(dead_code)]
     timeout_tracker: Arc<LockFreeTimeoutTracker>,
     /// SIMD-accelerated batch processor
+    #[allow(dead_code)]
     batch_processor: SIMDTimeoutBatchProcessor,
     /// Adaptive scaling system
+    #[allow(dead_code)]
     adaptive_scaler: AdaptiveTimeoutScaler,
     /// Zero-allocation timeout pools
+    #[allow(dead_code)]
     timeout_pools: TimeoutPoolManager,
     /// Performance monitoring
+    #[allow(dead_code)]
     performance_monitor: Arc<TimeoutPerformanceMonitor>,
 }
 
 /// Lock-free timeout tracking with atomic operations
+#[allow(dead_code)]
 #[derive(Debug)]
 struct LockFreeTimeoutTracker {
     /// Active timeout entries (lock-free)
+    #[allow(dead_code)]
     active_timeouts: Injector<TimeoutEntry>,
     /// Timeout checking workers
+    #[allow(dead_code)]
     timeout_workers: Vec<Worker<TimeoutEntry>>,
     /// Timeout stealers for load balancing
+    #[allow(dead_code)]
     timeout_stealers: Vec<Stealer<TimeoutEntry>>,
     /// Global timeout counter
+    #[allow(dead_code)]
     active_count: AtomicU32,
     /// Timeout resolution counter
+    #[allow(dead_code)]
     resolved_count: AtomicU32,
     /// Emergency shutdown flag
+    #[allow(dead_code)]
     shutdown_flag: AtomicBool,
 }
 
 /// SIMD-accelerated batch timeout processor
+#[allow(dead_code)]
 #[derive(Debug)]
 struct SIMDTimeoutBatchProcessor {
     /// SIMD capability detection
+    #[allow(dead_code)]
     simd_enabled: bool,
     /// Batch size for SIMD operations
+    #[allow(dead_code)]
     batch_size: usize,
     /// Vectorized timeout buffer
+    #[allow(dead_code)]
     timeout_buffer: Vec<u64>, // Aligned for SIMD
     /// Performance counters
+    #[allow(dead_code)]
     simd_operations: AtomicU64,
+    #[allow(dead_code)]
     batch_operations: AtomicU64,
 }
 
 /// Adaptive timeout scaling based on system performance
+#[allow(dead_code)]
 #[derive(Debug)]
 struct AdaptiveTimeoutScaler {
     /// Base timeout multiplier
+    #[allow(dead_code)]
     base_multiplier: AtomicU64, // Fixed-point: 1.0 = 1000
     /// System load detector
+    #[allow(dead_code)]
     load_detector: SystemLoadDetector,
     /// Historical performance data
+    #[allow(dead_code)]
     performance_history: Arc<RwLock<Vec<PerformanceDataPoint>>>,
     /// Adaptive scaling enabled
+    #[allow(dead_code)]
     adaptive_enabled: AtomicBool,
 }
 
 /// Zero-allocation timeout pools
+#[allow(dead_code)]
 #[derive(Debug)]
 struct TimeoutPoolManager {
     /// Pre-allocated timeout entries
+    #[allow(dead_code)]
     entry_pool: Arc<Mutex<Vec<TimeoutEntry>>>,
     /// Pre-allocated error objects
+    #[allow(dead_code)]
     error_pool: Arc<Mutex<Vec<TimeoutError>>>,
     /// Pool statistics
+    #[allow(dead_code)]
     pool_stats: PoolStatistics,
 }
 
 /// Ultra-optimized timeout configuration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutConfig {
     /// Default timeout (nanoseconds for precision)
+    #[allow(dead_code)]
     pub default_timeout_ns: u64,
     /// Async test timeout (nanoseconds)
+    #[allow(dead_code)]
     pub async_timeout_ns: u64,
     /// Fixture timeout (nanoseconds)
+    #[allow(dead_code)]
     pub fixture_timeout_ns: u64,
     /// Enable adaptive scaling
+    #[allow(dead_code)]
     pub adaptive_scaling: bool,
     /// Enable SIMD acceleration
+    #[allow(dead_code)]
     pub simd_acceleration: bool,
     /// Timeout check interval (microseconds)
+    #[allow(dead_code)]
     pub check_interval_us: u64,
     /// Warning threshold (fixed-point: 0.8 = 800)
+    #[allow(dead_code)]
     pub warning_threshold: u32,
     /// Maximum timeout entries to track
+    #[allow(dead_code)]
     pub max_active_timeouts: usize,
     /// Pool size for pre-allocated objects
+    #[allow(dead_code)]
     pub pool_size: usize,
 }
 
@@ -133,122 +172,191 @@ impl Default for TimeoutConfig {
 }
 
 /// Lock-free timeout entry with cache-line alignment
+#[allow(dead_code)]
 #[repr(align(64))] // Cache line aligned
 #[derive(Debug, Clone)]
 struct TimeoutEntry {
     /// Test identifier (interned)
+    #[allow(dead_code)]
     test_id: u64, // Hash of test ID for faster comparison
     /// Original test ID string
+    #[allow(dead_code)]
     test_id_str: String,
     /// Start time (nanoseconds since epoch)
+    #[allow(dead_code)]
     start_time_ns: u64,
     /// Timeout duration (nanoseconds)
+    #[allow(dead_code)]
     timeout_duration_ns: u64,
     /// Warning threshold time
+    #[allow(dead_code)]
     warning_time_ns: u64,
     /// Current state
+    #[allow(dead_code)]
     state: TimeoutState,
     /// Test type for specialized handling
+    #[allow(dead_code)]
     test_type: TestType,
     /// Worker affinity for load balancing
+    #[allow(dead_code)]
     worker_affinity: u8,
 }
 
 /// Timeout state tracking
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TimeoutState {
+    #[allow(dead_code)]
     Active,
+    #[allow(dead_code)]
     Warning,
+    #[allow(dead_code)]
     TimedOut,
+    #[allow(dead_code)]
     Completed,
+    #[allow(dead_code)]
     Cancelled,
 }
 
 /// Test type for specialized timeout handling
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum TestType {
+    #[allow(dead_code)]
     Regular,
+    #[allow(dead_code)]
     Async,
+    #[allow(dead_code)]
     Fixture,
+    #[allow(dead_code)]
     Integration,
+    #[allow(dead_code)]
     Performance,
 }
 
 /// Enhanced timeout error with zero-allocation design
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TimeoutError {
+    #[allow(dead_code)]
     pub test_id: String,
+    #[allow(dead_code)]
     pub timeout_duration_ns: u64,
+    #[allow(dead_code)]
     pub elapsed_time_ns: u64,
+    #[allow(dead_code)]
     pub timeout_type: TimeoutType,
+    #[allow(dead_code)]
     pub context: String,
+    #[allow(dead_code)]
     pub performance_hint: PerformanceHint,
+    #[allow(dead_code)]
     pub adaptive_suggestion: String,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum TimeoutType {
+    #[allow(dead_code)]
     TestExecution,
+    #[allow(dead_code)]
     FixtureSetup,
+    #[allow(dead_code)]
     FixtureTeardown,
+    #[allow(dead_code)]
     AsyncOperation,
+    #[allow(dead_code)]
     Integration,
+    #[allow(dead_code)]
     Performance,
 }
 
 /// Performance hint for timeout optimization
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PerformanceHint {
+    #[allow(dead_code)]
     pub suggested_timeout_ns: u64,
+    #[allow(dead_code)]
     pub performance_category: PerformanceCategory,
+    #[allow(dead_code)]
     pub optimization_suggestions: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PerformanceCategory {
+    #[allow(dead_code)]
     Fast,      // < 1s
+    #[allow(dead_code)]
     Medium,    // 1-10s
+    #[allow(dead_code)]
     Slow,      // 10-60s
+    #[allow(dead_code)]
     VerySlow,  // > 60s
 }
 
 /// System load detection for adaptive scaling
+#[allow(dead_code)]
 #[derive(Debug)]
 struct SystemLoadDetector {
+    #[allow(dead_code)]
     cpu_usage: AtomicU32,    // Percentage * 100
+    #[allow(dead_code)]
     memory_usage: AtomicU32, // Percentage * 100
+    #[allow(dead_code)]
     last_update: AtomicU64,  // Timestamp in nanoseconds
 }
 
 /// Performance data point for adaptive scaling
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct PerformanceDataPoint {
+    #[allow(dead_code)]
     timestamp_ns: u64,
+    #[allow(dead_code)]
     test_duration_ns: u64,
+    #[allow(dead_code)]
     timeout_duration_ns: u64,
+    #[allow(dead_code)]
     system_load: f32,
+    #[allow(dead_code)]
     test_type: TestType,
 }
 
 /// Pool statistics for monitoring
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct PoolStatistics {
+    #[allow(dead_code)]
     entries_allocated: AtomicU64,
+    #[allow(dead_code)]
     entries_reused: AtomicU64,
+    #[allow(dead_code)]
     errors_allocated: AtomicU64,
+    #[allow(dead_code)]
     errors_reused: AtomicU64,
+    #[allow(dead_code)]
     pool_efficiency: AtomicU64, // Percentage * 100
 }
 
 /// Performance monitoring for timeout operations
+#[allow(dead_code)]
 #[derive(Debug, Default)]
 struct TimeoutPerformanceMonitor {
+    #[allow(dead_code)]
     timeout_checks: AtomicU64,
+    #[allow(dead_code)]
     simd_checks: AtomicU64,
+    #[allow(dead_code)]
     adaptive_adjustments: AtomicU64,
+    #[allow(dead_code)]
     warning_events: AtomicU64,
+    #[allow(dead_code)]
     timeout_events: AtomicU64,
+    #[allow(dead_code)]
     average_check_time_ns: AtomicU64,
+    #[allow(dead_code)]
     total_overhead_ns: AtomicU64,
 }
 

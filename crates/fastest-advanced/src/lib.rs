@@ -67,6 +67,7 @@ impl Default for AdvancedConfig {
 
 /// Smart advanced features manager
 pub struct AdvancedManager {
+    #[allow(dead_code)]
     config: AdvancedConfig,
 }
 

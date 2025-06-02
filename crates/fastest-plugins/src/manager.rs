@@ -20,6 +20,7 @@ use super::hooks;
 /// Central plugin manager with smart orchestration
 pub struct PluginManager {
     config: PluginConfig,
+    #[allow(dead_code)]
     registry: PluginRegistry,
     hook_registry: Arc<HookRegistry>,
     pytest_hooks: PytestHooks,

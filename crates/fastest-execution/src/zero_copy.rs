@@ -22,6 +22,7 @@ use parking_lot::{Mutex, RwLock};
 use std::arch::x86_64::*;
 
 #[cfg(target_arch = "aarch64")]
+#[allow(unused_imports)]
 use std::arch::aarch64::*;
 
 use fastest_core::TestItem;
@@ -111,10 +112,13 @@ pub struct ZeroCopyExecutor<'arena> {
 
 /// Cached test execution pattern for optimization
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TestPattern {
     complexity_score: u16,
     estimated_duration: Duration,
+    #[allow(dead_code)]
     requires_fixtures: bool,
+    #[allow(dead_code)]
     is_async: bool,
     memory_footprint: usize,
 }

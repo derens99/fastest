@@ -24,10 +24,14 @@ use super::TestResult;
 // use fastest_integration::{DevExperienceConfig, DevExperienceManager};
 
 // Temporary stub implementations until we implement the full types
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct DevExperienceConfig {
+    #[allow(dead_code)]
     pub enabled: bool,
+    #[allow(dead_code)]
     pub debug_enabled: bool,
+    #[allow(dead_code)]
     pub enhanced_reporting: bool,
 }
 
@@ -41,12 +45,15 @@ impl Default for DevExperienceConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct DevExperienceManager {
+    #[allow(dead_code)]
     config: DevExperienceConfig,
 }
 
 impl DevExperienceManager {
+    #[allow(dead_code)]
     pub fn new(config: DevExperienceConfig) -> Self {
         Self { config }
     }
@@ -57,15 +64,24 @@ use fastest_core::{Error, Result};
 // TODO: Import from fastest-integration when needed
 // use fastest_integration::{PluginCompatibilityConfig, PluginCompatibilityManager};
 
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct PluginCompatibilityConfig {
+    #[allow(dead_code)]
     pub enabled: bool,
+    #[allow(dead_code)]
     pub xdist_enabled: bool,
+    #[allow(dead_code)]
     pub xdist_workers: usize,
+    #[allow(dead_code)]
     pub coverage_enabled: bool,
+    #[allow(dead_code)]
     pub coverage_source: Vec<std::path::PathBuf>,
+    #[allow(dead_code)]
     pub mock_enabled: bool,
+    #[allow(dead_code)]
     pub asyncio_enabled: bool,
+    #[allow(dead_code)]
     pub asyncio_mode: String,
 }
 
@@ -84,16 +100,20 @@ impl Default for PluginCompatibilityConfig {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct PluginCompatibilityManager {
+    #[allow(dead_code)]
     config: PluginCompatibilityConfig,
 }
 
 impl PluginCompatibilityManager {
+    #[allow(dead_code)]
     pub fn new(config: PluginCompatibilityConfig) -> Self {
         Self { config }
     }
     
+    #[allow(dead_code)]
     pub async fn execute_with_plugins(&self, tests: Vec<TestItem>) -> std::result::Result<Vec<TestResult>, String> {
         // Stub implementation - just return empty results for now
         Ok(tests.into_iter().map(|test| TestResult {
@@ -122,64 +142,99 @@ const NATIVE_JIT_THRESHOLD: usize = 20;        // Reduced to focus on small suit
 const WORK_STEALING_THRESHOLD: usize = 500;
 
 /// System performance profile for adaptive execution
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct SystemProfile {
+    #[allow(dead_code)]
     cpu_cores: usize,
+    #[allow(dead_code)]
     available_memory_gb: f64,
+    #[allow(dead_code)]
     cpu_usage_percent: f32,
+    #[allow(dead_code)]
     memory_usage_percent: f32,
+    #[allow(dead_code)]
     is_high_performance: bool,
+    #[allow(dead_code)]
     optimal_parallelism: usize,
 }
 
 /// Enhanced execution strategies with revolutionary module integration
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum RevolutionaryExecutionStrategy {
     /// Native JIT compilation for simple tests (50-100x speedup)
-    NativeJIT { complexity_score: f32 },
+    #[allow(dead_code)]
+    NativeJIT { #[allow(dead_code)] complexity_score: f32 },
     /// 🚀 BURST EXECUTION: Revolutionary 21-100 test strategy (5-8x speedup)
-    BurstExecution { batch_size: usize, micro_threads: usize },
+    #[allow(dead_code)]
+    BurstExecution { #[allow(dead_code)] batch_size: usize, #[allow(dead_code)] micro_threads: usize },
     /// Ultra-optimized in-process execution for small suites (3x speedup)
-    UltraInProcess { thread_count: usize },
+    #[allow(dead_code)]
+    UltraInProcess { #[allow(dead_code)] thread_count: usize },
     /// Work-stealing parallelism for large suites (8-15x speedup)
-    WorkStealingParallel { worker_count: usize },
+    #[allow(dead_code)]
+    WorkStealingParallel { #[allow(dead_code)] worker_count: usize },
     /// Process-level parallelism for massive suites (>1000 tests)
-    MassiveParallel { process_count: usize },
+    #[allow(dead_code)]
+    MassiveParallel { #[allow(dead_code)] process_count: usize },
 }
 
 /// Real-time performance statistics and monitoring
+#[allow(dead_code)]
 #[derive(Debug, Default, Clone)]
 pub struct UltraPerformanceStats {
+    #[allow(dead_code)]
     pub total_tests: usize,
+    #[allow(dead_code)]
     pub strategy_used: String,
+    #[allow(dead_code)]
     pub execution_time: Duration,
+    #[allow(dead_code)]
     pub discovery_time: Duration,
+    #[allow(dead_code)]
     pub preparation_time: Duration,
+    #[allow(dead_code)]
     pub actual_speedup: f64,
+    #[allow(dead_code)]
     pub estimated_pytest_time: f64,
+    #[allow(dead_code)]
     pub tests_per_second: f64,
+    #[allow(dead_code)]
     pub memory_efficiency: f64,
+    #[allow(dead_code)]
     pub cpu_utilization: f64,
+    #[allow(dead_code)]
     pub cache_hit_rate: f64,
+    #[allow(dead_code)]
     pub strategy_overhead: Duration,
+    #[allow(dead_code)]
     pub system_profile: Option<SystemProfile>,
 }
 
 /// Adaptive test complexity analyzer
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 struct TestComplexityAnalyzer {
+    #[allow(dead_code)]
     simple_test_patterns: Vec<String>,
+    #[allow(dead_code)]
     complex_test_indicators: Vec<String>,
+    #[allow(dead_code)]
     fixture_usage_weight: f32,
+    #[allow(dead_code)]
     async_test_weight: f32,
 }
 
 /// Legacy execution strategy for compatibility
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 enum ExecutionStrategy {
     /// Ultra-optimized in-process execution (legacy compatibility)
+    #[allow(dead_code)]
     UltraInProcess,
     /// Process-level parallelism for massive suites (legacy compatibility)
+    #[allow(dead_code)]
     MassiveParallel,
 }
 
@@ -189,28 +244,39 @@ enum ExecutionStrategy {
 
 /// 🚀 REVOLUTIONARY ULTRA-FAST PYTHON ENGINE WITH ADVANCED OPTIMIZATIONS
 /// Eliminates ALL overhead and integrates with revolutionary modules
+#[allow(dead_code)]
 struct UltraFastPythonEngine {
     /// Pre-compiled and optimized Python worker code
+    #[allow(dead_code)]
     worker_module: PyObject,
     /// Cached function references for maximum speed
+    #[allow(dead_code)]
     fn_cache: Arc<RwLock<HashMap<String, PyObject>>>,
     /// Module cache to avoid repeated imports
+    #[allow(dead_code)]
     module_cache: Arc<RwLock<HashMap<String, PyObject>>>,
     /// Advanced performance monitoring
+    #[allow(dead_code)]
     performance_stats: Arc<Mutex<UltraPerformanceStats>>,
     /// Memory arena for zero-copy operations
+    #[allow(dead_code)]
     arena: Bump,
     /// Adaptive complexity analyzer
+    #[allow(dead_code)]
     complexity_analyzer: TestComplexityAnalyzer,
     /// System resource monitor
+    #[allow(dead_code)]
     system_monitor: Arc<Mutex<System>>,
     /// Cache warming state
+    #[allow(dead_code)]
     cache_warmed: Arc<std::sync::atomic::AtomicBool>,
     /// Performance learning database
+    #[allow(dead_code)]
     performance_db: Arc<RwLock<HashMap<String, f64>>>,
 }
 
 impl TestComplexityAnalyzer {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self {
             simple_test_patterns: vec![
@@ -232,6 +298,7 @@ impl TestComplexityAnalyzer {
         }
     }
     
+    #[allow(dead_code)]
     fn analyze_test_complexity(&self, test: &TestItem) -> f32 {
         let mut complexity_score = 1.0;
         
@@ -261,6 +328,7 @@ impl TestComplexityAnalyzer {
 
 impl UltraFastPythonEngine {
     /// Initialize the revolutionary ultra-fast Python engine with ALL optimizations
+    #[allow(dead_code)]
     fn new(py: Python, verbose: bool) -> PyResult<Self> {
         if verbose {
             eprintln!("🚀 Initializing Revolutionary Ultra-Fast Python Engine...");
@@ -314,6 +382,7 @@ impl UltraFastPythonEngine {
     }
     
     /// Get current system performance profile for adaptive execution
+    #[allow(dead_code)]
     fn get_system_profile(&self) -> SystemProfile {
         let mut system = self.system_monitor.lock().unwrap();
         system.refresh_all();
@@ -345,6 +414,7 @@ impl UltraFastPythonEngine {
     }
     
     /// 🚀 REVOLUTIONARY EXECUTE TESTS with adaptive strategy selection
+    #[allow(dead_code)]
     fn execute_tests_revolutionary(&self, py: Python, tests: &[TestItem], verbose: bool) -> PyResult<Vec<TestResult>> {
         let execution_start = Instant::now();
         
@@ -546,6 +616,7 @@ impl UltraFastPythonEngine {
     }
     
     /// Execute with Zero-Copy arena allocation
+    #[allow(dead_code)]
     fn execute_with_zero_copy(&self, py: Python, tests: &[TestItem], arena_size_mb: usize, verbose: bool) -> PyResult<Vec<TestResult>> {
         if verbose {
             eprintln!("⚡ ZERO-COPY: Arena allocation for {} tests ({}MB arena)", tests.len(), arena_size_mb);
@@ -737,6 +808,7 @@ impl UltraFastPythonEngine {
     }
     
     /// Get comprehensive performance statistics
+    #[allow(dead_code)]
     pub fn get_performance_stats(&self) -> UltraPerformanceStats {
         self.performance_stats.lock().unwrap().clone()
     }
@@ -1590,6 +1662,7 @@ impl UltraFastExecutor {
     }
     
     /// Get comprehensive performance statistics
+    #[allow(dead_code)]
     pub fn get_performance_stats(&self) -> UltraPerformanceStats {
         self.performance_stats.lock().unwrap().clone()
     }
@@ -1754,6 +1827,7 @@ impl UltraFastExecutor {
 // Codebase simplified by ~80% while dramatically improving performance.
 
 // Helper function to try and extract test function code
+#[allow(dead_code)]
 fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String> {
     let file_path = &test_item.path;
     if !file_path.exists() {

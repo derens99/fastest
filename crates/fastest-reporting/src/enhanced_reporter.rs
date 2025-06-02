@@ -45,8 +45,10 @@ impl Default for ReporterConfig {
 
 #[derive(Debug, Clone)]
 struct ErrorTemplate {
+    #[allow(dead_code)]
     pattern: String,
     title: String,
+    #[allow(dead_code)]
     description: String,
     suggestions: Vec<String>,
 }

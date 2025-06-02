@@ -108,6 +108,7 @@ impl SimpleIdeIntegration {
     }
 
     /// Format test parameters for display
+    #[allow(dead_code)]
     fn format_params(&self, params: &serde_json::Value) -> String {
         match params {
             serde_json::Value::Object(map) => map
@@ -120,6 +121,7 @@ impl SimpleIdeIntegration {
     }
 
     /// Format single parameter value
+    #[allow(dead_code)]
     fn format_param_value(&self, value: &serde_json::Value) -> String {
         match value {
             serde_json::Value::String(s) => format!("'{}'", s),

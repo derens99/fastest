@@ -133,8 +133,8 @@ pub struct SIMDPatternAnalyzer {
     complex_patterns: Vec<BytesRegex>,
 }
 
-/// 🔥 LIGHTNING-FAST pattern matching with pre-compiled byte patterns
 lazy_static! {
+    /// 🔥 LIGHTNING-FAST pattern matching with pre-compiled byte patterns
     static ref GLOBAL_PATTERN_MATCHER: AhoCorasick = {
         AhoCorasickBuilder::new()
             .match_kind(MatchKind::LeftmostFirst)
@@ -288,22 +288,30 @@ impl SIMDPatternAnalyzer {
 
 /// Advanced Python AST analysis result
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ASTAnalysis {
     pattern: TestPattern,
+    #[allow(dead_code)]
     complexity_score: u16,
+    #[allow(dead_code)]
     variables: Vec<String>,
+    #[allow(dead_code)]
     operations: Vec<String>,
     estimated_instructions: usize,
+    #[allow(dead_code)]
     can_vectorize: bool,
 }
 
 /// 🚀 REVOLUTIONARY NATIVE TEST EXECUTOR v2.0 - 1000x Performance Breakthrough
 pub struct NativeTestExecutor {
     /// Ultra-fast JIT compilation module with persistent caching
+    #[allow(dead_code)]
     jit_module: JITModule,
     /// Pre-allocated function builder context (zero allocation hot path)
+    #[allow(dead_code)]
     function_builder_context: FunctionBuilderContext,
     /// Cranelift context for compilation (reused across tests)
+    #[allow(dead_code)]
     ctx: codegen::Context,
     /// Real-time performance statistics with lock-free updates
     stats: TranspilationStats,
@@ -312,6 +320,7 @@ pub struct NativeTestExecutor {
     /// 🚀 REVOLUTIONARY SIMD pattern analyzer - 1000x faster than AST
     simd_pattern_analyzer: SIMDPatternAnalyzer,
     /// Arena allocator for zero GC pressure on hot paths
+    #[allow(dead_code)]
     arena: Bump,
     /// Code generation optimization level
     optimization_level: OptLevel,
@@ -321,28 +330,35 @@ pub struct NativeTestExecutor {
 
 /// 🔥 REVOLUTIONARY compiled test with instant execution
 #[derive(Debug)]
+#[allow(dead_code)]
 struct CompiledTest {
     test_id: String,
     /// Direct function pointer to native machine code (3-10 CPU cycles execution)
     native_function: unsafe extern "C" fn() -> i32,
     /// Function ID for module management
+    #[allow(dead_code)]
     function_id: cranelift_module::FuncId,
     /// Compilation metadata
+    #[allow(dead_code)]
     compilation_time: Duration,
     /// Generated instruction count
     instruction_count: usize,
     /// Test pattern that was compiled
+    #[allow(dead_code)]
     pattern: TestPattern,
     /// BLAKE3 content hash for integrity verification
     content_hash: u64,
     /// Memory usage of compiled code
+    #[allow(dead_code)]
     memory_usage: usize,
 }
 
 /// Advanced Python AST analyzer for pattern recognition
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ASTAnalyzer {
     /// Pattern matching cache
+    #[allow(dead_code)]
     pattern_cache: HashMap<String, TestPattern>,
     /// Analysis statistics
     analysis_stats: AnalysisStats,
@@ -350,13 +366,18 @@ struct ASTAnalyzer {
 
 /// AST analysis performance statistics
 #[derive(Debug, Default, Clone)]
-struct AnalysisStats {
+pub struct AnalysisStats {
+    #[allow(dead_code)]
     analyses_performed: usize,
+    #[allow(dead_code)]
     patterns_recognized: usize,
+    #[allow(dead_code)]
     cache_hits: usize,
+    #[allow(dead_code)]
     average_analysis_time: Duration,
 }
 
+#[allow(dead_code)]
 impl NativeTestExecutor {
     /// 🚀 Create revolutionary native test executor with SIMD acceleration
     pub fn new() -> Result<Self> {
@@ -539,7 +560,7 @@ impl NativeTestExecutor {
     }
     
     /// 🔥 SIMD-optimized JIT execution for simple patterns
-    fn execute_simd_jit_fast(&mut self, test: &TestItem, test_code: &str, pattern: TestPattern, content_hash: u64) -> Result<NativeTestResult> {
+    fn execute_simd_jit_fast(&mut self, test: &TestItem, test_code: &str, pattern: TestPattern, _content_hash: u64) -> Result<NativeTestResult> {
         match pattern {
             TestPattern::SimpleAssertion(true) => {
                 // INSTANT SUCCESS - return immediately without compilation
@@ -973,6 +994,7 @@ pub struct DetailedStats {
     pub optimization_level: String,
 }
 
+#[allow(dead_code)]
 impl ASTAnalyzer {
     fn new() -> Self {
         Self {

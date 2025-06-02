@@ -28,6 +28,7 @@ const PYTHON_CMD: &str = "python";
 // use fastest_reporting::{AssertionRewriter, AssertionConfig};
 
 // Temporary stub implementations until we implement the full types
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct AssertionConfig {
     pub enabled: bool,
@@ -37,16 +38,20 @@ pub struct AssertionConfig {
     pub rewrite_assert_messages: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct AssertionRewriter {
+    #[allow(dead_code)]
     config: AssertionConfig,
 }
 
 impl AssertionRewriter {
+    #[allow(dead_code)]
     pub fn new(config: AssertionConfig) -> Self {
         Self { config }
     }
     
+    #[allow(dead_code)]
     pub fn rewrite_source(&self, source: &str) -> Result<String, String> {
         // Stub implementation - just return the source unchanged for now
         Ok(source.to_string())
@@ -54,13 +59,20 @@ impl AssertionRewriter {
 }
 
 /// Configuration for the Python runtime
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
+    #[allow(dead_code)]
     pub verbose: bool,
+    #[allow(dead_code)]
     pub capture_output: bool,
+    #[allow(dead_code)]
     pub assertion_rewriting: bool,
+    #[allow(dead_code)]
     pub timeout_seconds: Option<u64>,
+    #[allow(dead_code)]
     pub pool_size: usize,
+    #[allow(dead_code)]
     pub batch_size: usize,
 }
 
@@ -78,83 +90,131 @@ impl Default for RuntimeConfig {
 }
 
 /// Wire protocol messages between Rust and Python workers
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct RuntimeCommand {
+    #[allow(dead_code)]
     id: usize,
+    #[allow(dead_code)]
     command_type: CommandType,
+    #[allow(dead_code)]
     data: serde_json::Value,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 #[serde(tag = "type")]
 enum CommandType {
+    #[allow(dead_code)]
     #[serde(rename = "setup_fixtures")]
-    SetupFixtures { fixtures: Vec<FixtureSetupData> },
+    SetupFixtures { #[allow(dead_code)] fixtures: Vec<FixtureSetupData> },
+    #[allow(dead_code)]
     #[serde(rename = "run_tests")]
-    RunTests { tests: Vec<TestExecutionData> },
+    RunTests { #[allow(dead_code)] tests: Vec<TestExecutionData> },
+    #[allow(dead_code)]
     #[serde(rename = "cleanup_fixtures")]
-    CleanupFixtures { scope: String, scope_id: String },
+    CleanupFixtures { #[allow(dead_code)] scope: String, #[allow(dead_code)] scope_id: String },
+    #[allow(dead_code)]
     #[serde(rename = "shutdown")]
     Shutdown,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize)]
 struct FixtureSetupData {
+    #[allow(dead_code)]
     name: String,
+    #[allow(dead_code)]
     scope: String,
+    #[allow(dead_code)]
     code: String,
+    #[allow(dead_code)]
     dependencies: Vec<String>,
+    #[allow(dead_code)]
     autouse: bool,
 }
 
+#[allow(dead_code)]
 #[derive(Serialize, Clone)]
 struct TestExecutionData {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     module: String,
+    #[allow(dead_code)]
     function: String,
+    #[allow(dead_code)]
     path: String,
+    #[allow(dead_code)]
     fixtures: Vec<String>,
+    #[allow(dead_code)]
     params: Option<serde_json::Value>,
+    #[allow(dead_code)]
     markers: Vec<String>,
+    #[allow(dead_code)]
     rewritten_code: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct RuntimeResponse {
+    #[allow(dead_code)]
     id: usize,
+    #[allow(dead_code)]
     success: bool,
+    #[allow(dead_code)]
     data: serde_json::Value,
+    #[allow(dead_code)]
     error: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct FixtureResult {
+    #[allow(dead_code)]
     name: String,
+    #[allow(dead_code)]
     value: serde_json::Value,
+    #[allow(dead_code)]
     error: Option<String>,
 }
 
+#[allow(dead_code)]
 #[derive(Deserialize)]
 struct TestExecutionResult {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     passed: bool,
+    #[allow(dead_code)]
     duration: f64,
+    #[allow(dead_code)]
     output: String,
+    #[allow(dead_code)]
     error: Option<String>,
+    #[allow(dead_code)]
     stdout: String,
+    #[allow(dead_code)]
     stderr: String,
+    #[allow(dead_code)]
     fixtures_used: Vec<String>,
 }
 
 /// Enhanced Python worker with fixture and plugin support
+#[allow(dead_code)]
 struct EnhancedPythonWorker {
+    #[allow(dead_code)]
     stdin: Mutex<std::process::ChildStdin>,
+    #[allow(dead_code)]
     stdout: Mutex<BufReader<std::process::ChildStdout>>,
+    #[allow(dead_code)]
     fixture_cache: Arc<Mutex<HashMap<String, serde_json::Value>>>,
+    #[allow(dead_code)]
     worker_id: usize,
 }
 
 impl EnhancedPythonWorker {
+    #[allow(dead_code)]
     fn spawn(worker_id: usize, config: &RuntimeConfig) -> Result<Self> {
         let mut child = Command::new(&*PYTHON_CMD)
             .args(["-u", "-c", &Self::worker_code(config)])
@@ -187,6 +247,7 @@ impl EnhancedPythonWorker {
         })
     }
 
+    #[allow(dead_code)]
     fn execute_command(&self, cmd: &RuntimeCommand) -> Result<RuntimeResponse> {
         // Send command
         {
@@ -217,6 +278,7 @@ impl EnhancedPythonWorker {
         Ok(response)
     }
 
+    #[allow(dead_code)]
     fn setup_fixtures(&self, fixtures: &[Fixture]) -> Result<HashMap<String, serde_json::Value>> {
         let fixture_data: Vec<FixtureSetupData> = fixtures
             .iter()
@@ -263,6 +325,7 @@ impl EnhancedPythonWorker {
         Ok(fixture_values)
     }
 
+    #[allow(dead_code)]
     fn run_tests(&self, tests: &[TestExecutionData]) -> Result<Vec<TestExecutionResult>> {
         let cmd = RuntimeCommand {
             id: next_command_id(),
@@ -284,6 +347,7 @@ impl EnhancedPythonWorker {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         let scope_str = match scope {
             FixtureScope::Function => "function",
@@ -310,6 +374,7 @@ impl EnhancedPythonWorker {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn generate_fixture_code(&self, fixture: &Fixture) -> String {
         // Generate Python code for fixture
         // This is a simplified version - in practice would need more sophisticated code generation
@@ -321,6 +386,7 @@ impl EnhancedPythonWorker {
         }
     }
 
+    #[allow(dead_code)]
     fn worker_code(config: &RuntimeConfig) -> String {
         format!(
             r#"
@@ -793,13 +859,18 @@ while True:
 }
 
 /// Pool of enhanced Python workers
+#[allow(dead_code)]
 struct EnhancedWorkerPool {
+    #[allow(dead_code)]
     workers: Vec<Arc<EnhancedPythonWorker>>,
+    #[allow(dead_code)]
     config: RuntimeConfig,
+    #[allow(dead_code)]
     cursor: AtomicUsize,
 }
 
 impl EnhancedWorkerPool {
+    #[allow(dead_code)]
     fn new(config: RuntimeConfig) -> Result<Self> {
         let mut workers = Vec::with_capacity(config.pool_size);
 
@@ -815,6 +886,7 @@ impl EnhancedWorkerPool {
         })
     }
 
+    #[allow(dead_code)]
     fn get_worker(&self) -> Arc<EnhancedPythonWorker> {
         let idx = self.cursor.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         self.workers[idx].clone()
@@ -822,14 +894,20 @@ impl EnhancedWorkerPool {
 }
 
 /// Enhanced Python runtime engine
+#[allow(dead_code)]
 pub struct PythonRuntime {
+    #[allow(dead_code)]
     pool: Arc<EnhancedWorkerPool>,
+    #[allow(dead_code)]
     fixture_manager: Arc<Mutex<FixtureManager>>,
+    #[allow(dead_code)]
     config: RuntimeConfig,
+    #[allow(dead_code)]
     assertion_rewriter: AssertionRewriter,
 }
 
 impl PythonRuntime {
+    #[allow(dead_code)]
     pub fn new(config: RuntimeConfig) -> Result<Self> {
         let pool = Arc::new(EnhancedWorkerPool::new(config.clone())?);
         let fixture_manager = Arc::new(Mutex::new(FixtureManager::new()));
@@ -849,6 +927,7 @@ impl PythonRuntime {
     }
 
     /// Execute a batch of tests with complete fixture support
+    #[allow(dead_code)]
     pub fn execute_tests_with_fixtures(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         if tests.is_empty() {
             return Ok(Vec::new());
@@ -879,6 +958,7 @@ impl PythonRuntime {
         Ok(results)
     }
 
+    #[allow(dead_code)]
     fn execute_test_batch(&self, tests: &[TestItem]) -> Vec<TestResult> {
         let worker = self.pool.get_worker();
 
@@ -927,6 +1007,7 @@ impl PythonRuntime {
         }
     }
 
+    #[allow(dead_code)]
     fn extract_test_fixtures(&self, test: &TestItem) -> Vec<String> {
         // Extract fixture names from test function signature
         // This is simplified - real implementation would parse the actual function signature
@@ -946,6 +1027,7 @@ impl PythonRuntime {
         fixtures
     }
 
+    #[allow(dead_code)]
     fn setup_batch_fixtures(
         &self,
         worker: &EnhancedPythonWorker,
@@ -967,6 +1049,7 @@ impl PythonRuntime {
         Ok(())
     }
 
+    #[allow(dead_code)]
     fn prepare_test_execution_data(&self, test: &TestItem) -> TestExecutionData {
         // Parse test ID to extract module and function
         let parts: Vec<&str> = test.id.split("::").collect();
@@ -1010,6 +1093,7 @@ impl PythonRuntime {
         }
     }
 
+    #[allow(dead_code)]
     fn rewrite_test_code(&self, test: &TestItem) -> Option<String> {
         if !self.config.assertion_rewriting {
             return None;
@@ -1028,6 +1112,7 @@ impl PythonRuntime {
         None
     }
 
+    #[allow(dead_code)]
     fn convert_test_result(&self, result: TestExecutionResult) -> TestResult {
         let is_skip = result
             .error
@@ -1052,6 +1137,7 @@ impl PythonRuntime {
         }
     }
 
+    #[allow(dead_code)]
     fn create_error_result(&self, test: &TestItem, error: &str) -> TestResult {
         TestResult {
             test_id: test.id.clone(),
@@ -1065,12 +1151,14 @@ impl PythonRuntime {
     }
 
     /// Register a fixture with the runtime
+    #[allow(dead_code)]
     pub fn register_fixture(&self, fixture: Fixture) {
         let mut fixture_manager = self.fixture_manager.lock();
         fixture_manager.register_fixture(fixture);
     }
 
     /// Cleanup fixtures for a specific scope
+    #[allow(dead_code)]
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         // Send cleanup command to all workers
         for worker in &self.pool.workers {
@@ -1099,10 +1187,12 @@ static ENHANCED_POOL: Lazy<PythonRuntime> = Lazy::new(|| {
 });
 
 /// Get the global enhanced runtime
+#[allow(dead_code)]
 pub fn get_enhanced_runtime() -> &'static PythonRuntime {
     &ENHANCED_POOL
 }
 
+#[allow(dead_code)]
 fn next_command_id() -> usize {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     COUNTER.fetch_add(1, Ordering::Relaxed)

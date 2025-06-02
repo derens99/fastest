@@ -66,9 +66,12 @@ pub struct XdistManager {
 
 #[derive(Debug)]
 pub struct XdistWorker {
+    #[allow(dead_code)]
     id: String,
     active: bool,
+    #[allow(dead_code)]
     current_test: Option<String>,
+    #[allow(dead_code)]
     completed_tests: usize,
 }
 
@@ -88,6 +91,7 @@ pub enum LoadBalanceStrategy {
 pub struct CoverageManager {
     source_dirs: Vec<PathBuf>,
     coverage_data: Arc<RwLock<HashMap<String, CoverageData>>>,
+    #[allow(dead_code)]
     output_format: CoverageFormat,
 }
 
@@ -110,6 +114,7 @@ pub enum CoverageFormat {
 /// pytest-mock mocker fixture support  
 pub struct MockManager {
     active_mocks: Arc<RwLock<HashMap<String, MockData>>>,
+    #[allow(dead_code)]
     mock_registry: HashMap<String, String>,
 }
 
@@ -131,7 +136,9 @@ pub enum MockType {
 /// pytest-asyncio async test support
 pub struct AsyncioManager {
     mode: AsyncioMode,
+    #[allow(dead_code)]
     event_loop: Option<String>,
+    #[allow(dead_code)]
     timeout: Option<std::time::Duration>,
 }
 

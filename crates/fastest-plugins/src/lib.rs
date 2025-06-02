@@ -22,7 +22,9 @@ pub use registry::{PluginInfo, PluginRegistry};
 
 /// Smart plugin loader that handles both Rust and Python plugins
 pub struct SmartPluginLoader {
+    #[allow(dead_code)]
     config: PluginConfig,
+    #[allow(dead_code)]
     registry: PluginRegistry,
 }
 

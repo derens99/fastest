@@ -12,6 +12,7 @@ use super::{incremental::TestStatus, AdvancedConfig};
 
 /// Smart test prioritizer using multiple strategies
 pub struct TestPrioritizer {
+    #[allow(dead_code)]
     config: AdvancedConfig,
     test_history: HashMap<String, TestHistory>,
     priority_weights: PriorityWeights,

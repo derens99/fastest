@@ -31,44 +31,65 @@ use super::TestResult;
 /* -------------------------------------------------------------------------- */
 
 /// Serializable test metadata for memory mapping
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestMetadata {
+    #[allow(dead_code)]
     pub id: String,
+    #[allow(dead_code)]
     pub path: PathBuf,
+    #[allow(dead_code)]
     pub function_name: String,
+    #[allow(dead_code)]
     pub line_number: Option<usize>,
+    #[allow(dead_code)]
     pub file_hash: u64,           // For incremental testing
+    #[allow(dead_code)]
     pub dependencies: Vec<String>, // Test dependencies
+    #[allow(dead_code)]
     pub estimated_duration: Duration,
+    #[allow(dead_code)]
     pub complexity_score: u8,     // 0-255 complexity estimate
 }
 
 /// Test database for massive test suites
+#[allow(dead_code)]
 pub struct MmapTestDatabase {
     /// Database file path
+    #[allow(dead_code)]
     database_path: PathBuf,
     
     /// Index mapping test IDs to offsets
+    #[allow(dead_code)]
     test_index: HashMap<String, usize>,
     
     /// File-based test grouping
+    #[allow(dead_code)]
     file_groups: HashMap<PathBuf, Vec<String>>,
     
     /// Statistics
+    #[allow(dead_code)]
     stats: DatabaseStats,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Default, Clone)]
 pub struct DatabaseStats {
+    #[allow(dead_code)]
     pub total_tests: usize,
+    #[allow(dead_code)]
     pub total_files: usize,
+    #[allow(dead_code)]
     pub database_size: usize,
+    #[allow(dead_code)]
     pub index_build_time: Duration,
+    #[allow(dead_code)]
     pub memory_usage: usize,
 }
 
 impl MmapTestDatabase {
     /// Create new memory-mapped test database
+    #[allow(dead_code)]
     pub fn new(tests: &[TestItem], database_path: &Path) -> Result<Self> {
         let start_time = Instant::now();
         
@@ -146,6 +167,7 @@ impl MmapTestDatabase {
     }
     
     /// Calculate file hash for incremental testing
+    #[allow(dead_code)]
     fn calculate_file_hash(path: &Path) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
@@ -161,16 +183,19 @@ impl MmapTestDatabase {
     }
     
     /// Get tests for a specific file
+    #[allow(dead_code)]
     pub fn get_tests_for_file(&self, file_path: &Path) -> Vec<String> {
         self.file_groups.get(file_path).cloned().unwrap_or_default()
     }
     
     /// Get all file groups for parallel processing
+    #[allow(dead_code)]
     pub fn get_file_groups(&self) -> &HashMap<PathBuf, Vec<String>> {
         &self.file_groups
     }
     
     /// Get database statistics
+    #[allow(dead_code)]
     pub fn get_stats(&self) -> &DatabaseStats {
         &self.stats
     }
@@ -279,6 +304,7 @@ impl MmapTestDatabase {
 #[derive(Debug)]
 pub struct SharedResultBuffer {
     /// Result file path
+    #[allow(dead_code)]
     result_file_path: PathBuf,
     
     /// Result slots (one per test)
