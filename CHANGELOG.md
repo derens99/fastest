@@ -1,3 +1,10 @@
+## [0.3.14](https://github.com/derens99/fastest/compare/v0.3.13...v0.3.14) (2025-06-05)
+
+
+### Bug Fixes
+
+* pain ([ac16d89](https://github.com/derens99/fastest/commit/ac16d891631853cde53bb7989e9da050d9172ca1))
+
 ## [0.3.13](https://github.com/derens99/fastest/compare/v0.3.12...v0.3.13) (2025-06-05)
 
 
