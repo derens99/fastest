@@ -99,6 +99,9 @@ jobs:
         with:
           tool: cargo-dist@0.14.0
 
+      - name: Initialize cargo-dist
+        run: cargo dist init --ci --yes
+
       - name: Run dist plan
         run: cargo dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
 
