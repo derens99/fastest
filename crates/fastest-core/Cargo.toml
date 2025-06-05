@@ -1,6 +1,6 @@
 [package]
 name = "fastest-core"
-version = "0.3.15"
+version = "0.3.16"
 authors.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,3 +1,10 @@
+## [0.3.16](https://github.com/derens99/fastest/compare/v0.3.15...v0.3.16) (2025-06-05)
+
+
+### Bug Fixes
+
+* cargo2 ([4c5e444](https://github.com/derens99/fastest/commit/4c5e4449ba54c36df298f2cda1445bf20f03e47f))
+
 ## [0.3.15](https://github.com/derens99/fastest/compare/v0.3.14...v0.3.15) (2025-06-05)
 
 
