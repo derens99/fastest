@@ -1,0 +1,23 @@
+{
+  "latest": "0.2.0",
+  "minimum": "0.1.0",
+  "versions": {
+    "0.2.0": {
+      "date": "2025-05-28",
+      "downloads": {
+        "linux-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-linux-amd64.tar.gz",
+        "linux-arm64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-linux-arm64.tar.gz",
+        "darwin-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-darwin-amd64.tar.gz",
+        "darwin-arm64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-darwin-arm64.tar.gz",
+        "windows-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-windows-amd64.zip"
+      },
+      "checksums": {
+        "linux-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-linux-amd64.tar.gz.sha256",
+        "linux-arm64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-linux-arm64.tar.gz.sha256",
+        "darwin-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-darwin-amd64.tar.gz.sha256",
+        "darwin-arm64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-darwin-arm64.tar.gz.sha256",
+        "windows-amd64": "https://github.com/derens99/fastest/releases/download/v0.2.0/fastest-windows-amd64.zip.sha256"
+      }
+    }
+  }
+}

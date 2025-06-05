@@ -100,7 +100,7 @@ jobs:
           tool: cargo-dist@0.14.0
 
       - name: Run dist plan
-        run: dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
+        run: cargo dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
 
       - name: Upload plan
         uses: actions/upload-artifact@v4
@@ -171,7 +171,7 @@ jobs:
 
       - name: Build artifacts
         run: |
-          dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
+          cargo dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
           echo "cargo-dist output:"
           cat dist-output.json
 
