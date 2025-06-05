@@ -43,8 +43,8 @@ colored = "2.1"
 indicatif = "0.17"
 
 [workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI
-cargo-dist-version = "0.14.0"
+# Use the latest cargo-dist available in CI (no version pin)
+
 # CI backends to support
 ci = ["github"]
 # The installers to generate
@@ -57,8 +57,8 @@ targets = [
     "aarch64-apple-darwin",
     "x86_64-pc-windows-msvc"
 ]
-# Publish jobs to run in CI
-publish-jobs = ["homebrew"]
+# No publish jobs for now (can be re-enabled later)
+publish-jobs = []
 # Whether to install an updater program
 install-updater = false
 # Path to the binary to build
