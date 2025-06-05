@@ -1,3 +1,10 @@
+## [0.3.13](https://github.com/derens99/fastest/compare/v0.3.12...v0.3.13) (2025-06-05)
+
+
+### Bug Fixes
+
+* dist version ([123a6f0](https://github.com/derens99/fastest/commit/123a6f0d7f17fc815c1bb6df230e22607e1e41e5))
+
 ## [0.3.12](https://github.com/derens99/fastest/compare/v0.3.11...v0.3.12) (2025-06-05)
 
 
