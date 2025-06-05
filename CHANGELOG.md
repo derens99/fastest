@@ -1,3 +1,10 @@
+## [0.3.11](https://github.com/derens99/fastest/compare/v0.3.10...v0.3.11) (2025-06-05)
+
+
+### Bug Fixes
+
+* json fix ([c873246](https://github.com/derens99/fastest/commit/c873246c4769ff29081cda2630a830054ba3b9c1))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
