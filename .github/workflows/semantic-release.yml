@@ -90,7 +90,7 @@ jobs:
       - name: Install dist
         uses: taiki-e/install-action@v2
         with:
-          tool: dist
+          tool: cargo-dist
 
       - name: Run dist plan
         run: dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
@@ -144,7 +144,7 @@ jobs:
       - name: Install dist
         uses: taiki-e/install-action@v2
         with:
-          tool: dist
+          tool: cargo-dist
 
       - name: Install cross-compilation tools
         if: contains(matrix.targets, 'aarch64') && runner.os == 'Linux'
