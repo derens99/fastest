@@ -1,6 +1,6 @@
 [package]
 name = "fastest-plugins-macros"
-version = "0.3.14"
+version = "0.3.15"
 edition = "2021"
 
 [lib]
