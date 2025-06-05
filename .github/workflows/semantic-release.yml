@@ -1,153 +1,225 @@
-name: Semantic Release
+name: Release
 
 on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: write
   pull-requests: write
   issues: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
 
 jobs:
   semantic-release:
     name: Semantic Release
-    runs-on: ubuntu-22.04
-    # Skip if commit message contains [skip ci]
+    runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     outputs:
-      release_created: ${{ steps.check.outputs.release_created }}
-      release_tag: ${{ steps.check.outputs.release_tag }}
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_git_tag: ${{ steps.semantic.outputs.new_release_git_tag }}
     steps:
+      - name: Generate GitHub App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        continue-on-error: true
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
+          cache: npm
+          cache-dependency-path: '**/package-lock.json'
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Cache semantic-release
+        uses: actions/cache@v4
+        id: semantic-cache
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-semantic-release-${{ hashFiles('.releaserc*') }}
+          restore-keys: |
+            ${{ runner.os }}-semantic-release-
 
-      - name: Install dependencies
-        run: |
-          npm install -g \
-            semantic-release@23 \
-            @semantic-release/changelog@6 \
-            @semantic-release/git@10 \
-            @semantic-release/github@10 \
-            @semantic-release/exec@6 \
-            conventional-changelog-conventionalcommits@7
-
-      - name: Get current latest tag
-        id: current-tag
-        run: |
-          CURRENT_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          echo "current_tag=${CURRENT_TAG}" >> $GITHUB_OUTPUT
-
-      - name: Run semantic-release
+      - name: Semantic Release
+        id: semantic
+        uses: cycjimmy/semantic-release-action@v4
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npx semantic-release
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+        with:
+          semantic_version: 24
+          extra_plugins: |
+            @semantic-release/changelog@6
+            @semantic-release/git@10
+            @semantic-release/github@10
+            @semantic-release/exec@6
+            conventional-changelog-conventionalcommits@8
 
-      - name: Check if release was created
-        id: check
-        run: |
-          # Get the new latest tag
-          NEW_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          CURRENT_TAG="${{ steps.current-tag.outputs.current_tag }}"
-          
-          if [[ "${NEW_TAG}" != "${CURRENT_TAG}" ]] && [[ -n "${NEW_TAG}" ]]; then
-            echo "Release created: ${NEW_TAG}"
-            echo "release_created=true" >> $GITHUB_OUTPUT
-            echo "release_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
-          else
-            echo "No new release created"
-            echo "release_created=false" >> $GITHUB_OUTPUT
-          fi
-
-  build-binaries:
-    name: Build binaries
+  dist:
+    name: Build Distribution
     needs: semantic-release
-    if: needs.semantic-release.outputs.release_created == 'true'
-    strategy:
-      matrix:
-        include:
-          # Linux x86_64
-          - os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            archive_name: fastest-linux-amd64.tar.gz
-          # Linux aarch64
-          - os: ubuntu-22.04
-            target: aarch64-unknown-linux-gnu
-            archive_name: fastest-linux-arm64.tar.gz
-          # macOS x86_64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            archive_name: fastest-darwin-amd64.tar.gz
-          # macOS aarch64 (Apple Silicon)
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            archive_name: fastest-darwin-arm64.tar.gz
-    runs-on: ${{ matrix.os }}
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      artifacts: ${{ steps.dist.outputs.artifacts }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.semantic-release.outputs.release_tag }}
+          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
 
-      - name: Setup Rust
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist
+
+      - name: Run cargo-dist plan
+        id: plan
+        run: |
+          cargo dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
+          echo "cargo-dist plan:"
+          jq -r '.ci.github.artifacts_matrix.include[] | "\(.targets[]) on \(.runner)"' plan.json
+
+      - name: Upload plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-plan
+          path: plan.json
+          retention-days: 1
+
+  build:
+    name: Build ${{ matrix.display_name || matrix.targets }}
+    needs: [semantic-release, dist]
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu
+            display_name: Linux x64
+          - runner: ubuntu-latest
+            targets: aarch64-unknown-linux-gnu
+            display_name: Linux arm64
+          - runner: macos-latest
+            targets: x86_64-apple-darwin
+            display_name: macOS x64
+          - runner: macos-latest
+            targets: aarch64-apple-darwin
+            display_name: macOS arm64
+          - runner: windows-latest
+            targets: x86_64-pc-windows-msvc
+            display_name: Windows x64
+    runs-on: ${{ matrix.runner }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: true
+          cache-on-failure: true
+          prefix-key: v0-rust-${{ matrix.targets }}
+
+      - name: Install cargo-dist
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-dist
+
+      - name: Install cross-compilation tools
+        if: contains(matrix.targets, 'aarch64') && runner.os == 'Linux'
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        with:
+          target: ${{ matrix.targets }}
+
+      - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ matrix.targets }}
 
-      - name: Install dependencies
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y pkg-config
-          
-      - name: Install target-specific dependencies
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
-        run: |
-          sudo apt-get install -y libssl-dev
-          
-      - name: Install cross-compilation tools
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          # Install cross-compilation toolchain
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu libc6-dev-arm64-cross
-          
-          # Setup environment for cross-compilation
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++" >> $GITHUB_ENV
-          echo "AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar" >> $GITHUB_ENV
-
-      - name: Build binary
-        run: |
-          # Use vendored OpenSSL feature to avoid cross-compilation issues
-          cargo build --release --target ${{ matrix.target }} --features openssl/vendored
-          
-      - name: Create archive
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/fastest dist/
-          chmod +x dist/fastest
-          tar -czf ${{ matrix.archive_name }} -C dist fastest
-          
-      - name: Upload to release
-        uses: svenstaro/upload-release-action@v2
+      - name: Download dist plan
+        uses: actions/download-artifact@v4
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: ${{ matrix.archive_name }}
-          asset_name: ${{ matrix.archive_name }}
-          tag: ${{ needs.semantic-release.outputs.release_tag }}
-          overwrite: true
+          name: dist-plan
+
+      - name: Build artifacts
+        run: |
+          cargo dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
+          echo "cargo-dist output:"
+          cat dist-output.json
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.targets }}
+          path: target/distrib/*
+          retention-days: 1
+
+  publish:
+    name: Publish Release
+    needs: [semantic-release, build]
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: |
+          echo "Downloaded artifacts:"
+          find dist -type f -name "*" | sort
+
+      - name: Create checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.sha256
+          echo "Checksums:"
+          cat checksums.sha256
+
+      - name: Attach artifacts to release
+        run: |
+          gh release upload ${{ needs.semantic-release.outputs.new_release_git_tag }} dist/* --clobber
+
+      # Crates.io publishing removed - not needed for this project
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: dist/*

@@ -16,7 +16,7 @@ serde.workspace = true
 serde_json.workspace = true
 
 # Git integration for incremental testing
-git2 = "0.18"
+git2 = { version = "0.18", features = ["vendored-openssl"] }
 
 # Dependency graph management
 petgraph = "0.6"
@@ -35,7 +35,7 @@ notify = "6.0"
 # Updates and packaging
 semver = "1.0"
 tar = "0.4"
-ureq = { version = "2.9", features = ["json"] }
+ureq = { version = "2.9", features = ["json", "native-certs"] }
 zip = "0.6"
 
 # Time handling
