@@ -13,7 +13,7 @@ permissions:
 jobs:
   semantic-release:
     name: Semantic Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     # Skip if commit message contains [skip ci]
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
     outputs:
@@ -81,11 +81,11 @@ jobs:
       matrix:
         include:
           # Linux x86_64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             archive_name: fastest-linux-amd64.tar.gz
           # Linux aarch64
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: aarch64-unknown-linux-gnu
             archive_name: fastest-linux-arm64.tar.gz
           # macOS x86_64
