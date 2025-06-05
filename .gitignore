@@ -74,7 +74,6 @@ tmp/
 temp/
 
 # Build and benchmark artifacts
-*.json
 !package.json
 comparison_results/
 debug_*.py

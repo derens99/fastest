@@ -51,6 +51,13 @@ jobs:
         with:
           node-version: 20
 
+      # Install Rust and cargo-edit so the exec plugin can bump Cargo.toml versions
+      - name: Setup Rust toolchain (for version bump)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-edit
+        run: cargo install cargo-edit --locked
+
       - name: Cache semantic-release
         uses: actions/cache@v4
         id: semantic-cache
