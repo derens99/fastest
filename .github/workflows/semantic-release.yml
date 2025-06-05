@@ -87,17 +87,13 @@ jobs:
         with:
           ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
 
-      - name: Install cargo-dist
+      - name: Install dist
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-dist
+          tool: dist
 
-      - name: Run cargo-dist plan
-        id: plan
-        run: |
-          cargo dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
-          echo "cargo-dist plan:"
-          jq -r '.ci.github.artifacts_matrix.include[] | "\(.targets[]) on \(.runner)"' plan.json
+      - name: Run dist plan
+        run: dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
 
       - name: Upload plan
         uses: actions/upload-artifact@v4
@@ -145,10 +141,10 @@ jobs:
           cache-on-failure: true
           prefix-key: v0-rust-${{ matrix.targets }}
 
-      - name: Install cargo-dist
+      - name: Install dist
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-dist
+          tool: dist
 
       - name: Install cross-compilation tools
         if: contains(matrix.targets, 'aarch64') && runner.os == 'Linux'
@@ -168,7 +164,7 @@ jobs:
 
       - name: Build artifacts
         run: |
-          cargo dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
+          dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
           echo "cargo-dist output:"
           cat dist-output.json
 
