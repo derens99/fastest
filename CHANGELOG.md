@@ -1,3 +1,10 @@
+## [0.3.17](https://github.com/derens99/fastest/compare/v0.3.16...v0.3.17) (2025-06-05)
+
+
+### Bug Fixes
+
+* ci ([317dc6e](https://github.com/derens99/fastest/commit/317dc6ea086a978ee8908b4a940d3bd76ee76d97))
+
 ## [0.3.16](https://github.com/derens99/fastest/compare/v0.3.15...v0.3.16) (2025-06-05)
 
 
