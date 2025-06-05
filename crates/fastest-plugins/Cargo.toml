@@ -1,35 +1,39 @@
 [package]
 name = "fastest-plugins"
-version.workspace = true
-authors.workspace = true
-edition.workspace = true
-license.workspace = true
-description = "Plugin system for Fastest test runner"
+version = "0.1.0"
+edition = "2021"
+authors = ["Fastest Contributors"]
+description = "Plugin system for the Fastest test runner"
+license = "MIT"
+repository = "https://github.com/derens99/fastest"
 
 [dependencies]
 # Core dependencies
 fastest-core = { path = "../fastest-core" }
-anyhow.workspace = true
-thiserror.workspace = true
-serde.workspace = true
-serde_json.workspace = true
+thiserror = "1.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
-# Plugin system
-inventory = "0.3"                   # Plugin discovery
-linkme = "0.3"                      # Static plugin linking
-libloading = "0.8"                  # Dynamic plugin loading
-async-trait = "0.1"                 # Async trait support
-uuid = { version = "1.0", features = ["v4"] }
+# Plugin loading
+once_cell = "1.19"
+inventory = "0.3"
+linkme = "0.3"
+dlopen2 = "0.7"  # For dynamic plugin loading
 
-# Concurrency
-dashmap = "6.1"                     # Concurrent HashMap
-tokio = { version = "1.24", features = ["rt", "time", "sync"] }
-
-# Python integration for conftest.py
+# Python integration
 pyo3 = { version = "0.19", features = ["auto-initialize"] }
-ignore = "0.4"                      # Fast directory walking
-regex = "1.11"                      # Regular expressions
-chrono = { version = "0.4", features = ["serde"] }  # Date/time handling
+
+# Async support
+tokio = { version = "1.35", features = ["sync", "rt"] }
+async-trait = "0.1"
+
+# Collections
+indexmap = "2.0"
+parking_lot = "0.12"
+
+# Logging
+tracing = "0.1"
 
 [dev-dependencies]
 tempfile = "3.8"

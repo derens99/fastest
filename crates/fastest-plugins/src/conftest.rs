@@ -1,359 +1,306 @@
-//! Smart conftest.py Discovery and Loading
+//! Conftest Plugin Support - Load plugins from conftest.py files
 //!
-//! Fast, minimal conftest.py handling using external libraries for performance
+//! This module provides support for pytest's conftest.py plugin system,
+//! allowing users to define hooks and fixtures in Python.
 
-use anyhow::Result;
-use dashmap::DashMap;
-use ignore::WalkBuilder;
-use pyo3::prelude::*;
+use std::path::Path;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use pyo3::prelude::*;
+use pyo3::types::{PyDict, PyList, PyModule};
 
-use super::Plugin;
-use super::hooks::{HookData, HookRegistry, HookResult};
+use crate::api::{Plugin, PluginMetadata, PluginError, PluginResult};
+use crate::hooks::{Hook, HookArgs, HookReturn, HookResult};
 
-/// Fast conftest.py loader using ignore crate for performance
-pub struct ConftestLoader {
-    discovered: Arc<DashMap<PathBuf, ConftestFile>>,
-    loaded: Arc<DashMap<PathBuf, ConftestPlugin>>,
-}
-
-/// Represents a conftest.py file
-#[derive(Debug, Clone)]
-pub struct ConftestFile {
-    pub path: PathBuf,
-    pub content: String,
-    pub mtime: std::time::SystemTime,
-    pub fixtures: Vec<String>,
-    pub hooks: Vec<String>,
-    pub plugins: Vec<String>,
-}
-
-/// Runtime conftest plugin instance
+/// A plugin loaded from conftest.py
 pub struct ConftestPlugin {
-    pub file: ConftestFile,
-    pub python_module: Option<PyObject>,
-    pub fixtures: HashMap<String, PyObject>,
-    pub hooks: HashMap<String, PyObject>,
+    metadata: PluginMetadata,
+    module: PyObject,
+    hooks: HashMap<String, PyObject>,
+}
+
+impl ConftestPlugin {
+    /// Load a conftest.py file
+    pub fn load(py: Python, path: &Path) -> PluginResult<Self> {
+        // Read the conftest.py file
+        let code = std::fs::read_to_string(path)
+            .map_err(|e| PluginError::InitializationFailed(
+                format!("Failed to read conftest.py: {}", e)
+            ))?;
+        
+        // Create a module name from the path
+        let module_name = path.file_stem()
+            .and_then(|n| n.to_str())
+            .unwrap_or("conftest");
+        
+        // Execute the conftest.py code
+        let module = PyModule::from_code(py, &code, &format!("{}.py", module_name), module_name)
+            .map_err(|e| PluginError::InitializationFailed(
+                format!("Failed to execute conftest.py: {}", e)
+            ))?;
+        
+        // Discover hooks in the module
+        let hooks = Self::discover_hooks(py, module)?;
+        
+        let metadata = PluginMetadata {
+            name: format!("conftest:{}", path.display()),
+            version: "0.1.0".to_string(),
+            description: format!("Conftest plugin from {}", path.display()),
+            priority: -100, // Conftest plugins run after built-in plugins
+            ..Default::default()
+        };
+        
+        Ok(Self {
+            metadata,
+            module: module.into(),
+            hooks,
+        })
+    }
+    
+    /// Discover pytest hooks in the module
+    fn discover_hooks(py: Python, module: &PyModule) -> PyResult<HashMap<String, PyObject>> {
+        let mut hooks = HashMap::new();
+        
+        // List of known pytest hooks
+        let hook_names = [
+            "pytest_configure",
+            "pytest_unconfigure",
+            "pytest_sessionstart",
+            "pytest_sessionfinish",
+            "pytest_collection_start",
+            "pytest_collection_modifyitems",
+            "pytest_collection_finish",
+            "pytest_runtest_protocol",
+            "pytest_runtest_setup",
+            "pytest_runtest_call",
+            "pytest_runtest_teardown",
+            "pytest_runtest_makereport",
+            "pytest_exception_interact",
+            "pytest_fixture_setup",
+            "pytest_fixture_post_finalizer",
+            "pytest_make_parametrize_id",
+            "pytest_generate_tests",
+        ];
+        
+        // Check for each hook
+        for hook_name in &hook_names {
+            if let Ok(hook_fn) = module.getattr(hook_name) {
+                if hook_fn.is_callable() {
+                    hooks.insert(hook_name.to_string(), hook_fn.into());
+                }
+            }
+        }
+        
+        // Also discover fixture functions
+        let locals = PyDict::new(py);
+        locals.set_item("module", module)?;
+        
+        py.run(r#"
+import inspect
+
+fixtures = {}
+for name, obj in inspect.getmembers(module):
+    # Check if it's a fixture
+    if hasattr(obj, '_pytestfixturefunction'):
+        fixtures[name] = {
+            'func': obj,
+            'scope': getattr(obj._pytestfixturefunction, 'scope', 'function'),
+            'autouse': getattr(obj._pytestfixturefunction, 'autouse', False),
+            'params': getattr(obj._pytestfixturefunction, 'params', None),
+        }
+    elif name.startswith('fixture_') or name.endswith('_fixture'):
+        # Heuristic for fixtures without decorator
+        if callable(obj) and not name.startswith('_'):
+            fixtures[name] = {
+                'func': obj,
+                'scope': 'function',
+                'autouse': False,
+                'params': None,
+            }
+"#, None, Some(locals))?;
+        
+        // Store fixture definitions as a special hook
+        if let Ok(fixtures) = locals.get_item("fixtures") {
+            hooks.insert("_fixtures".to_string(), fixtures.into());
+        }
+        
+        Ok(hooks)
+    }
+    
+    /// Get a hook implementation
+    pub fn get_hook(&self, name: &str) -> Option<PyObject> {
+        self.hooks.get(name).cloned()
+    }
+    
+    /// Call a Python hook
+    pub fn call_hook(&self, py: Python, name: &str, args: &HookArgs) -> HookResult<HookReturn> {
+        if let Some(hook_fn) = self.hooks.get(name) {
+            // Convert HookArgs to Python kwargs
+            let kwargs = PyDict::new(py);
+            
+            // TODO: Properly convert HookArgs to Python arguments
+            // For now, just call with no args
+            
+            match hook_fn.call0(py) {
+                Ok(result) => {
+                    // Convert Python result to HookReturn
+                    if result.is_none(py) {
+                        Ok(HookReturn::None)
+                    } else if let Ok(b) = result.extract::<bool>(py) {
+                        Ok(HookReturn::Bool(b))
+                    } else if let Ok(s) = result.extract::<String>(py) {
+                        Ok(HookReturn::String(s))
+                    } else {
+                        Ok(HookReturn::None)
+                    }
+                }
+                Err(e) => Err(HookError::ExecutionFailed(format!("Python hook failed: {}", e))),
+            }
+        } else {
+            Ok(HookReturn::None)
+        }
+    }
+}
+
+impl std::fmt::Debug for ConftestPlugin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConftestPlugin")
+            .field("metadata", &self.metadata)
+            .field("hooks", &self.hooks.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl Plugin for ConftestPlugin {
+    fn metadata(&self) -> &PluginMetadata {
+        &self.metadata
+    }
+    
+    fn initialize(&mut self) -> PluginResult<()> {
+        Python::with_gil(|py| {
+            // Call pytest_configure if it exists
+            if let Err(e) = self.call_hook(py, "pytest_configure", &HookArgs::new()) {
+                eprintln!("pytest_configure failed: {}", e);
+            }
+            Ok(())
+        })
+    }
+    
+    fn shutdown(&mut self) -> PluginResult<()> {
+        Python::with_gil(|py| {
+            // Call pytest_unconfigure if it exists
+            if let Err(e) = self.call_hook(py, "pytest_unconfigure", &HookArgs::new()) {
+                eprintln!("pytest_unconfigure failed: {}", e);
+            }
+            Ok(())
+        })
+    }
+    
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    
+    fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
+        self
+    }
+}
+
+/// Conftest loader for discovering and loading conftest.py files
+pub struct ConftestLoader {
+    /// Loaded conftest modules by path
+    loaded: HashMap<std::path::PathBuf, ConftestPlugin>,
 }
 
 impl ConftestLoader {
     pub fn new() -> Self {
         Self {
-            discovered: Arc::new(DashMap::new()),
-            loaded: Arc::new(DashMap::new()),
+            loaded: HashMap::new(),
         }
     }
-
-    /// Fast discovery using ignore crate (same as ripgrep)
-    pub fn discover_conftest_files(&self, search_paths: &[PathBuf]) -> Result<Vec<ConftestFile>> {
-        let mut conftest_files = Vec::new();
-
-        for search_path in search_paths {
-            let walker = WalkBuilder::new(search_path)
-                .hidden(false)
-                .ignore(false)
-                .git_ignore(true)
-                .add_custom_ignore_filename("pytest.ignore")
-                .filter_entry(|entry| {
-                    entry.file_name() == "conftest.py"
-                        || entry.file_type().map_or(false, |ft| ft.is_dir())
-                })
-                .build();
-
-            for entry in walker {
-                let entry = entry?;
-                if entry.file_name() == "conftest.py" {
-                    let conftest = self.parse_conftest_file(entry.path())?;
-                    self.discovered
-                        .insert(entry.path().to_path_buf(), conftest.clone());
-                    conftest_files.push(conftest);
-                }
-            }
-        }
-
-        Ok(conftest_files)
-    }
-
-    /// Smart conftest.py parsing using tree-sitter for speed
-    fn parse_conftest_file(&self, path: &Path) -> Result<ConftestFile> {
-        let content = std::fs::read_to_string(path)?;
-        let mtime = std::fs::metadata(path)?.modified()?;
-
-        let mut fixtures = Vec::new();
-        let mut hooks = Vec::new();
+    
+    /// Load all conftest.py files in the path hierarchy
+    pub fn load_hierarchy(&mut self, start_path: &Path) -> PluginResult<Vec<&ConftestPlugin>> {
         let mut plugins = Vec::new();
-
-        // Parse fixtures
-        let fixture_re = regex::Regex::new(r"@pytest\.fixture\s*\n\s*def\s+(\w+)").unwrap();
-        for cap in fixture_re.captures_iter(&content) {
-            if let Some(fixture_name) = cap.get(1) {
-                fixtures.push(fixture_name.as_str().to_string());
+        let mut current = start_path.to_path_buf();
+        
+        // Walk up the directory tree
+        loop {
+            let conftest_path = current.join("conftest.py");
+            if conftest_path.exists() && !self.loaded.contains_key(&conftest_path) {
+                Python::with_gil(|py| {
+                    match ConftestPlugin::load(py, &conftest_path) {
+                        Ok(plugin) => {
+                            self.loaded.insert(conftest_path.clone(), plugin);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load {}: {}", conftest_path.display(), e);
+                        }
+                    }
+                });
+            }
+            
+            if self.loaded.contains_key(&conftest_path) {
+                plugins.push(&self.loaded[&conftest_path]);
+            }
+            
+            // Move up one directory
+            if !current.pop() {
+                break;
             }
         }
-
-        // Parse hooks
-        let hook_re = regex::Regex::new(r"def\s+pytest_(\w+)").unwrap();
-        for cap in hook_re.captures_iter(&content) {
-            if let Some(hook_name) = cap.get(1) {
-                hooks.push(format!("pytest_{}", hook_name.as_str()));
-            }
-        }
-
-        // Parse plugins
-        let plugin_re = regex::Regex::new(r"pytest_plugins\s*=\s*\[(.*?)\]").unwrap();
-        if let Some(cap) = plugin_re.captures(&content) {
-            if let Some(plugins_str) = cap.get(1) {
-                let plugin_names: Vec<&str> = plugins_str
-                    .as_str()
-                    .split(',')
-                    .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\''))
-                    .collect();
-                plugins.extend(plugin_names.into_iter().map(String::from));
-            }
-        }
-
-        Ok(ConftestFile {
-            path: path.to_path_buf(),
-            content,
-            mtime,
-            fixtures,
-            hooks,
-            plugins,
-        })
-    }
-
-    /// Load conftest.py files into Python runtime
-    pub fn discover_and_load(&self, search_paths: &[PathBuf]) -> Result<Vec<Box<dyn Plugin>>> {
-        let conftest_files = self.discover_conftest_files(search_paths)?;
-        let mut plugins = Vec::new();
-
-        Python::with_gil(|py| -> Result<()> {
-            for conftest_file in conftest_files {
-                let plugin = self.load_conftest_plugin(py, conftest_file)?;
-                let boxed_plugin: Box<dyn Plugin> = Box::new(plugin);
-                plugins.push(boxed_plugin);
-            }
-            Ok(())
-        })?;
-
+        
+        // Return in order from root to leaf
+        plugins.reverse();
         Ok(plugins)
     }
-
-    fn load_conftest_plugin(
-        &self,
-        py: Python,
-        conftest_file: ConftestFile,
-    ) -> Result<ConftestPluginWrapper> {
-        // Execute conftest.py in Python
-        let module = PyModule::from_code(
-            py,
-            &conftest_file.content,
-            &conftest_file.path.to_string_lossy(),
-            "conftest",
-        )?;
-
-        let mut fixtures = HashMap::new();
-        let mut hooks = HashMap::new();
-
-        // Extract fixtures
-        for fixture_name in &conftest_file.fixtures {
-            if let Ok(fixture_fn) = module.getattr(fixture_name.as_str()) {
-                fixtures.insert(fixture_name.clone(), fixture_fn.to_object(py));
-            }
-        }
-
-        // Extract hooks
-        for hook_name in &conftest_file.hooks {
-            if let Ok(hook_fn) = module.getattr(hook_name.as_str()) {
-                hooks.insert(hook_name.clone(), hook_fn.to_object(py));
-            }
-        }
-
-        let plugin = ConftestPlugin {
-            file: conftest_file.clone(),
-            python_module: Some(module.to_object(py)),
-            fixtures,
-            hooks,
-        };
-
-        self.loaded.insert(conftest_file.path.clone(), plugin);
-
-        Ok(ConftestPluginWrapper {
-            file: conftest_file,
-        })
-    }
-
-    /// Get conftest files for a specific test path (inheritance chain)
-    pub fn get_conftest_chain(&self, test_path: &Path) -> Vec<ConftestFile> {
-        let mut chain = Vec::new();
-        let mut current_path = test_path.parent();
-
-        while let Some(path) = current_path {
-            let conftest_path = path.join("conftest.py");
-            if let Some(conftest) = self.discovered.get(&conftest_path) {
-                chain.push(conftest.value().clone());
-            }
-            current_path = path.parent();
-        }
-
-        // Reverse to get root-to-leaf order
-        chain.reverse();
-        chain
-    }
-
-    /// Reload conftest files if changed
-    pub fn reload_if_changed(&self) -> Result<Vec<PathBuf>> {
-        let mut reloaded = Vec::new();
-
-        for entry in self.discovered.iter() {
-            let path = entry.key();
-            let conftest = entry.value();
-
-            if let Ok(metadata) = std::fs::metadata(path) {
-                if let Ok(mtime) = metadata.modified() {
-                    if mtime > conftest.mtime {
-                        // File changed, reload
-                        let new_conftest = self.parse_conftest_file(path)?;
-                        self.discovered.insert(path.clone(), new_conftest);
-                        reloaded.push(path.clone());
+    
+    /// Get fixtures from all loaded conftest files
+    pub fn collect_fixtures(&self, py: Python) -> HashMap<String, PyObject> {
+        let mut all_fixtures = HashMap::new();
+        
+        for plugin in self.loaded.values() {
+            if let Some(fixtures_obj) = plugin.get_hook("_fixtures") {
+                if let Ok(fixtures_dict) = fixtures_obj.downcast::<PyDict>(py) {
+                    for (name, fixture_info) in fixtures_dict {
+                        if let Ok(name_str) = name.extract::<String>() {
+                            all_fixtures.insert(name_str, fixture_info.into());
+                        }
                     }
                 }
             }
         }
-
-        Ok(reloaded)
+        
+        all_fixtures
     }
 }
 
-/// Wrapper to make ConftestPlugin implement Plugin trait
-pub struct ConftestPluginWrapper {
-    file: ConftestFile,
+/// Create a conftest hook wrapper
+pub struct ConftestHook {
+    plugin: ConftestPlugin,
+    hook_name: String,
 }
 
-impl Plugin for ConftestPluginWrapper {
+impl ConftestHook {
+    pub fn new(plugin: ConftestPlugin, hook_name: String) -> Self {
+        Self { plugin, hook_name }
+    }
+}
+
+impl Hook for ConftestHook {
     fn name(&self) -> &str {
-        "conftest"
+        &self.hook_name
     }
-
-    fn pytest_compatible(&self) -> bool {
-        true
-    }
-
-    fn register_hooks(&self, registry: &mut HookRegistry) -> Result<()> {
-        let file_path = self.file.path.clone();
-
-        // Register each hook found in the conftest file
-        for hook_name in &self.file.hooks {
-            let hook_name_clone = hook_name.clone();
-            let file_path_clone = file_path.clone();
-
-            registry.add_hook(&hook_name, move |_data: &HookData| -> Result<HookResult> {
-                // Execute the Python hook function
-                Python::with_gil(|_py| -> Result<HookResult> {
-                    // This is a simplified implementation
-                    // In practice, we'd need to call the actual Python function
-                    Ok(HookResult::Value(serde_json::json!({
-                        "conftest": file_path_clone.to_string_lossy(),
-                        "hook": hook_name_clone,
-                        "executed": true
-                    })))
-                })
-            })?;
-        }
-
-        Ok(())
+    
+    fn execute(&self, args: HookArgs) -> HookResult<HookReturn> {
+        Python::with_gil(|py| {
+            self.plugin.call_hook(py, &self.hook_name, &args)
+        })
     }
 }
 
-impl Default for ConftestLoader {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use tempfile::TempDir;
-
-    #[test]
-    fn test_conftest_discovery() {
-        let temp_dir = TempDir::new().unwrap();
-        let conftest_path = temp_dir.path().join("conftest.py");
-
-        std::fs::write(
-            &conftest_path,
-            r#"
-import pytest
-
-@pytest.fixture
-def sample_fixture():
-    return "test_value"
-
-def pytest_configure(config):
-    pass
-
-pytest_plugins = ["pytest_html", "pytest_cov"]
-"#,
-        )
-        .unwrap();
-
-        let loader = ConftestLoader::new();
-        let conftest_files = loader
-            .discover_conftest_files(&[temp_dir.path().to_path_buf()])
-            .unwrap();
-
-        assert_eq!(conftest_files.len(), 1);
-
-        // Parse the conftest file content to extract fixtures and hooks
-        let content = std::fs::read_to_string(&conftest_path).unwrap();
-        let mut fixtures = Vec::new();
-        let mut hooks = Vec::new();
-        let mut plugins = Vec::new();
-
-        // Extract fixtures
-        if content.contains("@pytest.fixture") {
-            fixtures.push("sample_fixture".to_string());
-        }
-
-        // Extract hooks
-        if content.contains("pytest_configure") {
-            hooks.push("pytest_configure".to_string());
-        }
-
-        // Extract plugins
-        if content.contains("pytest_plugins") {
-            plugins.extend(vec!["pytest_html".to_string(), "pytest_cov".to_string()]);
-        }
-
-        assert_eq!(conftest_files[0].fixtures, fixtures);
-        assert_eq!(conftest_files[0].hooks, hooks);
-        assert_eq!(conftest_files[0].plugins, plugins);
-    }
-
-    #[test]
-    fn test_conftest_chain() {
-        let temp_dir = TempDir::new().unwrap();
-        let root_conftest = temp_dir.path().join("conftest.py");
-        let sub_dir = temp_dir.path().join("tests");
-        let sub_conftest = sub_dir.join("conftest.py");
-
-        std::fs::create_dir(&sub_dir).unwrap();
-        std::fs::write(&root_conftest, "# root conftest").unwrap();
-        std::fs::write(&sub_conftest, "# sub conftest").unwrap();
-
-        let loader = ConftestLoader::new();
-        loader
-            .discover_conftest_files(&[temp_dir.path().to_path_buf()])
-            .unwrap();
-
-        let test_file = sub_dir.join("test_example.py");
-        let chain = loader.get_conftest_chain(&test_file);
-
-        assert_eq!(chain.len(), 2);
-        assert!(chain[0].path.ends_with("conftest.py"));
-        assert!(chain[1].path.ends_with("tests/conftest.py"));
+impl std::fmt::Debug for ConftestHook {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConftestHook")
+            .field("hook_name", &self.hook_name)
+            .finish()
     }
 }

@@ -104,6 +104,48 @@ Sets up real-world test repositories for validation and testing.
 ./scripts/setup_test_repos.sh
 ```
 
+### `run_full_benchmark.sh`
+Runs the complete benchmark suite including all performance tests.
+
+**Usage:**
+```bash
+./scripts/run_full_benchmark.sh
+```
+
+## 🧪 Feature Testing Scripts
+
+### `test_markers.py`
+Tests the marker system functionality including @pytest.mark.skip, xfail, skipif, and custom markers.
+
+**Usage:**
+```bash
+python scripts/test_markers.py
+```
+
+### `test_parametrization.py`
+Tests parametrization functionality with various parameter types and combinations.
+
+**Usage:**
+```bash
+python scripts/test_parametrization.py
+```
+
+### `test_plugins.py`
+Tests the plugin system including loading, hooks, CLI options, and built-in plugins.
+
+**Usage:**
+```bash
+python scripts/test_plugins.py
+```
+
+### `optimization_results.py`
+Analyzes and displays optimization results from benchmarks.
+
+**Usage:**
+```bash
+python scripts/optimization_results.py
+```
+
 ## 📋 Running Benchmarks
 
 ### For Official Results (CI/Release)

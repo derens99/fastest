@@ -8,7 +8,6 @@ pub mod dependencies;
 pub mod incremental;
 pub mod prioritization;
 pub mod phase3;
-pub mod simple;
 pub mod updates;
 pub mod watch;
 

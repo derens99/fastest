@@ -86,3 +86,7 @@ test_results/
 
 # Other
 CLAUDE.md
+
+# Node.js dependencies
+node_modules/
+package-lock.json

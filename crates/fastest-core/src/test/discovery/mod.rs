@@ -14,6 +14,7 @@ use once_cell::sync::Lazy;
 use aho_corasick::{AhoCorasick, AhoCorasickBuilder, MatchKind};
 use regex::Regex;
 use crate::test::parser::Parser as TsParser;
+use crate::test::parametrize::expand_parametrized_tests;
 use smallvec::SmallVec;
 use std::time::Instant;
 use std::collections::HashMap;
@@ -106,17 +107,15 @@ fn discover_tests_in_file(file_path: &Path) -> Result<Vec<TestItem>> {
 fn discover_tests_in_file_tree_sitter_cached(file_path: &Path, content: &str) -> Result<Vec<TestItem>> {
     // Use thread-local parser to eliminate parser creation overhead
     let tests = with_thread_local_parser(|parser| {
-        let (_, tests) = parser.parse_content(content)?;
+        let (_, tests, _, _) = parser.parse_content(content)?;
         Ok(tests)
     })?;
 
     let mut items = Vec::with_capacity(tests.len() * 2); // Pre-allocate assuming some parametrized tests
 
     for test in tests {
-        
         let decorators = test.decorators.clone();
         let fixture_deps = test.parameters.clone();
-        let is_xfail = decorators.iter().any(|d| d.contains("xfail") || d.contains("pytest.mark.xfail"));
         let line_number = Some(test.line_number);
 
         // Build base id (path::class::func)
@@ -126,29 +125,23 @@ fn discover_tests_in_file_tree_sitter_cached(file_path: &Path, content: &str) ->
             format!("{}::{}", file_path.display(), test.name)
         };
 
-        // Handle parametrization cases
-        let param_cases = helper_count_parametrize_cases(&decorators);
+        // Create base test item
+        let base_test = TestItem {
+            id: base_id,
+            path: file_path.to_path_buf(),
+            name: test.name.clone(),
+            function_name: test.name.clone(),
+            line_number,
+            decorators: decorators.clone(),
+            is_async: test.is_async,
+            fixture_deps,
+            class_name: test.class_name.clone(),
+            is_xfail: false,
+        };
 
-        for i in 0..param_cases {
-            let (id, name) = if param_cases > 1 {
-                (format!("{}[{}]", base_id, i), format!("{}[{}]", test.name, i))
-            } else {
-                (base_id.clone(), test.name.clone())
-            };
-
-            items.push(TestItem {
-                id,
-                path: file_path.to_path_buf(),
-                name,
-                function_name: test.name.clone(),
-                line_number,
-                decorators: decorators.clone(),
-                is_async: test.is_async,
-                fixture_deps: fixture_deps.clone(),
-                class_name: test.class_name.clone(),
-                is_xfail,
-            });
-        }
+        // Use expand_parametrized_tests to properly handle parametrization
+        let expanded = expand_parametrized_tests(&base_test, &decorators)?;
+        items.extend(expanded);
     }
 
     Ok(items)
