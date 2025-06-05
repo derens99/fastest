@@ -18,6 +18,7 @@ use super::AdvancedConfig;
 
 /// Smart incremental tester using git integration
 pub struct IncrementalTester {
+    #[allow(dead_code)]
     config: AdvancedConfig,
     git_repo: Option<Repository>,
     file_hashes: Arc<RwLock<HashMap<PathBuf, String>>>,
@@ -236,7 +237,7 @@ impl IncrementalTester {
             return Ok(affected);
         }
 
-        let content = std::fs::read_to_string(file_path)?;
+        let _content = std::fs::read_to_string(file_path)?;
         let file_stem = file_path.file_stem()
             .unwrap_or_default()
             .to_string_lossy()
@@ -415,7 +416,7 @@ impl IncrementalTester {
 
     /// Cleanup old cache entries
     pub async fn cleanup_cache(&self, max_age_days: u64) -> Result<()> {
-        let cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
+        let _cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
         let mut cache = self.test_cache.write().await;
         
         // Remove old entries (LRU will handle this automatically)
@@ -429,7 +430,7 @@ impl IncrementalTester {
     }
     
     /// Get tests that depend on a given file (for watch mode compatibility)
-    pub fn get_dependents(&self, file_path: &Path) -> Option<Vec<String>> {
+    pub fn get_dependents(&self, _file_path: &Path) -> Option<Vec<String>> {
         // This is a synchronous version for compatibility with the watch mode
         // In a real implementation, this would need to use tokio::runtime::Handle::current().block_on()
         // For now, return empty to avoid blocking

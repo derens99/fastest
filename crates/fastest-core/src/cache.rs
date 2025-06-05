@@ -1,5 +1,6 @@
 use crate::test::discovery::TestItem;
 use crate::error::Result;
+use crate::utils::simd_json; // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -41,7 +42,7 @@ impl DiscoveryCache {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
 
-        let mut cache: Self = serde_json::from_reader(reader)?;
+        let mut cache: Self = simd_json::from_reader(reader)?;
 
         // Check version compatibility and validate cache integrity
         if cache.version != Self::CURRENT_VERSION {
@@ -77,7 +78,7 @@ impl DiscoveryCache {
             let file = File::create(&temp_path)?;
             let writer = BufWriter::new(file);
 
-            serde_json::to_writer(writer, self)?;
+            simd_json::to_writer(writer, self)?;
         }
 
         // Atomic rename

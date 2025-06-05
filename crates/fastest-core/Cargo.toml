@@ -12,6 +12,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+simd-json = { version = "0.13", features = ["serde_impl"] }  # 2-3x faster JSON parsing
 
 # Test discovery and parsing
 walkdir.workspace = true
@@ -31,6 +32,12 @@ toml = "0.8"                        # Config parsing
 xxhash-rust = { version = "0.8.7", features = ["xxh3"] } # Fast non-cryptographic hashing
 dirs = "5.0"                        # Directory utilities
 rayon = "1.8"                       # Parallel processing
+
+# Fixture system dependencies
+topological-sort = "0.2"            # Dependency ordering
+uuid = { version = "1.0", features = ["v4", "serde"] } # Unique IDs
+parking_lot = "0.12"                # Better synchronization primitives
+
 
 [dev-dependencies]
 tempfile = "3.8"

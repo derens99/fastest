@@ -9,7 +9,6 @@ pub mod error;
 pub mod incremental;
 pub mod prioritization;
 pub mod phase3;
-pub mod simple;
 pub mod updates;
 pub mod watch;
 
@@ -67,6 +66,7 @@ impl Default for AdvancedConfig {
 
 /// Smart advanced features manager
 pub struct AdvancedManager {
+    #[allow(dead_code)]
     config: AdvancedConfig,
 }
 

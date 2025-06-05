@@ -2,33 +2,40 @@
 //!
 //! Streamlined execution crate with SIMD-accelerated discovery consolidated into core.
 //! Single UltraFastExecutor implementation for maximum performance and simplicity.
+//!
+//! ## Architecture
+//!
+//! The crate is organized into three main modules:
+//!
+//! - **`core`**: Core execution functionality including strategies, runtime, and fixture execution
+//! - **`infrastructure`**: Supporting systems for parallel execution, output capture, and timeouts  
+//! - **`experimental`**: Cutting-edge optimizations including zero-copy, work-stealing, and JIT compilation
 
-pub mod runtime;       // Python runtime integration
-pub mod strategies;    // Main execution strategies (UltraFastExecutor only)
-pub mod parallel;      // Parallel execution
-pub mod capture;       // Output capture
-pub mod timeout;       // Timeout handling
-
-// 🗑️ REMOVED: simd_discovery - consolidated into fastest-core discovery module
-
-// Revolutionary performance modules - fully implemented SIMD-accelerated systems
-pub mod zero_copy;           // Zero-copy memory architecture with arena allocation and string interning
-pub mod work_stealing;       // Lock-free work-stealing parallelism with SIMD acceleration
-pub mod native_transpiler;   // JIT compilation with Cranelift and BLAKE3 pattern recognition
-pub mod execution;           // Advanced fixture execution
+pub mod core;           // Core execution functionality
+pub mod infrastructure; // Supporting systems
+pub mod experimental;   // Experimental optimizations
+pub mod utils;          // Utility modules including SIMD optimizations
 
 // Re-export the main execution module that was in mod.rs
 use serde::{Deserialize, Serialize};
 
-// Re-export main types
-pub use strategies::{DevExperienceConfig, PluginCompatibilityConfig};
 use std::time::Duration;
+
+/// Outcome of a test execution
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TestOutcome {
+    Passed,
+    Failed,
+    Skipped { reason: Option<String> },
+    XFailed { reason: Option<String> },
+    XPassed,  // Expected to fail but passed
+}
 
 /// Result of running a test
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TestResult {
     pub test_id: String,
-    pub passed: bool,
+    pub outcome: TestOutcome,
     pub duration: Duration,
     pub output: String,
     pub error: Option<String>,
@@ -36,17 +43,30 @@ pub struct TestResult {
     pub stderr: String,
 }
 
-// Re-export main execution types
-pub use capture::{CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo};
-pub use runtime::{PythonRuntime, RuntimeConfig};
-pub use strategies::UltraFastExecutor;
-pub use timeout::{UltraFastTimeoutManager, TimeoutConfig, TimeoutHandle, TimeoutEvent, TimeoutEventType, TimeoutStatistics};
-pub use parallel::{MassiveParallelExecutor, MassiveExecutionStats};
+impl TestResult {
+    /// Helper method for backward compatibility
+    pub fn passed(&self) -> bool {
+        matches!(self.outcome, TestOutcome::Passed | TestOutcome::XFailed { .. })
+    }
+}
 
-// Revolutionary performance optimizations - all fully implemented
-pub use zero_copy::{ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results, ExecutionStats as ZeroCopyStats, create_zero_copy_executor_with_arena};
-pub use work_stealing::{WorkStealingExecutor, WorkStealingStats, WorkerMetrics};
-pub use native_transpiler::{NativeTestExecutor, NativeTestResult, ExecutionType as NativeExecutionType, TranspilationStats, DetailedStats as NativeDetailedStats, TestPattern};
+// Re-export main types from organized modules
+pub use core::{UltraFastExecutor, DevExperienceConfig, PluginCompatibilityConfig, PythonRuntime, RuntimeConfig};
+pub use infrastructure::{
+    MassiveParallelExecutor, MassiveExecutionStats,
+    CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo,
+    UltraFastTimeoutManager, TimeoutConfig, TimeoutHandle, TimeoutEvent, TimeoutEventType, TimeoutStatistics
+};
+pub use experimental::{
+    ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results, ZeroCopyStats,
+    create_zero_copy_executor_with_arena, WorkStealingExecutor, WorkStealingStats, WorkerMetrics,
+    NativeTestExecutor, NativeTestResult, NativeExecutionType, TranspilationStats, 
+    NativeDetailedStats, TestPattern
+};
+pub use utils::{
+    init_simd_json, is_simd_json_available, benchmark_json_performance, 
+    SimdJsonConfig, SimdJsonStats, init_simd_json_with_config
+};
 
 // 🧹 REMOVED: Legacy executor wrappers eliminated for cleaner architecture
 // All execution now uses UltraFastExecutor directly for maximum performance

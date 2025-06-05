@@ -14,6 +14,7 @@ use super::AdvancedConfig;
 
 /// Smart dependency tracker using graph algorithms
 pub struct DependencyTracker {
+    #[allow(dead_code)]
     config: AdvancedConfig,
     dependency_graph: Graph<String, DependencyType>,
     node_indices: HashMap<String, petgraph::graph::NodeIndex>,

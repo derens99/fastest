@@ -1,238 +1,381 @@
-//! Smart Plugin Manager - Orchestrates the entire plugin system
+//! Plugin Manager - Central orchestrator for all plugins
+//!
+//! The PluginManager handles plugin lifecycle, dependency resolution,
+//! and hook coordination.
 
-use anyhow::Result;
-use dashmap::DashMap;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use parking_lot::RwLock;
+use indexmap::IndexMap;
 
-use super::{
-    conftest::ConftestLoader,
-    hooks::{HookData, HookRegistry, HookResult, PytestHooks},
-    registry::PluginRegistry,
-    Plugin, PluginConfig,
-};
-use crate::SmartPluginLoader;
+use crate::api::{Plugin, PluginError, PluginInfo, PluginMetadata, PluginResult, PluginType};
+use crate::hooks::{HookRegistry, HookCaller};
+use crate::loader::PluginLoader;
+use crate::registry::PluginRegistry;
 
-use super::hooks;
+/// Plugin manager configuration
+#[derive(Debug, Clone)]
+pub struct PluginConfig {
+    /// Enable plugin discovery from installed packages
+    pub discover_installed: bool,
+    
+    /// Enable loading from conftest.py files
+    pub load_conftest: bool,
+    
+    /// Additional plugin directories
+    pub plugin_dirs: Vec<std::path::PathBuf>,
+    
+    /// Disabled plugins
+    pub disabled: HashSet<String>,
+    
+    /// Plugin load timeout (ms)
+    pub load_timeout: u64,
+}
 
-/// Central plugin manager with smart orchestration
+impl Default for PluginConfig {
+    fn default() -> Self {
+        Self {
+            discover_installed: true,
+            load_conftest: true,
+            plugin_dirs: Vec::new(),
+            disabled: HashSet::new(),
+            load_timeout: 5000,
+        }
+    }
+}
+
+/// Central plugin manager
 pub struct PluginManager {
+    /// Configuration
     config: PluginConfig,
-    registry: PluginRegistry,
-    hook_registry: Arc<HookRegistry>,
-    pytest_hooks: PytestHooks,
-    conftest_loader: ConftestLoader,
-    loaded_plugins: Arc<DashMap<String, Arc<dyn Plugin>>>,
-    session_data: Arc<RwLock<HashMap<String, serde_json::Value>>>,
+    
+    /// Loaded plugins
+    plugins: Arc<RwLock<IndexMap<String, Box<dyn Plugin>>>>,
+    
+    /// Plugin metadata
+    metadata: Arc<RwLock<HashMap<String, PluginInfo>>>,
+    
+    /// Hook registry
+    hooks: Arc<HookRegistry>,
+    
+    /// Plugin loader
+    loader: PluginLoader,
+    
+    /// Initialization state
+    initialized: bool,
 }
 
 impl PluginManager {
-    pub fn new(config: PluginConfig) -> Self {
-        let hook_registry = Arc::new(HookRegistry::new());
-        let pytest_hooks = PytestHooks::new(hook_registry.clone());
-
+    /// Create a new plugin manager
+    pub fn new() -> Self {
+        Self::with_config(PluginConfig::default())
+    }
+    
+    /// Create with custom configuration
+    pub fn with_config(config: PluginConfig) -> Self {
         Self {
             config,
-            registry: PluginRegistry::new(),
-            hook_registry,
-            pytest_hooks,
-            conftest_loader: ConftestLoader::new(),
-            loaded_plugins: Arc::new(DashMap::new()),
-            session_data: Arc::new(RwLock::new(HashMap::new())),
+            plugins: Arc::new(RwLock::new(IndexMap::new())),
+            metadata: Arc::new(RwLock::new(HashMap::new())),
+            hooks: Arc::new(HookRegistry::new()),
+            loader: PluginLoader::new(),
+            initialized: false,
         }
     }
-
-    /// Initialize the complete plugin system
-    pub async fn initialize(&mut self) -> Result<()> {
-        // Load all plugins using smart loader
-        let mut loader = SmartPluginLoader::new(self.config.clone());
-        let plugins = loader.load_all()?;
-
-        // Register hooks for each plugin
-        for plugin in plugins {
-            // Register with hook registry
-            plugin.register_hooks(&mut *Arc::get_mut(&mut self.hook_registry).unwrap())?;
-
-            // Store plugin
-            let name = plugin.name().to_string();
-            self.loaded_plugins.insert(name.clone(), Arc::from(plugin));
+    
+    /// Register a plugin manually
+    pub fn register(&mut self, mut plugin: Box<dyn Plugin>) -> PluginResult<()> {
+        let metadata = plugin.metadata().clone();
+        
+        // Check if already registered
+        if self.plugins.read().contains_key(&metadata.name) {
+            return Err(PluginError::Conflict(
+                format!("Plugin '{}' already registered", metadata.name)
+            ));
         }
-
-        // Register built-in hooks
-        hooks::register_builtin_hooks(&self.hook_registry)?;
-
-        if self.config.pytest_plugin_compatibility {
-            self.setup_pytest_compatibility().await?;
+        
+        // Check if disabled
+        if self.config.disabled.contains(&metadata.name) {
+            return Ok(());
         }
-
+        
+        // Validate dependencies
+        self.validate_dependencies(&metadata)?;
+        
+        // Initialize plugin
+        plugin.initialize()?;
+        
+        // Store plugin info
+        let info = PluginInfo {
+            metadata: metadata.clone(),
+            plugin_type: PluginType::Builtin,
+            source: "manual".to_string(),
+        };
+        
+        self.metadata.write().insert(metadata.name.clone(), info);
+        self.plugins.write().insert(metadata.name.clone(), plugin);
+        
         Ok(())
     }
-
-    async fn setup_pytest_compatibility(&self) -> Result<()> {
-        // Initialize pytest session
-        let session_data = serde_json::json!({
-            "config": self.config,
-            "plugins": self.loaded_plugins.iter().map(|entry| entry.key().clone()).collect::<Vec<_>>(),
-            "capabilities": {
-                "conftest_support": true,
-                "fixture_support": true,
-                "marker_support": true,
-                "parametrize_support": true
+    
+    /// Initialize the plugin system
+    pub fn initialize(&mut self) -> PluginResult<()> {
+        if self.initialized {
+            return Ok(());
+        }
+        
+        // Discover and load plugins
+        if self.config.discover_installed {
+            self.discover_installed_plugins()?;
+        }
+        
+        if self.config.load_conftest {
+            self.load_conftest_plugins()?;
+        }
+        
+        // Load plugins from additional directories
+        for dir in &self.config.plugin_dirs.clone() {
+            self.load_plugins_from_dir(dir)?;
+        }
+        
+        // Sort plugins by dependency order
+        let sorted_names = self.topological_sort()?;
+        
+        // Initialize plugins in order
+        for name in sorted_names {
+            if let Some(mut plugin) = self.plugins.write().get_mut(&name) {
+                plugin.initialize()?;
             }
-        });
-
-        self.pytest_hooks.pytest_sessionstart(session_data).await?;
+        }
+        
+        self.initialized = true;
+        
+        // Call configure hook
+        self.hook_caller("pytest_configure").call()?;
+        
         Ok(())
     }
-
-    /// Execute a pytest hook with automatic plugin orchestration
-    pub async fn execute_hook(
-        &self,
-        hook_name: &str,
-        args: serde_json::Value,
-    ) -> Result<Vec<HookResult>> {
-        let data = HookData {
-            name: hook_name.to_string(),
-            args,
-            context: HashMap::new(),
-            test_id: None,
-            session_id: uuid::Uuid::new_v4().to_string(),
-        };
-
-        self.hook_registry.call_hook(hook_name, data).await
+    
+    /// Shutdown all plugins
+    pub fn shutdown(&mut self) -> PluginResult<()> {
+        // Call session finish hook
+        let _ = self.hook_caller("pytest_sessionfinish").call();
+        
+        // Shutdown plugins in reverse order
+        let names: Vec<_> = self.plugins.read().keys().cloned().collect();
+        for name in names.iter().rev() {
+            if let Some(mut plugin) = self.plugins.write().get_mut(name) {
+                let _ = plugin.shutdown();
+            }
+        }
+        
+        self.initialized = false;
+        Ok(())
     }
-
-    /// Fast synchronous hook execution for performance-critical paths
-    pub fn execute_hook_sync(
-        &self,
-        hook_name: &str,
-        args: serde_json::Value,
-    ) -> Result<Vec<HookResult>> {
-        let data = HookData {
-            name: hook_name.to_string(),
-            args,
-            context: HashMap::new(),
-            test_id: None,
-            session_id: uuid::Uuid::new_v4().to_string(),
-        };
-
-        self.hook_registry.call_hook_sync(hook_name, data)
+    
+    /// Get a plugin by name
+    pub fn get<T: Plugin + 'static>(&self, name: &str) -> Option<&T> {
+        let plugins = self.plugins.read();
+        plugins.get(name)?.as_any().downcast_ref::<T>()
     }
-
-    /// Get pytest hooks interface
-    pub fn pytest_hooks(&self) -> &PytestHooks {
-        &self.pytest_hooks
+    
+    /// Get mutable plugin reference
+    pub fn get_mut<T: Plugin + 'static>(&mut self, name: &str) -> Option<&mut T> {
+        let mut plugins = self.plugins.write();
+        plugins.get_mut(name)?.as_any_mut().downcast_mut::<T>()
     }
-
-    /// Get conftest files for test path
-    pub fn get_conftest_chain(&self, test_path: &PathBuf) -> Vec<PathBuf> {
-        self.conftest_loader
-            .get_conftest_chain(test_path)
-            .into_iter()
-            .map(|cf| cf.path.clone())
-            .collect()
+    
+    /// Get the hook registry
+    pub fn hooks(&self) -> &HookRegistry {
+        &self.hooks
     }
-
-    /// Add session data
-    pub async fn set_session_data(&self, key: String, value: serde_json::Value) {
-        let mut session_data = self.session_data.write().await;
-        session_data.insert(key, value);
+    
+    /// Create a hook caller
+    pub fn hook_caller(&self, hook_name: &str) -> HookCaller {
+        HookCaller::new(&self.hooks, hook_name)
     }
-
-    /// Get session data
-    pub async fn get_session_data(&self, key: &str) -> Option<serde_json::Value> {
-        let session_data = self.session_data.read().await;
-        session_data.get(key).cloned()
+    
+    /// List all loaded plugins
+    pub fn list_plugins(&self) -> Vec<PluginInfo> {
+        self.metadata.read().values().cloned().collect()
     }
+    
+    /// Validate plugin dependencies
+    fn validate_dependencies(&self, metadata: &PluginMetadata) -> PluginResult<()> {
+        let plugins = self.plugins.read();
+        
+        // Check required dependencies
+        for required in &metadata.requires {
+            if !plugins.contains_key(required) {
+                return Err(PluginError::NotFound(
+                    format!("Required plugin '{}' not found", required)
+                ));
+            }
+        }
+        
+        // Check conflicts
+        for conflict in &metadata.conflicts {
+            if plugins.contains_key(conflict) {
+                return Err(PluginError::Conflict(
+                    format!("Plugin conflicts with '{}'", conflict)
+                ));
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Topological sort for dependency order
+    fn topological_sort(&self) -> PluginResult<Vec<String>> {
+        let metadata = self.metadata.read();
+        let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+        let mut in_degree: HashMap<String, usize> = HashMap::new();
+        
+        // Build dependency graph
+        for (name, info) in metadata.iter() {
+            graph.entry(name.clone()).or_insert_with(Vec::new);
+            in_degree.entry(name.clone()).or_insert(0);
+            
+            for dep in &info.metadata.requires {
+                graph.entry(dep.clone())
+                    .or_insert_with(Vec::new)
+                    .push(name.clone());
+                *in_degree.get_mut(name).unwrap() += 1;
+            }
+        }
+        
+        // Kahn's algorithm
+        let mut queue: Vec<_> = in_degree.iter()
+            .filter(|(_, &deg)| deg == 0)
+            .map(|(name, _)| name.clone())
+            .collect();
+        
+        let mut sorted = Vec::new();
+        
+        while let Some(name) = queue.pop() {
+            sorted.push(name.clone());
+            
+            if let Some(deps) = graph.get(&name) {
+                for dep in deps {
+                    let deg = in_degree.get_mut(dep).unwrap();
+                    *deg -= 1;
+                    if *deg == 0 {
+                        queue.push(dep.clone());
+                    }
+                }
+            }
+        }
+        
+        if sorted.len() != metadata.len() {
+            return Err(PluginError::Invalid(
+                "Circular dependency detected".to_string()
+            ));
+        }
+        
+        Ok(sorted)
+    }
+    
+    /// Discover installed plugins
+    fn discover_installed_plugins(&mut self) -> PluginResult<()> {
+        let discovered = self.loader.discover_entry_points()?;
+        
+        for info in discovered {
+            if self.config.disabled.contains(&info.metadata.name) {
+                continue;
+            }
+            
+            match self.loader.load_plugin(&info) {
+                Ok(plugin) => {
+                    self.register(plugin)?;
+                }
+                Err(e) => {
+                    eprintln!("Failed to load plugin '{}': {}", info.metadata.name, e);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Load conftest plugins
+    fn load_conftest_plugins(&mut self) -> PluginResult<()> {
+        let conftest_files = self.loader.find_conftest_files()?;
+        
+        for path in conftest_files {
+            match self.loader.load_conftest(&path) {
+                Ok(plugins) => {
+                    for plugin in plugins {
+                        self.register(plugin)?;
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to load conftest {:?}: {}", path, e);
+                }
+            }
+        }
+        
+        Ok(())
+    }
+    
+    /// Load plugins from a directory
+    fn load_plugins_from_dir(&mut self, dir: &std::path::Path) -> PluginResult<()> {
+        let plugins = self.loader.load_from_directory(dir)?;
+        
+        for plugin in plugins {
+            self.register(plugin)?;
+        }
+        
+        Ok(())
+    }
+}
 
-    /// Plugin statistics
-    pub fn get_stats(&self) -> PluginManagerStats {
-        // Count the number of registered hooks
-        let registered_hooks = self.hook_registry.hook_count();
-        PluginManagerStats {
-            total_plugins: self.loaded_plugins.len(),
-            builtin_plugins: self
-                .loaded_plugins
-                .iter()
-                .filter(|entry| entry.value().pytest_compatible())
-                .count(),
-            conftest_files: 0, // TODO: Add getter method
-            registered_hooks,
+/// Plugin manager builder
+pub struct PluginManagerBuilder {
+    config: PluginConfig,
+    plugins: Vec<Box<dyn Plugin>>,
+}
+
+impl PluginManagerBuilder {
+    pub fn new() -> Self {
+        Self {
+            config: PluginConfig::default(),
+            plugins: Vec::new(),
         }
     }
-
-    /// Reload conftest files if changed
-    pub async fn reload_conftest_if_changed(&self) -> Result<Vec<PathBuf>> {
-        self.conftest_loader.reload_if_changed()
+    
+    pub fn discover_installed(mut self, enabled: bool) -> Self {
+        self.config.discover_installed = enabled;
+        self
     }
-
-    /// Shutdown plugin system
-    pub async fn shutdown(&self) -> Result<()> {
-        let session_data = serde_json::json!({
-            "final_stats": self.get_stats(),
-            "shutdown_time": chrono::Utc::now().to_rfc3339()
-        });
-
-        self.pytest_hooks
-            .pytest_sessionfinish(session_data, 0)
-            .await?;
-        Ok(())
+    
+    pub fn load_conftest(mut self, enabled: bool) -> Self {
+        self.config.load_conftest = enabled;
+        self
     }
-}
-
-/// Plugin manager statistics
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct PluginManagerStats {
-    pub total_plugins: usize,
-    pub builtin_plugins: usize,
-    pub conftest_files: usize,
-    pub registered_hooks: usize,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_plugin_manager_initialization() {
-        let mut config = PluginConfig::default();
-        config.enabled_plugins = vec!["builtin".to_string()]; // Enable builtin plugin
-        config.pytest_plugin_compatibility = true; // Enable pytest compatibility
-        let mut manager = PluginManager::new(config);
-
-        // Should initialize without errors
-        assert!(manager.initialize().await.is_ok());
-
-        // Register builtin hooks manually to ensure they exist
-        hooks::register_builtin_hooks(&manager.hook_registry).unwrap();
-
-        let stats = manager.get_stats();
-        // Note: No builtin hooks are currently registered in BUILTIN_HOOKS
-        // This assertion would fail until actual hooks are implemented
-        // assert!(stats.registered_hooks > 0, "No hooks were registered during initialization");
-        // Hook count is always non-negative (usize)
-        assert!(
-            stats.registered_hooks == 0,
-            "Expected no hooks registered initially"
-        );
+    
+    pub fn plugin_dir(mut self, dir: impl Into<std::path::PathBuf>) -> Self {
+        self.config.plugin_dirs.push(dir.into());
+        self
     }
-
-    #[tokio::test]
-    async fn test_hook_execution() {
-        let config = PluginConfig::default();
-        let mut manager = PluginManager::new(config);
-        manager.initialize().await.unwrap();
-
-        // Test hook execution
-        let args = serde_json::json!({"test": "data"});
-        let results = manager
-            .execute_hook("pytest_configure", args)
-            .await
-            .unwrap();
-
-        // Should execute without errors (even if no handlers)
-        assert!(results.is_empty() || !results.is_empty());
+    
+    pub fn disable(mut self, name: impl Into<String>) -> Self {
+        self.config.disabled.insert(name.into());
+        self
+    }
+    
+    pub fn with_plugin(mut self, plugin: Box<dyn Plugin>) -> Self {
+        self.plugins.push(plugin);
+        self
+    }
+    
+    pub fn build(self) -> PluginResult<PluginManager> {
+        let mut manager = PluginManager::with_config(self.config);
+        
+        // Register provided plugins
+        for plugin in self.plugins {
+            manager.register(plugin)?;
+        }
+        
+        Ok(manager)
     }
 }

@@ -7,7 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2025-05-28
+### Added
+- **Class-Based Test Support** ⭐⭐⭐
+  - Full discovery of test classes matching `TestClass` pattern
+  - Proper method execution with `self` parameter handling
+  - Support for `setUp` and `tearDown` methods
+  - Async test methods in classes
+  - Test class inheritance
+  - Nested test discovery within class bodies
+- **Enhanced Test Discovery**
+  - Improved tree-sitter parser with `collect_functions_in_class()`
+  - Better handling of decorated methods in classes
+  - Support for `testMethodName` pattern (without underscore)
+
+### Fixed
+- Class methods not being discovered in test classes
+- Test methods requiring proper class instantiation
+- Async class methods not being detected
+
+### Known Issues
+- Parametrized tests incorrectly map index as value instead of actual parameter values
+- Markers like `@pytest.mark.skip` and `@pytest.mark.xfail` not implemented
+- Fixture scopes limited to function scope only
+- `capsys` fixture not fully implemented
+
+## [0.2.0] - 2024-05-28
 
 ### Added
 - **Intelligent Execution Strategy**: Automatically selects optimal execution mode based on test suite size

@@ -1,5 +1,6 @@
 use crate::test::discovery::TestItem;
 use crate::error::Result;
+use crate::utils::simd_json; // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION
 use rustpython_parser::ast;
 use rustpython_parser::Parse;
 use serde_json::Value;
@@ -22,7 +23,7 @@ pub struct ParamSet {
 }
 
 /// Parse parametrize decorator and extract parameter information
-pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<ParamSet>)> {
+pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     // Remove @ prefix if present and extract the call expression
     let cleaned = decorator.trim_start_matches('@');
 
@@ -55,14 +56,14 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 }
 
 /// Parse parametrize decorator from AST expression
-pub fn parse_parametrize_expr(expr: &ast::Expr) -> Option<(Vec<String>, Vec<ParamSet>)> {
+pub fn parse_parametrize_expr(expr: &ast::Expr) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     match expr {
         ast::Expr::Call(call) => parse_parametrize_call(call),
         _ => None,
     }
 }
 
-fn parse_parametrize_call(call: &ast::ExprCall) -> Option<(Vec<String>, Vec<ParamSet>)> {
+fn parse_parametrize_call(call: &ast::ExprCall) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     // Check if it's a parametrize call
     if !is_parametrize_call(&call.func) {
         return None;
@@ -81,10 +82,17 @@ fn parse_parametrize_call(call: &ast::ExprCall) -> Option<(Vec<String>, Vec<Para
         .find(|kw| kw.arg.as_deref() == Some("ids"))
         .and_then(|kw| extract_ids(&kw.value));
 
+    // Extract indirect parameter if provided
+    let indirect = call
+        .keywords
+        .iter()
+        .find(|kw| kw.arg.as_deref() == Some("indirect"))
+        .and_then(|kw| extract_indirect(&kw.value, &param_names));
+
     // Parse parameter sets
     let param_sets = parse_param_values(values, &param_names, &ids)?;
 
-    Some((param_names, param_sets))
+    Some((param_names, param_sets, indirect))
 }
 
 fn is_parametrize_call(func: &ast::Expr) -> bool {
@@ -119,6 +127,42 @@ fn extract_ids(expr: &ast::Expr) -> Option<Vec<String>> {
                 })
                 .collect(),
         ),
+        _ => None,
+    }
+}
+
+fn extract_indirect(expr: &ast::Expr, param_names: &[String]) -> Option<Vec<String>> {
+    match expr {
+        // indirect=True means all parameters are indirect
+        ast::Expr::Constant(c) => {
+            if let ast::Constant::Bool(true) = &c.value {
+                Some(param_names.to_vec())
+            } else {
+                None
+            }
+        }
+        // indirect=["param1", "param2"] means specific parameters are indirect
+        ast::Expr::List(list) => Some(
+            list.elts
+                .iter()
+                .filter_map(|e| {
+                    if let ast::Expr::Constant(c) = e {
+                        if let ast::Constant::Str(s) = &c.value {
+                            return Some(s.clone());
+                        }
+                    }
+                    None
+                })
+                .collect(),
+        ),
+        // indirect="param" means a single parameter is indirect
+        ast::Expr::Constant(c) if matches!(&c.value, ast::Constant::Str(_)) => {
+            if let ast::Constant::Str(s) = &c.value {
+                Some(vec![s.clone()])
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
@@ -347,8 +391,8 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
                 format!("@{}", decorator)
             };
 
-            if let Some((names, param_sets)) = parse_parametrize_decorator(&decorator_with_at) {
-                param_info_list.push((names, param_sets));
+            if let Some((names, param_sets, indirect)) = parse_parametrize_decorator(&decorator_with_at) {
+                param_info_list.push((names, param_sets, indirect));
             }
         }
     }
@@ -380,10 +424,18 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
         expanded_test.is_xfail = base_xfail || case.is_xfail;
 
         // Store parameters
-        let params_json = serde_json::to_string(&case.params).unwrap_or_default();
+        let params_json = simd_json::to_string(&case.params).unwrap_or_default();
         expanded_test
             .decorators
             .push(format!("__params__={}", params_json));
+
+        // Store indirect parameters if any
+        if !case.indirect_params.is_empty() {
+            let indirect_json = simd_json::to_string(&case.indirect_params).unwrap_or_default();
+            expanded_test
+                .decorators
+                .push(format!("__indirect__={}", indirect_json));
+        }
 
         if expanded_test.is_xfail {
             expanded_test.decorators.push("__xfail__=True".to_string());
@@ -398,28 +450,30 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
 #[derive(Debug)]
 struct TestCase {
     params: HashMap<String, Value>,
+    indirect_params: Vec<String>,
     id: Option<String>,
     is_xfail: bool,
 }
 
-fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>)]) -> Vec<TestCase> {
+fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)]) -> Vec<TestCase> {
     if param_info_list.is_empty() {
         return vec![];
     }
 
     // Start with first decorator
-    let (first_names, first_sets) = &param_info_list[0];
+    let (first_names, first_sets, first_indirect) = &param_info_list[0];
     let mut cases: Vec<TestCase> = first_sets
         .iter()
         .map(|set| TestCase {
             params: create_params_map(first_names, &set.values),
+            indirect_params: first_indirect.clone().unwrap_or_default(),
             id: set.id.clone(),
             is_xfail: set.is_xfail,
         })
         .collect();
 
     // Cross product with remaining decorators
-    for (names, param_sets) in param_info_list.iter().skip(1) {
+    for (names, param_sets, indirect) in param_info_list.iter().skip(1) {
         let mut new_cases = Vec::new();
 
         for case in &cases {
@@ -433,8 +487,19 @@ fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>)]) -> Vec<
                     }
                 }
 
+                // Merge indirect params
+                let mut merged_indirect = case.indirect_params.clone();
+                if let Some(indirect_params) = indirect {
+                    for param in indirect_params {
+                        if !merged_indirect.contains(param) {
+                            merged_indirect.push(param.clone());
+                        }
+                    }
+                }
+
                 new_cases.push(TestCase {
                     params,
+                    indirect_params: merged_indirect,
                     id: set.id.clone().or_else(|| case.id.clone()),
                     is_xfail: case.is_xfail || set.is_xfail,
                 });

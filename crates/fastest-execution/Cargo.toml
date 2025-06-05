@@ -6,9 +6,14 @@ edition.workspace = true
 license.workspace = true
 description = "Fast Python test execution engine for Fastest"
 
+[features]
+default = ["mimalloc"]
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
 # Core dependencies
 fastest-core = { path = "../fastest-core" }
+fastest-plugins = { path = "../fastest-plugins" }
 anyhow.workspace = true
 thiserror.workspace = true
 serde.workspace = true
@@ -39,7 +44,7 @@ crossbeam-deque = "0.8"             # Work-stealing queues
 string-interner = "0.15"            # String deduplication
 ahash = "0.8"                       # Fast hasher
 num-traits = "0.2"                  # For ToPrimitive trait (e.g., .to_u8() on BigInt)
-mimalloc = { version = "0.1", default-features = false }
+mimalloc = { version = "0.1", default-features = false, optional = true }
 smallvec = "1.11"                   # Stack vectors
 
 # JIT compilation (experimental)
@@ -61,3 +66,4 @@ blake3 = "1.5"                      # Ultra-fast content hashing
 regex = "1.10"                      # SIMD-optimized regex
 lazy_static = "1.4"                 # Static initialization
 memchr = "2.6"                      # SIMD string searching
+simd-json = { version = "0.13", features = ["serde_impl"] }  # 2-3x faster JSON parsing

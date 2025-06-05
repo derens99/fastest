@@ -1,5 +1,7 @@
 pub mod builtin;
 pub mod session;
+pub mod advanced;
+pub mod conftest;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
@@ -10,6 +12,11 @@ pub use builtin::{
     generate_builtin_fixture_code, get_builtin_fixture_metadata, is_builtin_fixture,
 };
 pub use session::{SessionFixtureManager, SessionFixture, SessionStats};
+pub use advanced::{
+    AdvancedFixtureManager, FixtureDefinition, FixtureRequest,
+    FixtureInstance, FixtureInstanceKey, FixtureCacheStats, parse_fixture_decorator,
+};
+pub use conftest::{ConftestDiscovery, ConftestFile};
 
 // Simple fixture execution for core (advanced execution moved to fastest-execution)
 pub fn generate_test_code_with_fixtures(
@@ -31,7 +38,10 @@ impl FixtureExecutor {
     }
 }
 
-/// Represents a test fixture instance
+/// Re-export FixtureScope from advanced module
+pub use advanced::FixtureScope;
+
+/// Represents a test fixture instance (legacy - use FixtureDefinition from advanced)
 #[derive(Debug, Clone)]
 pub struct Fixture {
     pub name: String,
@@ -40,25 +50,6 @@ pub struct Fixture {
     pub params: Vec<serde_json::Value>,
     pub func_path: PathBuf,        // Path to the module containing the fixture
     pub dependencies: Vec<String>, // Other fixtures this depends on
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-pub enum FixtureScope {
-    Function, // New instance for each test
-    Class,    // Shared within test class
-    Module,   // Shared within module
-    Session,  // Shared across entire session
-}
-
-impl From<&str> for FixtureScope {
-    fn from(s: &str) -> Self {
-        match s {
-            "class" => FixtureScope::Class,
-            "module" => FixtureScope::Module,
-            "session" => FixtureScope::Session,
-            _ => FixtureScope::Function,
-        }
-    }
 }
 
 /// Key for fixture instance caching
@@ -161,6 +152,7 @@ impl FixtureManager {
                     FixtureScope::Class => key.scope_id == self.get_class_from_test_id(test_id),
                     FixtureScope::Module => key.scope_id == self.get_module_from_test_id(test_id),
                     FixtureScope::Session => false, // Never auto-remove session fixtures
+                    FixtureScope::Package => false, // Package fixtures managed separately
                 };
                 !should_remove
             } else {
@@ -189,6 +181,7 @@ impl FixtureManager {
             FixtureScope::Class => self.get_class_from_test_id(test_id),
             FixtureScope::Module => self.get_module_from_test_id(test_id),
             FixtureScope::Session => "session".to_string(),
+            FixtureScope::Package => self.get_module_from_test_id(test_id), // Use module path for now
         }
     }
 

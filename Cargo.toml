@@ -2,11 +2,10 @@
 members = [
     "crates/fastest-core",
     "crates/fastest-execution", 
-    "crates/fastest-reporting",
-    "crates/fastest-plugins",
     "crates/fastest-advanced",
-    "crates/fastest-integration",
     "crates/fastest-cli",
+    "crates/fastest-plugins",
+    "crates/fastest-plugins-macros",
 ]
 resolver = "2"
 
