@@ -12,8 +12,9 @@ use anyhow::{anyhow, Result};
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule, PyTuple};
+use pyo3::types::{PyDict, PyList, PyModule, PyTuple};
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -23,7 +24,7 @@ use fastest_core::test::fixtures::{
 use fastest_core::TestItem;
 
 /// Fixture value with metadata
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct FixtureValue {
     /// Python object value
     value: PyObject,
@@ -35,6 +36,20 @@ struct FixtureValue {
     _scope: FixtureScope,
     /// Creation timestamp
     _created_at: std::time::Instant,
+}
+
+impl Clone for FixtureValue {
+    fn clone(&self) -> Self {
+        Python::with_gil(|py| {
+            FixtureValue {
+                value: self.value.clone_ref(py),
+                is_generator: self.is_generator,
+                generator: self.generator.as_ref().map(|g| g.clone_ref(py)),
+                _scope: self._scope.clone(),
+                _created_at: self._created_at,
+            }
+        })
+    }
 }
 
 /// Complete fixture manager with full pytest compatibility
@@ -276,7 +291,8 @@ class pytest:
 sys.modules['pytest'] = pytest
 "#;
 
-        let module = PyModule::from_code(py, fixture_code, "fastest_fixtures", "fastest_fixtures")?;
+        let code_cstring = CString::new(fixture_code).unwrap();
+        let module = PyModule::from_code(py, code_cstring.as_c_str(), c"fastest_fixtures", c"fastest_fixtures")?;
 
         *self.fixture_module.lock().unwrap() = Some(module.into());
 
@@ -397,14 +413,14 @@ sys.modules['pytest'] = pytest
         py: Python,
         name: &str,
         request: &FixtureRequest,
-        fixture_values: &PyDict,
+        fixture_values: &Bound<PyDict>,
     ) -> PyResult<PyObject> {
         // Check cache first
         let cache_key = self.get_cache_key(name, request);
 
         let active = self.active_fixtures.lock().unwrap();
         if let Some(cached) = active.get(&cache_key) {
-            return Ok(cached.value.clone());
+            return Ok(Python::with_gil(|py| cached.value.clone_ref(py)));
         }
         drop(active);
 
@@ -427,23 +443,25 @@ sys.modules['pytest'] = pytest
             })?;
 
         let module_obj = self.get_fixture_module(py)?;
-        let module: &PyModule = module_obj.extract(py)?;
+        let module = module_obj.downcast_bound::<PyModule>(py)?;
+        let eval_code = format!(
+            "inspect.isgeneratorfunction(_fixture_registry.get('{}', lambda: None))",
+            name
+        );
+        let eval_cstring = CString::new(eval_code).unwrap();
         let is_generator = py
             .eval(
-                &format!(
-                    "inspect.isgeneratorfunction(_fixture_registry.get('{}', lambda: None))",
-                    name
-                ),
-                Some(module.dict()),
+                eval_cstring.as_c_str(),
+                Some(&module.dict()),
                 None,
             )?
             .extract::<bool>()?;
 
         let fixture_value = FixtureValue {
-            value: result.clone(),
+            value: result.clone_ref(py),
             is_generator,
             generator: if is_generator {
-                Some(result.clone())
+                Some(result.clone_ref(py))
             } else {
                 None
             },
@@ -464,9 +482,9 @@ sys.modules['pytest'] = pytest
     /// Execute built-in fixture
     fn execute_builtin_fixture(&self, py: Python, name: &str) -> PyResult<PyObject> {
         let module_obj = self.get_fixture_module(py)?;
-        let module: &PyModule = module_obj.extract(py)?;
+        let module = module_obj.downcast_bound::<PyModule>(py)?;
         let fixture_fn = module.getattr(name)?;
-        Ok(fixture_fn.call0()?.into())
+        Ok(fixture_fn.call0()?.unbind())
     }
 
     /// Execute user-defined fixture
@@ -475,10 +493,10 @@ sys.modules['pytest'] = pytest
         py: Python,
         name: &str,
         request: &FixtureRequest,
-        fixture_values: &PyDict,
+        fixture_values: &Bound<PyDict>,
     ) -> PyResult<PyObject> {
         let module_obj = self.get_fixture_module(py)?;
-        let module: &PyModule = module_obj.extract(py)?;
+        let module = module_obj.downcast_bound::<PyModule>(py)?;
         let registry = module.getattr("_fixture_registry")?;
         let fixture_fn = registry.get_item(name)?;
 
@@ -487,17 +505,18 @@ sys.modules['pytest'] = pytest
         let is_async = metadata.get_item("is_async")?.extract::<bool>()?;
 
         // Prepare arguments
+        let sig_code = format!("inspect.signature(_fixture_registry['{}'])", name);
+        let sig_cstring = CString::new(sig_code).unwrap();
         let sig = py.eval(
-            &format!("inspect.signature(_fixture_registry['{}'])", name),
-            Some(module.dict()),
+            sig_cstring.as_c_str(),
+            Some(&module.dict()),
             None,
         )?;
         let params = sig.getattr("parameters")?;
-        let param_names: Vec<String> = params
-            .call_method0("keys")?
-            .iter()?
-            .map(|p| p.unwrap().extract::<String>().unwrap())
-            .collect();
+        let keys_list = params.call_method("keys", (), None)?;
+        let list_type = py.get_type::<PyList>();
+        let param_list = list_type.call1((keys_list,))?;
+        let param_names: Vec<String> = param_list.extract()?;
 
         // Build kwargs from dependencies
         let kwargs = PyDict::new(py);
@@ -515,17 +534,17 @@ sys.modules['pytest'] = pytest
         if is_async {
             let asyncio = py.import("asyncio")?;
             Ok(asyncio
-                .call_method1("run", (fixture_fn.call((), Some(kwargs))?,))?
+                .call_method1("run", (fixture_fn.call((), Some(&kwargs))?,))?
                 .into())
         } else {
-            Ok(fixture_fn.call((), Some(kwargs))?.into())
+            Ok(fixture_fn.call((), Some(&kwargs))?.into())
         }
     }
 
     /// Create Python request object
     fn create_request_object(&self, py: Python, request: &FixtureRequest) -> PyResult<PyObject> {
         let module_obj = self.get_fixture_module(py)?;
-        let module: &PyModule = module_obj.extract(py)?;
+        let module = module_obj.downcast_bound::<PyModule>(py)?;
         let request_class = module.getattr("FixtureRequest")?;
 
         let args = PyTuple::new(
@@ -535,14 +554,14 @@ sys.modules['pytest'] = pytest
                 request.test_name.as_str(),
                 "function", // Default scope for now
             ],
-        );
+        ).unwrap();
 
         let kwargs = PyDict::new(py);
         if let Some(param_index) = request.param_index {
             kwargs.set_item("param", param_index)?;
         }
 
-        Ok(request_class.call(args, Some(kwargs))?.into())
+        Ok(request_class.call(args, Some(&kwargs))?.unbind())
     }
 
     /// Get cache key for fixture
@@ -567,7 +586,7 @@ sys.modules['pytest'] = pytest
             .ok_or_else(|| {
                 pyo3::exceptions::PyRuntimeError::new_err("Fixture module not initialized")
             })
-            .map(|m| m.clone())
+            .map(|m| Python::with_gil(|py| m.clone_ref(py)))
     }
 
     /// Teardown fixtures for a scope
@@ -589,7 +608,7 @@ sys.modules['pytest'] = pytest
                     if let Some(gen) = fixture_value.generator {
                         let locals = PyDict::new(py);
                         locals.set_item("gen", gen)?;
-                        let _ = py.eval("next(gen, None)", None, Some(locals));
+                        let _ = py.eval(c"next(gen, None)", None, Some(&locals));
                     }
                 }
             }

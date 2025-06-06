@@ -20,6 +20,7 @@ use cranelift_module::{Linkage, Module};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::time::{Duration, Instant};
 
 use crate::TestResult;
@@ -1030,11 +1031,12 @@ impl NativeTestExecutor {
                     .join("\n")
             );
 
+            let code_cstring = CString::new(optimized_code).unwrap();
             let _module = PyModule::from_code(
                 py,
-                &optimized_code,
-                "optimized_test_module",
-                "optimized_test_module",
+                code_cstring.as_c_str(),
+                c"optimized_test_module",
+                c"optimized_test_module",
             )?;
 
             Ok(true)
@@ -1070,18 +1072,20 @@ impl NativeTestExecutor {
 
         // Standard PyO3 execution
         let result = Python::with_gil(|py| -> PyResult<bool> {
+            let test_code_str = format!(
+                "def test_function():\n    {}\n\ntest_function()",
+                test_code
+                    .lines()
+                    .map(|line| format!("    {}", line))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
+            let code_cstring = CString::new(test_code_str).unwrap();
             let _module = PyModule::from_code(
                 py,
-                &format!(
-                    "def test_function():\n    {}\n\ntest_function()",
-                    test_code
-                        .lines()
-                        .map(|line| format!("    {}", line))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ),
-                "test_module",
-                "test_module",
+                code_cstring.as_c_str(),
+                c"test_module",
+                c"test_module",
             )?;
 
             Ok(true)

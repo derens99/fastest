@@ -12,9 +12,11 @@
 
 use crossbeam::channel::bounded;
 use pyo3::{PyObject, Python};
+use pyo3::types::{PyAnyMethods, PyDictMethods};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -877,7 +879,8 @@ def execute_test(test_id, test_name, test_code, file_path):
         return {'success': False, 'error': str(e), 'traceback': traceback.format_exc()}
 "#;
 
-    let module = PyModule::from_code(py, code, "test_executor", "test_executor")
+    let code_cstring = CString::new(code).unwrap();
+    let module = PyModule::from_code(py, code_cstring.as_c_str(), c"test_executor", c"test_executor")
         .map_err(|e| Error::Execution(format!("Failed to create Python executor: {}", e)))?;
 
     Ok(module.into())
@@ -899,12 +902,13 @@ fn execute_python_test(
         .call1(py, (test_id, test_name, test_code, ""))
         .map_err(|e| Error::Execution(format!("Test execution failed: {}", e)))?;
 
-    let result_dict: &pyo3::types::PyDict = result
-        .downcast(py)
+    let result_dict = result
+        .downcast_bound::<pyo3::types::PyDict>(py)
         .map_err(|e| Error::Execution(format!("Invalid result format: {}", e)))?;
 
     let success: bool = result_dict
         .get_item("success")
+        .map_err(|_| Error::Execution("Missing success field in result".to_string()))?
         .ok_or_else(|| Error::Execution("Missing success field in result".to_string()))?
         .extract()
         .map_err(|e| Error::Execution(format!("Failed to extract success: {}", e)))?;
@@ -912,9 +916,10 @@ fn execute_python_test(
     if !success {
         let error: String = result_dict
             .get_item("error")
-            .unwrap_or(&pyo3::types::PyString::new(py, "Unknown error"))
-            .extract()
-            .unwrap_or_else(|_| "Unknown error".to_string());
+            .ok()
+            .flatten()
+            .and_then(|e| e.extract().ok())
+            .unwrap_or_else(|| "Unknown error".to_string());
 
         return Err(Error::Execution(error));
     }

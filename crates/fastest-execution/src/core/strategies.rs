@@ -16,6 +16,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::ffi::CString;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sysinfo::System;
@@ -359,11 +360,12 @@ impl UltraFastPythonEngine {
 
         // Create the optimized worker module with verbose flag
         let worker_code = Self::get_ultra_optimized_python_code(verbose);
+        let code_cstring = CString::new(worker_code).unwrap();
         let worker_module = PyModule::from_code(
             py,
-            &worker_code,
-            "fastest_ultra_engine",
-            "fastest_ultra_engine",
+            code_cstring.as_c_str(),
+            c"fastest_ultra_engine",
+            c"fastest_ultra_engine",
         )?;
 
         // Initialize advanced caches with larger capacity
@@ -637,7 +639,7 @@ impl UltraFastPythonEngine {
         let mut all_results = Vec::with_capacity(tests.len());
 
         // Get the ultra-optimized burst executor function
-        let worker_module = self.worker_module.as_ref(py);
+        let worker_module = self.worker_module.bind(py);
         let execute_burst_fn = worker_module.getattr("execute_tests_burst_optimized")?;
 
         // For burst execution, process all tests in one go to maximize threading efficiency
@@ -652,7 +654,7 @@ impl UltraFastPythonEngine {
         }
 
         // Convert all tests to Python format at once
-        let py_batch: Vec<&PyDict> = all_tests
+        let py_batch: Vec<Bound<PyDict>> = all_tests
             .iter()
             .map(|test| {
                 let test_dict = PyDict::new(py);
@@ -673,7 +675,7 @@ impl UltraFastPythonEngine {
                     .unwrap();
 
                 // Include decorators for parametrized tests
-                let decorators_list = PyList::new(py, &test.decorators);
+                let decorators_list = PyList::new(py, &test.decorators).unwrap();
                 test_dict.set_item("decorators", decorators_list).unwrap();
 
                 // Include class name separately if present
@@ -685,34 +687,38 @@ impl UltraFastPythonEngine {
             })
             .collect();
 
-        let py_batch_list = PyList::new(py, py_batch);
+        let py_batch_list = PyList::new(py, &py_batch).unwrap();
 
         // Execute batch with burst optimization
         let py_results = execute_burst_fn.call1((py_batch_list, micro_threads))?;
-        let results_list: &PyList = py_results.downcast()?;
+        let results_list = py_results.downcast::<PyList>()?;
 
         // Convert results back with minimal overhead
         for py_result in results_list {
-            let result_dict: &PyDict = py_result.downcast()?;
+            let result_dict = py_result.downcast::<PyDict>()?;
 
-            let test_id: String = result_dict.get_item("id").unwrap().extract()?;
-            let duration: f64 = result_dict.get_item("duration").unwrap().extract()?;
-            let error: Option<String> = result_dict.get_item("error").unwrap().extract()?;
+            let test_id: String = result_dict.get_item("id")?.unwrap().extract()?;
+            let duration: f64 = result_dict.get_item("duration")?.unwrap().extract()?;
+            let error: Option<String> = result_dict.get_item("error")?.unwrap().extract()?;
 
             // Check for new outcome format first, fall back to passed bool
-            let outcome = if let Some(outcome_str) = result_dict.get_item("outcome") {
+            let outcome = if let Ok(Some(outcome_str)) = result_dict.get_item("outcome") {
                 match outcome_str.extract::<String>()?.as_str() {
                     "passed" => TestOutcome::Passed,
                     "failed" => TestOutcome::Failed,
                     "skipped" => {
                         let reason = result_dict
                             .get_item("skip_reason")
+                            .ok()
+                            .flatten()
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::Skipped { reason }
                     }
                     "xfailed" => {
                         let reason = result_dict
                             .get_item("xfail_reason")
+                            .ok()
+                            .flatten()
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::XFailed { reason }
                     }
@@ -721,7 +727,7 @@ impl UltraFastPythonEngine {
                 }
             } else {
                 // Fall back to old format
-                let passed: bool = result_dict.get_item("passed").unwrap().extract()?;
+                let passed: bool = result_dict.get_item("passed")?.unwrap().extract()?;
                 if passed {
                     TestOutcome::Passed
                 } else {
@@ -885,11 +891,11 @@ impl UltraFastPythonEngine {
         let mut results = Vec::with_capacity(tests.len());
 
         // Get the ultra-fast executor function
-        let worker_module = self.worker_module.as_ref(py);
+        let worker_module = self.worker_module.bind(py);
         let execute_tests_fn = worker_module.getattr("execute_tests_ultra_fast")?;
 
         // Convert tests to Python format (minimal overhead)
-        let py_test_dicts: Vec<&PyDict> = tests
+        let py_test_dicts: Vec<Bound<PyDict>> = tests
             .iter()
             .map(|test| {
                 let test_dict = PyDict::new(py);
@@ -910,7 +916,7 @@ impl UltraFastPythonEngine {
                     .unwrap();
 
                 // Include decorators for parametrized tests
-                let decorators_list = PyList::new(py, &test.decorators);
+                let decorators_list = PyList::new(py, &test.decorators).unwrap();
                 test_dict.set_item("decorators", decorators_list).unwrap();
 
                 // Include class name separately if present
@@ -922,34 +928,38 @@ impl UltraFastPythonEngine {
             })
             .collect();
 
-        let py_tests = PyList::new(py, py_test_dicts);
+        let py_tests = PyList::new(py, &py_test_dicts).unwrap();
 
         // Execute with maximum performance
         let py_results = execute_tests_fn.call1((py_tests,))?;
-        let results_list: &PyList = py_results.downcast()?;
+        let results_list = py_results.downcast::<PyList>()?;
 
         // Convert results back (minimal overhead)
         for py_result in results_list {
-            let result_dict: &PyDict = py_result.downcast()?;
+            let result_dict = py_result.downcast::<PyDict>()?;
 
-            let test_id: String = result_dict.get_item("id").unwrap().extract()?;
-            let duration: f64 = result_dict.get_item("duration").unwrap().extract()?;
-            let error: Option<String> = result_dict.get_item("error").unwrap().extract()?;
+            let test_id: String = result_dict.get_item("id")?.unwrap().extract()?;
+            let duration: f64 = result_dict.get_item("duration")?.unwrap().extract()?;
+            let error: Option<String> = result_dict.get_item("error")?.unwrap().extract()?;
 
             // Check for new outcome format first, fall back to passed bool
-            let outcome = if let Some(outcome_str) = result_dict.get_item("outcome") {
+            let outcome = if let Ok(Some(outcome_str)) = result_dict.get_item("outcome") {
                 match outcome_str.extract::<String>()?.as_str() {
                     "passed" => TestOutcome::Passed,
                     "failed" => TestOutcome::Failed,
                     "skipped" => {
                         let reason = result_dict
                             .get_item("skip_reason")
+                            .ok()
+                            .flatten()
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::Skipped { reason }
                     }
                     "xfailed" => {
                         let reason = result_dict
                             .get_item("xfail_reason")
+                            .ok()
+                            .flatten()
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::XFailed { reason }
                     }
@@ -958,7 +968,7 @@ impl UltraFastPythonEngine {
                 }
             } else {
                 // Fall back to old format
-                let passed: bool = result_dict.get_item("passed").unwrap().extract()?;
+                let passed: bool = result_dict.get_item("passed")?.unwrap().extract()?;
                 if passed {
                     TestOutcome::Passed
                 } else {
@@ -1060,7 +1070,7 @@ impl UltraFastPythonEngine {
 
     /// Perform global teardown after all tests have completed
     fn perform_global_teardown(&self, py: Python) -> PyResult<()> {
-        let worker_module = self.worker_module.as_ref(py);
+        let worker_module = self.worker_module.bind(py);
 
         // Call the perform_global_teardown function from the Python worker
         if let Ok(teardown_fn) = worker_module.getattr("perform_global_teardown") {

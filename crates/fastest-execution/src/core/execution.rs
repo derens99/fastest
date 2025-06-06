@@ -44,6 +44,7 @@ use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::ffi::CString;
 use std::fmt::Write;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
@@ -57,7 +58,7 @@ use pyo3::types::{PyDict, PyList, PyModule};
 // Removed pyo3-serde dependency - using manual conversion
 
 /// Class instance for shared class instances and lifecycle management
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct ClassInstance {
     /// Python class instance object
     instance: PyObject,
@@ -76,6 +77,22 @@ struct ClassInstance {
     setup_time: Option<std::time::Duration>,
     #[allow(dead_code)]
     teardown_time: Option<std::time::Duration>,
+}
+
+impl Clone for ClassInstance {
+    fn clone(&self) -> Self {
+        Python::with_gil(|py| {
+            ClassInstance {
+                instance: self.instance.clone_ref(py),
+                class_name: self.class_name.clone(),
+                ref_count: self.ref_count,
+                lifecycle_state: self.lifecycle_state.clone(),
+                created_at: self.created_at,
+                setup_time: self.setup_time,
+                teardown_time: self.teardown_time,
+            }
+        })
+    }
 }
 
 /// Tracks the lifecycle state of class instances
@@ -343,7 +360,7 @@ impl ClassInstanceManager {
         }
 
         // Create new instance using smart instantiation strategies
-        let module: &PyModule = module_obj.downcast(py)?;
+        let module = module_obj.downcast_bound::<PyModule>(py)?;
         let class_obj = module.getattr(class_name)?;
 
         let instance_obj = self.create_instance_with_strategies(py, &class_obj, class_name)?;
@@ -351,7 +368,7 @@ impl ClassInstanceManager {
         let setup_time = start_time.elapsed();
 
         let class_instance = ClassInstance {
-            instance: instance_obj.into(),
+            instance: instance_obj.unbind(),
             class_name: class_name.to_string(),
             ref_count: 1,
             lifecycle_state: ClassLifecycleState::Created,
@@ -379,9 +396,9 @@ impl ClassInstanceManager {
     fn create_instance_with_strategies<'py>(
         &self,
         py: Python<'py>,
-        class_obj: &'py PyAny,
+        class_obj: &Bound<'py, PyAny>,
         class_name: &str,
-    ) -> PyResult<&'py PyAny> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         for strategy in &self.instantiation_strategies {
             match self.try_instantiation_strategy(py, class_obj, strategy) {
                 Ok(instance) => {
@@ -420,9 +437,9 @@ impl ClassInstanceManager {
     fn try_instantiation_strategy<'py>(
         &self,
         py: Python<'py>,
-        class_obj: &'py PyAny,
+        class_obj: &Bound<'py, PyAny>,
         strategy: &ClassInstantiationStrategy,
-    ) -> PyResult<&'py PyAny> {
+    ) -> PyResult<Bound<'py, PyAny>> {
         match strategy {
             ClassInstantiationStrategy::Standard => class_obj.call0(),
             ClassInstantiationStrategy::NoArgs => class_obj.call((), None),
@@ -463,7 +480,7 @@ impl ClassInstanceManager {
     fn execute_setup_class(&self, py: Python, class_instance: &ClassInstance) -> PyResult<()> {
         let start_time = std::time::Instant::now();
 
-        let instance_obj = class_instance.instance.as_ref(py);
+        let instance_obj = class_instance.instance.bind(py);
 
         // Check for setup_class method
         if instance_obj.hasattr("setup_class")? {
@@ -526,7 +543,7 @@ impl ClassInstanceManager {
                 ClassLifecycleState::TeardownInProgress,
             );
 
-            let instance_obj = class_instance.instance.as_ref(py);
+            let instance_obj = class_instance.instance.bind(py);
 
             // Check for teardown_class method
             if instance_obj.hasattr("teardown_class")? {
@@ -582,7 +599,7 @@ impl ClassInstanceManager {
         py: Python,
         fixture_name: &str,
         class_name: &str,
-        fixture_fn: &PyAny,
+        fixture_fn: &Bound<PyAny>,
     ) -> PyResult<PyObject> {
         let cache_key = format!("{}::{}", class_name, fixture_name);
 
@@ -592,7 +609,8 @@ impl ClassInstanceManager {
                 let mut metrics = self.performance_metrics.lock();
                 metrics.classmethod_cache_hits += 1;
             }
-            return Ok(cached_value.clone());
+            let cached_result = Python::with_gil(|py| cached_value.clone_ref(py));
+            return Ok(cached_result);
         }
 
         // Execute @classmethod fixture
@@ -603,13 +621,13 @@ impl ClassInstanceManager {
             ))
         })?;
 
-        let class_obj = class_instance.instance.as_ref(py).get_type();
+        let class_obj = class_instance.instance.bind(py).get_type();
         let result = fixture_fn.call1((class_obj,))?;
 
         // Cache the result
-        let result_obj: PyObject = result.into();
+        let result_obj: PyObject = result.unbind();
         self.classmethod_fixtures
-            .insert(cache_key, result_obj.clone());
+            .insert(cache_key, result_obj.clone_ref(py));
 
         // Update metrics
         {
@@ -668,7 +686,7 @@ impl ClassInstanceManager {
 }
 
 /// Enhanced fixture value that supports both JSON and PyObject caching for maximum performance
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct FixtureValue {
     pub name: String,
     pub value: serde_json::Value,
@@ -697,6 +715,31 @@ pub struct FixtureValue {
     /// Track how often PyObject cache was hit vs JSON fallback
     pub pyobject_cache_hits: u64,
     pub json_fallback_uses: u64,
+}
+
+impl Clone for FixtureValue {
+    fn clone(&self) -> Self {
+        FixtureValue {
+            name: self.name.clone(),
+            value: self.value.clone(),
+            scope: self.scope.clone(),
+            teardown_code: self.teardown_code.clone(),
+            created_at: self.created_at,
+            last_accessed: self.last_accessed,
+            access_count: self.access_count,
+            msgpack_value: self.msgpack_value.clone(),
+            generator_state: self.generator_state.as_ref().map(|g| {
+                Python::with_gil(|py| g.clone_ref(py))
+            }),
+            py_object_cache: self.py_object_cache.clone(),
+            interpreter_id: self.interpreter_id.clone(),
+            execution_time: self.execution_time,
+            memory_usage: self.memory_usage,
+            was_cached: self.was_cached,
+            pyobject_cache_hits: self.pyobject_cache_hits,
+            json_fallback_uses: self.json_fallback_uses,
+        }
+    }
 }
 
 impl FixtureValue {
@@ -1125,7 +1168,7 @@ impl PythonRuntimeManager {
         // Check cache first
         if let Some(cached_module) = self.module_cache.get(&module_name) {
             self.stats.cache_hits += 1;
-            return Ok(cached_module.clone());
+            return Ok(Python::with_gil(|py| cached_module.clone_ref(py)));
         }
 
         // Add parent directory to sys.path if needed
@@ -1140,7 +1183,7 @@ impl PythonRuntimeManager {
         if !self.path_cache.contains_key(&parent_dir) {
             let sys_module = &self.common_modules["sys"];
             let sys_path_obj = sys_module.getattr(py, "path")?;
-            let sys_path: &PyList = sys_path_obj.downcast(py)?;
+            let sys_path = sys_path_obj.downcast_bound::<PyList>(py)?;
             if !sys_path.contains(&parent_dir)? {
                 sys_path.insert(0, &parent_dir)?;
             }
@@ -1152,7 +1195,7 @@ impl PythonRuntimeManager {
         let module_obj: PyObject = module.into();
 
         // Cache it
-        self.module_cache.insert(module_name, module_obj.clone());
+        self.module_cache.insert(module_name, module_obj.clone_ref(py));
         self.stats.module_imports += 1;
 
         Ok(module_obj)
@@ -1162,17 +1205,24 @@ impl PythonRuntimeManager {
     fn json_to_python(&self, py: Python, value: &serde_json::Value) -> PyResult<PyObject> {
         match value {
             serde_json::Value::Null => Ok(py.None()),
-            serde_json::Value::Bool(b) => Ok(b.into_py(py)),
+            serde_json::Value::Bool(b) => {
+                // Convert bool to Python using the standard Python boolean constants
+                Ok(if *b {
+                    py.get_type::<pyo3::types::PyBool>().call1((true,))?.unbind()
+                } else {
+                    py.get_type::<pyo3::types::PyBool>().call1((false,))?.unbind()
+                })
+            },
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
-                    Ok(i.into_py(py))
+                    Ok(i.into_pyobject(py).unwrap().into_any().unbind())
                 } else if let Some(f) = n.as_f64() {
-                    Ok(f.into_py(py))
+                    Ok(f.into_pyobject(py).unwrap().into_any().unbind())
                 } else {
-                    Ok(n.to_string().into_py(py))
+                    Ok(n.to_string().into_pyobject(py).unwrap().into_any().unbind())
                 }
             }
-            serde_json::Value::String(s) => Ok(s.into_py(py)),
+            serde_json::Value::String(s) => Ok(s.as_str().into_pyobject(py).unwrap().into_any().unbind()),
             serde_json::Value::Array(arr) => {
                 let py_list = pyo3::types::PyList::empty(py);
                 for item in arr {
@@ -1194,7 +1244,7 @@ impl PythonRuntimeManager {
 
     /// Convert Python object to serde_json::Value using manual conversion
     fn python_to_json(&self, py: Python, obj: &PyObject) -> PyResult<serde_json::Value> {
-        let obj_ref = obj.as_ref(py);
+        let obj_ref = obj.bind(py);
 
         if obj_ref.is_none() {
             Ok(serde_json::Value::Null)
@@ -1211,20 +1261,20 @@ impl PythonRuntimeManager {
         } else if let Ok(list) = obj_ref.downcast::<pyo3::types::PyList>() {
             let mut arr = Vec::new();
             for item in list {
-                arr.push(self.python_to_json(py, &item.into())?);
+                arr.push(self.python_to_json(py, &item.unbind())?);
             }
             Ok(serde_json::Value::Array(arr))
         } else if let Ok(dict) = obj_ref.downcast::<pyo3::types::PyDict>() {
             let mut map = serde_json::Map::new();
             for (key, value) in dict {
                 let key_str = key.extract::<String>()?;
-                let json_value = self.python_to_json(py, &value.into())?;
+                let json_value = self.python_to_json(py, &value.unbind())?;
                 map.insert(key_str, json_value);
             }
             Ok(serde_json::Value::Object(map))
         } else {
             // Fallback: convert to string representation
-            let str_repr = obj_ref.str()?.extract::<String>()?;
+            let str_repr = obj_ref.to_string();
             Ok(serde_json::Value::String(str_repr))
         }
     }
@@ -1987,8 +2037,8 @@ impl FixtureExecutor {
                 .map_err(|e| anyhow!("Failed to get class instance for {}: {}", class_name, e))?;
 
             // Get the fixture function
-            let module: &PyModule = module_obj
-                .downcast(py)
+            let module = module_obj
+                .downcast_bound::<PyModule>(py)
                 .map_err(|e| anyhow!("Module object is not a PyModule: {}", e))?;
             let fixture_fn = module.getattr(&*fixture.name).map_err(|e| {
                 anyhow!(
@@ -2002,7 +2052,7 @@ impl FixtureExecutor {
             if self.is_classmethod_fixture(&fixture.name) {
                 let result_obj = self
                     .class_manager
-                    .get_or_create_classmethod_fixture(py, &fixture.name, class_name, fixture_fn)
+                    .get_or_create_classmethod_fixture(py, &fixture.name, class_name, &fixture_fn)
                     .map_err(|e| anyhow!("Failed to execute @classmethod fixture: {}", e))?;
 
                 return runtime
@@ -2013,14 +2063,14 @@ impl FixtureExecutor {
             // Regular class fixture - call with class instance
             let kwargs = PyDict::new(py);
             // Add 'self' parameter for instance methods
-            kwargs.set_item("self", class_instance.instance.as_ref(py))?;
+            kwargs.set_item("self", class_instance.instance.bind(py).as_any())?;
 
             let result = fixture_fn
-                .call((), Some(kwargs))
+                .call((), Some(&kwargs))
                 .map_err(|e| anyhow!("Class fixture '{}' execution failed: {}", fixture.name, e))?;
 
             runtime
-                .python_to_json(py, &result.into())
+                .python_to_json(py, &result.unbind())
                 .map_err(|e| anyhow!("Failed to convert class fixture result: {}", e))
         })
     }
@@ -2252,8 +2302,8 @@ finally:
             drop(runtime); // Release lock early
 
             // 2. Get the fixture function
-            let module: &PyModule = module_obj
-                .downcast(py)
+            let module = module_obj
+                .downcast_bound::<PyModule>(py)
                 .map_err(|e| anyhow!("Module object is not a PyModule: {}", e))?;
             let fixture_fn = module
                 .getattr(&*fixture.name)
@@ -2315,7 +2365,7 @@ finally:
             let inspect_module = &runtime.common_modules["inspect"];
             let is_generator_fn = inspect_module
                 .getattr(py, "isgeneratorfunction")?
-                .call1(py, (fixture_fn,))?
+                .call1(py, (&fixture_fn,))?
                 .extract::<bool>(py)?;
             drop(runtime); // Release lock early
 
@@ -2326,8 +2376,8 @@ finally:
                 let json_result = self.execute_generator_fixture_pyo3(
                     py,
                     fixture,
-                    fixture_fn,
-                    kwargs,
+                    &fixture_fn,
+                    &kwargs,
                     &mut runtime,
                 )?;
                 drop(runtime);
@@ -2335,12 +2385,12 @@ finally:
             } else {
                 // Handle regular fixtures
                 let py_result = fixture_fn
-                    .call((), Some(kwargs))
+                    .call((), Some(&kwargs))
                     .map_err(|e| anyhow!("Fixture '{}' execution failed: {}", fixture.name, e))?;
 
                 // 🚀 PERFORMANCE: Cache the PyObject before converting to JSON
-                let py_obj: PyObject = py_result.into();
-                let cached_obj = Some(py_obj.clone());
+                let py_obj: PyObject = py_result.unbind();
+                let cached_obj = Some(py_obj.clone_ref(py));
 
                 // Convert result to JSON for backward compatibility
                 let runtime = self.python_runtime.lock();
@@ -2396,8 +2446,8 @@ finally:
         &self,
         py: Python,
         fixture: &Fixture,
-        fixture_fn: &PyAny,
-        kwargs: &PyDict,
+        fixture_fn: &Bound<PyAny>,
+        kwargs: &Bound<PyDict>,
         runtime: &mut PythonRuntimeManager,
     ) -> Result<serde_json::Value> {
         // Call the generator function
@@ -2977,7 +3027,13 @@ except Exception as e:
     /// Execute PyO3 generator teardowns with proper error handling
     fn execute_pyo3_generator_teardowns(&self, scope_id: &str) -> Result<()> {
         if let Some(generator_teardowns) = self.generator_teardown_stack.get(scope_id) {
-            let teardown_items: Vec<_> = generator_teardowns.value().clone();
+            let teardown_items: Vec<_> = generator_teardowns
+                .value()
+                .iter()
+                .map(|(key, gen)| {
+                    (key.clone(), Python::with_gil(|py| gen.clone_ref(py)))
+                })
+                .collect();
 
             debug!(
                 "Executing {} PyO3 generator teardowns for scope '{}'",
@@ -3015,7 +3071,7 @@ except Exception as e:
         generator: &PyObject,
     ) -> Result<()> {
         Python::with_gil(|py| -> Result<()> {
-            let gen_obj = generator.as_ref(py);
+            let gen_obj = generator.bind(py);
 
             // Try to continue the generator to execute teardown code
             match gen_obj.call_method0("__next__") {
@@ -3149,11 +3205,12 @@ execute_teardown()
                 cache_key.name
             );
 
+            let code_cstring = CString::new(teardown_module_code).unwrap();
             match PyModule::from_code(
                 py,
-                &teardown_module_code,
-                "teardown_module",
-                "teardown_module",
+                code_cstring.as_c_str(),
+                c"teardown_module",
+                c"teardown_module",
             ) {
                 Ok(_) => {
                     trace!(

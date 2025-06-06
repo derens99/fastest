@@ -9,6 +9,7 @@ use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -54,11 +55,12 @@ impl FixtureExecutor {
 
     /// Initialize Python fixture environment
     pub fn initialize_python_fixtures(&self, py: Python) -> PyResult<PyObject> {
+        let code_cstring = CString::new(self.get_fixture_runtime_code()).unwrap();
         let fixture_module = PyModule::from_code(
             py,
-            &self.get_fixture_runtime_code(),
-            "fastest_fixtures",
-            "fastest_fixtures",
+            code_cstring.as_c_str(),
+            c"fastest_fixtures",
+            c"fastest_fixtures",
         )?;
 
         // Register built-in fixtures
@@ -72,7 +74,7 @@ impl FixtureExecutor {
         &self,
         py: Python,
         test: &TestItem,
-        fixture_module: &PyModule,
+        fixture_module: &Bound<PyModule>,
     ) -> PyResult<PyObject> {
         let request = FixtureRequest::from_test_item(test);
 
@@ -105,7 +107,7 @@ impl FixtureExecutor {
         py: Python,
         name: &str,
         request: &FixtureRequest,
-        fixture_module: &PyModule,
+        fixture_module: &Bound<PyModule>,
     ) -> PyResult<PyObject> {
         // Check if it's a built-in fixture
         if is_builtin_fixture(name) {
@@ -122,7 +124,7 @@ impl FixtureExecutor {
 
         let instances = self.active_instances.lock().unwrap();
         if let Some(cached) = instances.get(&cache_key) {
-            return Ok(cached.clone());
+            return Ok(Python::with_gil(|py| cached.clone_ref(py)));
         }
         drop(instances);
 
@@ -147,19 +149,19 @@ impl FixtureExecutor {
                 )?;
                 kwargs.set_item("request", py_request)?;
             }
-            fixture_fn.call((), Some(kwargs))?
+            fixture_fn.call((), Some(&kwargs))?
         } else if fixture_def.dependencies.contains(&"request".to_string()) {
             let py_request = Py::new(py, PyFixtureRequest::from_request(request, None))?;
             kwargs.set_item("request", py_request)?;
-            fixture_fn.call((), Some(kwargs))?
+            fixture_fn.call((), Some(&kwargs))?
         } else {
-            fixture_fn.call((), Some(kwargs))?
+            fixture_fn.call((), Some(&kwargs))?
         };
 
         // Cache based on scope
         let mut instances = self.active_instances.lock().unwrap();
         let py_object: PyObject = result.into();
-        instances.insert(cache_key, py_object.clone());
+        instances.insert(cache_key, py_object.clone_ref(py));
 
         Ok(py_object)
     }
@@ -174,12 +176,12 @@ impl FixtureExecutor {
         match name {
             "tmp_path" => {
                 let tmp_path_class = py.eval(
-                    "type('TmpPath', (), {'__init__': lambda self: setattr(self, 'path', __import__('tempfile').mkdtemp())})",
+                    c"type('TmpPath', (), {'__init__': lambda self: setattr(self, 'path', __import__('tempfile').mkdtemp())})",
                     None,
                     None,
                 )?;
                 let instance = tmp_path_class.call0()?;
-                Ok(instance.getattr("path")?.into())
+                Ok(instance.getattr("path")?.unbind())
             }
             "capsys" => {
                 let capsys_code = r#"
@@ -224,7 +226,8 @@ capsys = Capsys()
 capsys._start()
 capsys
 "#;
-                Ok(py.eval(capsys_code, None, None)?.into())
+                let capsys_cstring = CString::new(capsys_code).unwrap();
+                Ok(py.eval(capsys_cstring.as_c_str(), None, None)?.unbind())
             }
             "monkeypatch" => {
                 let monkeypatch_code =
@@ -232,9 +235,10 @@ capsys
                         pyo3::exceptions::PyRuntimeError::new_err("Missing monkeypatch code")
                     })?;
                 let locals = PyDict::new(py);
-                py.run(&monkeypatch_code, None, Some(locals))?;
+                let mp_cstring = CString::new(monkeypatch_code).unwrap();
+                py.run(mp_cstring.as_c_str(), None, Some(&locals))?;
                 let mp_class = locals.get_item("MonkeyPatch").unwrap();
-                Ok(mp_class.call0()?.into())
+                Ok(mp_class.unwrap().call0()?.unbind())
             }
             _ => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
                 "Unknown built-in fixture: {}",
@@ -275,18 +279,21 @@ capsys
     }
 
     /// Register built-in fixtures
-    fn register_builtin_fixtures(&self, py: Python, module: &PyModule) -> PyResult<()> {
+    fn register_builtin_fixtures(&self, py: Python, module: &Bound<PyModule>) -> PyResult<()> {
         // Register tmp_path
         let tmp_path_code = generate_builtin_fixture_code("tmp_path").unwrap();
-        py.run(&tmp_path_code, None, Some(module.dict()))?;
+        let tmp_cstring = CString::new(tmp_path_code).unwrap();
+        py.run(tmp_cstring.as_c_str(), None, Some(&module.dict()))?;
 
         // Register capsys
         let capsys_code = generate_builtin_fixture_code("capsys").unwrap();
-        py.run(&capsys_code, None, Some(module.dict()))?;
+        let capsys_cstring = CString::new(capsys_code).unwrap();
+        py.run(capsys_cstring.as_c_str(), None, Some(&module.dict()))?;
 
         // Register monkeypatch
         let monkeypatch_code = generate_builtin_fixture_code("monkeypatch").unwrap();
-        py.run(&monkeypatch_code, None, Some(module.dict()))?;
+        let mp_cstring = CString::new(monkeypatch_code).unwrap();
+        py.run(mp_cstring.as_c_str(), None, Some(&module.dict()))?;
 
         Ok(())
     }
@@ -388,9 +395,11 @@ impl PyFixtureRequest {
             Some(value) => {
                 // Convert JSON value to Python object
                 let json_str = value.to_string();
+                let json_code = format!("__import__('json').loads('{}')", json_str);
+                let json_cstring = CString::new(json_code).unwrap();
                 Ok(py
                     .eval(
-                        &format!("__import__('json').loads('{}')", json_str),
+                        json_cstring.as_c_str(),
                         None,
                         None,
                     )?

@@ -182,18 +182,46 @@ This document outlines the development roadmap for Fastest, with features priori
   - Enhanced type safety with proper destructuring patterns
 
 ### v0.4.7 (January 2025) - Cross-Platform Build System Fixes
+- **Cross-Compilation Support** ⭐⭐⭐
+  - Fixed PyO3 cross-compilation by adding PYO3_CROSS_PYTHON_VERSION=3.8
+  - Re-enabled abi3-py38 feature for stable ABI across platforms
+  - Fixed Linux ARM64 builds requiring Python 3.8 libraries
+  - Proper cross-compilation environment setup in CI/CD
+  
 - **Build System Improvements** ⭐⭐⭐
   - Fixed Windows PowerShell syntax in CI/CD workflow
   - Separated packaging steps for Windows (PowerShell) and Unix (bash)
   - Fixed artifact directory creation with platform-specific commands
   - Updated PyO3 dependencies to use workspace version (0.25)
-  - Removed Python ABI version lock (abi3-py38) for better flexibility
-  - Supports Python 3.8+ without specific version requirement
+  - Changed Python setup to 3.8 for ABI compatibility
   
 - **Dependency Updates** ⭐⭐
   - Aligned PyO3 versions across all crates using workspace inheritance
-  - Removed version conflicts between workspace and crate dependencies
-  - Simplified Python integration with auto-initialize feature only
+  - Added abi3-py38 feature for cross-platform compatibility
+  - Supports Python 3.8+ with stable ABI
+
+### v0.4.8 (January 2025) - PyO3 0.25 Migration
+- **PyO3 0.25 API Migration** ⭐⭐⭐
+  - Systematically migrated all PyO3 0.22 API calls to PyO3 0.25
+  - Updated `call0`, `call1`, `getattr` methods to use `PyAnyMethods` trait
+  - Changed `downcast` to `downcast_bound` throughout the codebase
+  - Updated `to_object` to `into_py` for object conversion
+  - Fixed `clone` on Py<T> to use `clone_ref(py)`
+  - Updated methods to work with `Bound<'py, T>` instead of `&T`
+  - Fixed PyModule::from_code to accept CStr parameters
+  - Implemented manual Clone for types containing PyObject
+  - Fixed PyDict/PyList API calls
+  - Updated fixture system to use bound references
+  - Resolved all type mismatches and method resolution issues
+
+- **Key API Changes Applied**:
+  1. **Method imports**: Added `PyAnyMethods`, `PyDictMethods` imports where needed
+  2. **Bound references**: Updated all function signatures to use `&Bound<PyDict>`, `&Bound<PyModule>` etc
+  3. **CString conversions**: All `py.eval()`, `py.run()`, and `PyModule::from_code()` now use CStr
+  4. **Clone handling**: Implemented manual Clone traits for types containing PyObject using `clone_ref(py)`
+  5. **Error handling**: Fixed `get_item()` to handle Result types properly
+  6. **Type conversions**: Updated all `into_pyobject()` calls to handle new bound API
+
 
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 
