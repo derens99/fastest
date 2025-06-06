@@ -640,7 +640,7 @@ enum TestPatternType {
 /// Hyper-optimized test file collection with work-stealing and NUMA awareness
 #[allow(dead_code)]
 fn collect_test_files_simd_optimized(paths: &[PathBuf]) -> Vec<PathBuf> {
-    let _start = Instant::now();
+    let start = Instant::now();
     
     // Use work-stealing with NUMA-aware thread pools for maximum throughput
     let files: Vec<PathBuf> = paths

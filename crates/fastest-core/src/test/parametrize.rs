@@ -134,9 +134,13 @@ fn extract_ids(expr: &ast::Expr) -> Option<Vec<String>> {
 fn extract_indirect(expr: &ast::Expr, param_names: &[String]) -> Option<Vec<String>> {
     match expr {
         // indirect=True means all parameters are indirect
-        ast::Expr::Constant(c) => {
-            if let ast::Constant::Bool(true) = &c.value {
-                Some(param_names.to_vec())
+        ast::Expr::Constant(c) if matches!(&c.value, ast::Constant::Bool(true)) => {
+            Some(param_names.to_vec())
+        }
+        // indirect="param" means a single parameter is indirect
+        ast::Expr::Constant(c) if matches!(&c.value, ast::Constant::Str(_)) => {
+            if let ast::Constant::Str(s) = &c.value {
+                Some(vec![s.clone()])
             } else {
                 None
             }
@@ -155,14 +159,6 @@ fn extract_indirect(expr: &ast::Expr, param_names: &[String]) -> Option<Vec<Stri
                 })
                 .collect(),
         ),
-        // indirect="param" means a single parameter is indirect
-        ast::Expr::Constant(c) if matches!(&c.value, ast::Constant::Str(_)) => {
-            if let ast::Constant::Str(s) = &c.value {
-                Some(vec![s.clone()])
-            } else {
-                None
-            }
-        }
         _ => None,
     }
 }

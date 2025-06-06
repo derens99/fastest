@@ -131,6 +131,11 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
 
+      - name: Setup Python for PyO3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Build binary
         run: |
           cargo build --release --target ${{ matrix.targets }} --bin fastest

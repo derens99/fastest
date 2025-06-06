@@ -22,7 +22,7 @@ linkme = "0.3"
 dlopen2 = "0.7"  # For dynamic plugin loading
 
 # Python integration
-pyo3 = { version = "0.19", features = ["auto-initialize"] }
+pyo3 = { version = "0.19", features = ["auto-initialize", "abi3-py38"] }
 
 # Async support
 tokio = { version = "1.35", features = ["sync", "rt"] }

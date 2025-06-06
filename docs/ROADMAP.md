@@ -148,6 +148,17 @@ This document outlines the development roadmap for Fastest, with features priori
   - Removed cargo-dist dependency entirely for simpler release process
   - Binary artifacts now built directly with cargo and packaged as tar.gz/zip
 
+### v0.4.5 (January 2025) - CI/CD & Compilation Fixes
+- **Build System Improvements** ⭐⭐
+  - Fixed unused variable warnings in tree_sitter.rs parser
+  - Fixed unreachable pattern in parametrize.rs
+  - Added PyO3 abi3-py38 feature for cross-compilation support
+  - Fixed Linux ARM64 builds by enabling Python ABI stability
+  - Simplified CI workflow for more reliable releases
+  - Resolved duplicate pattern matching in parametrize.rs
+  - Fixed underscore prefix issue in discovery module
+  - Improved code quality and maintainability
+
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 
 ### ✅ Comprehensive Test Suite Validation & Critical Fixes

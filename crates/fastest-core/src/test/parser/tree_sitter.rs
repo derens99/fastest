@@ -124,18 +124,13 @@ impl Parser {
         let root = tree.root_node();
         let mut fixtures = Vec::new();
         let mut tests = Vec::new();
-        let mut module_metadata = ModuleMetadata {
-            setup_module: None,
-            teardown_module: None,
-        };
-        let mut class_metadata = HashMap::new();
 
         // First pass: collect all functions with their metadata
         let (functions, module_setup_teardown, collected_class_metadata) = self.collect_all_functions_and_metadata(root, content)?;
         
         // Update module metadata
-        module_metadata = module_setup_teardown;
-        class_metadata = collected_class_metadata;
+        let module_metadata = module_setup_teardown;
+        let class_metadata = collected_class_metadata;
 
         // Second pass: categorize into tests, fixtures, and setup/teardown
         for func in functions {
