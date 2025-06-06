@@ -222,6 +222,13 @@ This document outlines the development roadmap for Fastest, with features priori
   5. **Error handling**: Fixed `get_item()` to handle Result types properly
   6. **Type conversions**: Updated all `into_pyobject()` calls to handle new bound API
 
+### v0.4.9 (January 2025) - PyO3 Version Pinning
+- **Dependency Management** ⭐⭐⭐
+  - Pinned PyO3 to exact version `=0.25.0` to prevent future breaking changes
+  - Ensures stable builds across all environments
+  - Prevents unexpected API migrations in the future
+  - All 1089 tests passing at 7,361 tests/second after migration
+
 
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 
