@@ -1,3 +1,15 @@
+## [1.0.4](https://github.com/derens99/fastest/compare/v1.0.3...v1.0.4) (2025-06-06)
+
+
+### Bug Fixes
+
+* semver help ([f6919dc](https://github.com/derens99/fastest/commit/f6919dc92029a00c46bcbbd915ef60274fa628bd))
+* semver100 ([3911767](https://github.com/derens99/fastest/commit/3911767eab5bf4e7f8c80232312c1e93991c8b36))
+* semver101 ([7f00657](https://github.com/derens99/fastest/commit/7f006576614b811306f3f826b2168c7044070f98))
+* semver102 ([efda69e](https://github.com/derens99/fastest/commit/efda69ec3b19c612ca19db970bba6871776efdf2))
+* semver104 ([83ddab5](https://github.com/derens99/fastest/commit/83ddab5fde8748f836b89f7788830c7b147698f0))
+* semver5 ([cc7c3e2](https://github.com/derens99/fastest/commit/cc7c3e294b505fb7dcd68ff148533a61cd0e0dbf))
+
 ## [1.0.3](https://github.com/derens99/fastest/compare/v1.0.2...v1.0.3) (2025-06-06)
 
 
