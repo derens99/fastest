@@ -512,7 +512,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     
     // Call collection modifyitems hook
     if let Some(ref pm) = plugin_manager {
-        let mut items_json = serde_json::json!(discovered_tests);
+        let items_json = serde_json::json!(discovered_tests);
         if let Err(e) = pm.call_hook("pytest_collection_modifyitems", HookArgs::new().arg("items", items_json)) {
             if cli.verbose > 0 {
                 eprintln!("Warning: pytest_collection_modifyitems hook failed: {}", e);

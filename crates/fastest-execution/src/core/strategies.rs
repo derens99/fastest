@@ -920,6 +920,7 @@ impl UltraFastPythonEngine {
     }
     
     /// Legacy method that returns old-style worker code (kept for reference)
+    #[allow(dead_code)]
     fn get_legacy_worker_code(verbose: bool) -> String {
         let verbose_str = if verbose { "True" } else { "False" };
         format!(r#"

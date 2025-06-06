@@ -5,7 +5,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 use serde_json::Value;
 
-use crate::api::{Plugin, PluginMetadata, PluginError, PluginResult};
+use crate::api::{Plugin, PluginResult};
 
 /// Simplified hook arguments
 #[derive(Debug, Clone)]

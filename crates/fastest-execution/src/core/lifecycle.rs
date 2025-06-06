@@ -188,7 +188,7 @@ impl PythonLifecycleCoordinator {
     /// Execute module setup if needed
     pub fn setup_module_if_needed(
         &mut self,
-        py: Python,
+        _py: Python,
         module_path: &str,
         has_setup: bool,
     ) -> PyResult<bool> {
@@ -211,7 +211,7 @@ impl PythonLifecycleCoordinator {
     /// Execute class setup if needed
     pub fn setup_class_if_needed(
         &mut self,
-        py: Python,
+        _py: Python,
         class_path: &str,
         has_setup: bool,
     ) -> PyResult<bool> {

@@ -16,6 +16,7 @@ use regex::Regex;
 use crate::test::parser::Parser as TsParser;
 use crate::test::parametrize::expand_parametrized_tests;
 use smallvec::SmallVec;
+#[cfg(debug_assertions)]
 use std::time::Instant;
 use std::collections::HashMap;
 use std::cell::RefCell;
@@ -640,6 +641,7 @@ enum TestPatternType {
 /// Hyper-optimized test file collection with work-stealing and NUMA awareness
 #[allow(dead_code)]
 fn collect_test_files_simd_optimized(paths: &[PathBuf]) -> Vec<PathBuf> {
+    #[cfg(debug_assertions)]
     let start = Instant::now();
     
     // Use work-stealing with NUMA-aware thread pools for maximum throughput

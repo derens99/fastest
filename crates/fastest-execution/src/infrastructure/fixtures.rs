@@ -3,6 +3,8 @@
 //! This module integrates the advanced fixture system from fastest-core
 //! with the Python execution layer.
 
+#![allow(non_local_definitions)]
+
 use anyhow::Result;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyModule};
@@ -21,9 +23,9 @@ pub struct FixtureExecutor {
     /// Advanced fixture manager from core
     manager: Arc<AdvancedFixtureManager>,
     /// Conftest discovery
-    conftest_discovery: Arc<Mutex<ConftestDiscovery>>,
+    _conftest_discovery: Arc<Mutex<ConftestDiscovery>>,
     /// Python fixture implementations cache
-    fixture_implementations: Arc<Mutex<HashMap<String, PyObject>>>,
+    _fixture_implementations: Arc<Mutex<HashMap<String, PyObject>>>,
     /// Active fixture instances by scope
     active_instances: Arc<Mutex<HashMap<String, PyObject>>>,
 }
@@ -44,8 +46,8 @@ impl FixtureExecutor {
         
         Ok(Self {
             manager,
-            conftest_discovery: Arc::new(Mutex::new(conftest_discovery)),
-            fixture_implementations: Arc::new(Mutex::new(HashMap::new())),
+            _conftest_discovery: Arc::new(Mutex::new(conftest_discovery)),
+            _fixture_implementations: Arc::new(Mutex::new(HashMap::new())),
             active_instances: Arc::new(Mutex::new(HashMap::new())),
         })
     }
@@ -150,9 +152,10 @@ impl FixtureExecutor {
         
         // Cache based on scope
         let mut instances = self.active_instances.lock().unwrap();
-        instances.insert(cache_key, result.clone().into());
+        let py_object: PyObject = result.into();
+        instances.insert(cache_key, py_object.clone());
         
-        Ok(result.into())
+        Ok(py_object)
     }
     
     /// Execute built-in fixture
@@ -344,6 +347,7 @@ impl PyFixtureRequest {
 }
 
 #[pymethods]
+#[allow(non_local_definitions)]
 impl PyFixtureRequest {
     #[new]
     fn new(

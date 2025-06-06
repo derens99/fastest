@@ -1,7 +1,7 @@
 //! Built-in plugins that provide core functionality
 
 use std::any::Any;
-use crate::api::{Plugin, PluginMetadata, PluginResult};
+use crate::api::{Plugin, PluginMetadata};
 
 /// Fixture management plugin
 #[derive(Debug)]

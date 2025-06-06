@@ -33,9 +33,9 @@ struct FixtureValue {
     /// Generator object for teardown (if yield fixture)
     generator: Option<PyObject>,
     /// Scope of this fixture instance
-    scope: FixtureScope,
+    _scope: FixtureScope,
     /// Creation timestamp
-    created_at: std::time::Instant,
+    _created_at: std::time::Instant,
 }
 
 /// Complete fixture manager with full pytest compatibility
@@ -45,11 +45,11 @@ pub struct CompleteFixtureManager {
     /// Active fixture instances by cache key
     active_fixtures: Arc<Mutex<HashMap<String, FixtureValue>>>,
     /// Dependency graph for resolution
-    dependency_graph: Arc<Mutex<DiGraph<String, ()>>>,
+    _dependency_graph: Arc<Mutex<DiGraph<String, ()>>>,
     /// Node indices for graph operations
-    node_indices: Arc<Mutex<HashMap<String, NodeIndex>>>,
+    _node_indices: Arc<Mutex<HashMap<String, NodeIndex>>>,
     /// Conftest discovery
-    conftest_discovery: Arc<Mutex<ConftestDiscovery>>,
+    _conftest_discovery: Arc<Mutex<ConftestDiscovery>>,
     /// Python fixture module
     fixture_module: Arc<Mutex<Option<PyObject>>>,
     /// Teardown stack for proper cleanup order
@@ -105,9 +105,9 @@ impl CompleteFixtureManager {
         Ok(Self {
             fixture_definitions,
             active_fixtures: Arc::new(Mutex::new(HashMap::new())),
-            dependency_graph,
-            node_indices,
-            conftest_discovery: Arc::new(Mutex::new(conftest_discovery)),
+            _dependency_graph: dependency_graph,
+            _node_indices: node_indices,
+            _conftest_discovery: Arc::new(Mutex::new(conftest_discovery)),
             fixture_module: Arc::new(Mutex::new(None)),
             teardown_stack: Arc::new(Mutex::new(Vec::new())),
         })
@@ -443,8 +443,8 @@ sys.modules['pytest'] = pytest
             value: result.clone(),
             is_generator,
             generator: if is_generator { Some(result.clone()) } else { None },
-            scope: def.scope.clone(),
-            created_at: std::time::Instant::now(),
+            _scope: def.scope.clone(),
+            _created_at: std::time::Instant::now(),
         };
         
         let mut active = self.active_fixtures.lock().unwrap();
