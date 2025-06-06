@@ -2,34 +2,32 @@ name: Release
 
 on:
   push:
-    branches: [main]        # default branch
+    tags:
+      - 'v[0-9]+.*'
   workflow_dispatch:        # manual trigger
 
 permissions:
-  contents: write           # tags, CHANGELOG
+  contents: write           # tags, CHANGELOG, releases
   pull-requests: write
   id-token: write           # crates.io publish
 
 jobs:
-# ── create / update the Release PR ──────────────────────────
-  release-pr:
+# ── create GitHub Release ────────────────────────────────────
+  create-release:
     runs-on: ubuntu-latest
-    outputs:
-      created: ${{ steps.rp.outputs.release_created }}
     steps:
-      - uses: google-github-actions/release-please-action@v4
-        id: rp
+      - uses: actions/checkout@v4
+      - uses: taiki-e/create-gh-release-action@v1
         with:
+          # Path to changelog
+          changelog: CHANGELOG.md
+          # GitHub token for creating GitHub Releases
           token: ${{ secrets.GITHUB_TOKEN }}
-          command: manifest        # **manifest-driven**
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
 
-# ── publish to crates.io once that PR is merged ─────────────
+# ── publish to crates.io once tag is pushed ─────────────────
 # Temporarily disabled
 #  publish:
-#    if: needs.release-pr.outputs.created == 'true'
-#    needs: release-pr
+#    needs: create-release
 #    runs-on: ubuntu-latest
 #    steps:
 #      - uses: actions/checkout@v4
@@ -48,8 +46,7 @@ jobs:
 
 # ── build and upload binaries to GitHub Releases ────────────
   upload-binaries:
-    if: needs.release-pr.outputs.created == 'true'
-    needs: release-pr
+    needs: create-release
     strategy:
       matrix:
         include:
