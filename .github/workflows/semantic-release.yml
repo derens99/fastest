@@ -2,51 +2,52 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v[0-9]+.*'
-  workflow_dispatch:        # manual trigger
+    branches: [main]
+  workflow_dispatch:
 
 permissions:
-  contents: write           # tags, CHANGELOG, releases
+  contents: write
   pull-requests: write
-  id-token: write           # crates.io publish
+  id-token: write
 
 jobs:
-# ── create GitHub Release ────────────────────────────────────
-  create-release:
+# ── Semantic Release (analyze commits, bump version, create tag) ──
+  semantic-release:
     runs-on: ubuntu-latest
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+      new_release_git_tag: ${{ steps.semantic.outputs.new_release_git_tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: taiki-e/create-gh-release-action@v1
         with:
-          # Path to changelog
-          changelog: CHANGELOG.md
-          # GitHub token for creating GitHub Releases
-          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+      
+      - uses: dtolnay/rust-toolchain@stable
+      
+      - name: Install cargo-edit
+        run: cargo install cargo-edit
+      
+      - name: Semantic Release
+        uses: cycjimmy/semantic-release-action@v4
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          semantic_version: 19
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
 
-# ── publish to crates.io once tag is pushed ─────────────────
-# Temporarily disabled
-#  publish:
-#    needs: create-release
-#    runs-on: ubuntu-latest
-#    steps:
-#      - uses: actions/checkout@v4
-#        with: {fetch-depth: 0}     # pull tags
-#      - uses: dtolnay/rust-toolchain@stable
-#      - name: Publish to crates.io
-#        env:
-#          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-#        run: |
-#          cargo publish -p fastest-core
-#          cargo publish -p fastest-execution
-#          cargo publish -p fastest-plugins-macros
-#          cargo publish -p fastest-plugins
-#          cargo publish -p fastest-advanced
-#          cargo publish -p fastest-cli
-
-# ── build and upload binaries to GitHub Releases ────────────
+# ── Build and upload binaries when a new release is created ──
   upload-binaries:
-    needs: create-release
+    needs: semantic-release
+    if: needs.semantic-release.outputs.new_release_published == 'true'
     strategy:
       matrix:
         include:
@@ -63,22 +64,18 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
       
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
-          # Binary name
           bin: fastest
-          # Target triple
           target: ${{ matrix.target }}
-          # Archive name template
           archive: fastest-$tag-$target
-          # Include additional files
           include: LICENSE,README.md
-          # Create checksums
           checksum: sha256
-          # Build with release profile
           profile: release
-          # Path to workspace Cargo.toml
           manifest-path: ./Cargo.toml
-          # GitHub token
           token: ${{ secrets.GITHUB_TOKEN }}
+          # Specify the ref to ensure we're uploading to the right release
+          ref: refs/tags/${{ needs.semantic-release.outputs.new_release_git_tag }}
