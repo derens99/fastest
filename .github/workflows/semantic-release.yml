@@ -157,9 +157,6 @@ jobs:
             cp target/${{ matrix.targets }}/release/fastest artifacts/
             cd artifacts && tar czf $ARCHIVE_NAME fastest && cd ..
           fi
-          
-          # Move archive to artifacts directory
-          mv artifacts/$ARCHIVE_NAME artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
