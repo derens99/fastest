@@ -1,3 +1,10 @@
+## [0.3.20](https://github.com/derens99/fastest/compare/v0.3.19...v0.3.20) (2025-06-06)
+
+
+### Bug Fixes
+
+* semver fix ([83c3709](https://github.com/derens99/fastest/commit/83c37092037d3b1045209e91c4588a60c9af83b5))
+
 ## [0.3.19](https://github.com/derens99/fastest/compare/v0.3.18...v0.3.19) (2025-06-06)
 
 
