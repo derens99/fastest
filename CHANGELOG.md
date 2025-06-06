@@ -1,3 +1,15 @@
+# [1.0.0](https://github.com/derens99/fastest/compare/v0.3.25...v1.0.0) (2025-06-06)
+
+
+### Bug Fixes
+
+* complete PyO3 0.25 migration and pin version ([df1d25b](https://github.com/derens99/fastest/commit/df1d25b34f5a490827473c37b020282a4fb0de39))
+
+
+### BREAKING CHANGES
+
+* Requires PyO3 0.25.0 exactly
+
 ## [0.3.25](https://github.com/derens99/fastest/compare/v0.3.24...v0.3.25) (2025-06-06)
 
 
