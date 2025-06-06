@@ -132,7 +132,9 @@ jobs:
 
       - name: Install cross
         if: runner.os == 'Linux'
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
 
       - name: Build binary (Linux/macOS)
         if: runner.os != 'Windows'
