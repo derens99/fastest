@@ -130,10 +130,7 @@ jobs:
         if: contains(matrix.targets, 'aarch64') && runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y python3.10-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          # Create symlink for cross-compilation
-          sudo mkdir -p /usr/aarch64-linux-gnu/lib
-          sudo ln -sf /usr/lib/x86_64-linux-gnu/libpython3.10.so /usr/aarch64-linux-gnu/lib/libpython3.10.so || true
+          sudo apt-get install -y python3-dev gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Setup Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -145,10 +142,19 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Build binary
-        env:
-          PYO3_CROSS_LIB_DIR: ${{ runner.os == 'Linux' && contains(matrix.targets, 'aarch64') && '/usr/aarch64-linux-gnu/lib' || '' }}
-          PYO3_CROSS_PYTHON_VERSION: '3.10'
+      - name: Build binary (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          if [[ "${{ runner.os }}" == "Linux" ]] && [[ "${{ matrix.targets }}" == *"aarch64"* ]]; then
+            # For Linux ARM64 cross-compilation
+            export PYO3_CROSS_PYTHON_VERSION=3.10
+            export PYO3_CROSS=1
+          fi
+          cargo build --release --target ${{ matrix.targets }} --bin fastest
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
           cargo build --release --target ${{ matrix.targets }} --bin fastest
           
