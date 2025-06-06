@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/derens99/fastest/compare/v1.0.2...v1.0.3) (2025-06-06)
+
+
+### Bug Fixes
+
+* use cargo for native Linux x86_64 builds ([4cbd018](https://github.com/derens99/fastest/commit/4cbd018deef41f0af6f415c883daf409633ab708))
+
 ## [1.0.2](https://github.com/derens99/fastest/compare/v1.0.1...v1.0.2) (2025-06-06)
 
 
