@@ -81,37 +81,9 @@ jobs:
             @semantic-release/exec@6
             conventional-changelog-conventionalcommits@8
 
-  dist:
-    name: Build Distribution
-    needs: semantic-release
-    if: needs.semantic-release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-latest
-    outputs:
-      artifacts: ${{ steps.dist.outputs.artifacts }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.semantic-release.outputs.new_release_git_tag }}
-
-      - name: Install dist
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-dist@0.14.0
-
-      - name: Run dist plan
-        run: cargo dist plan --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --output-format=json > plan.json
-
-      - name: Upload plan
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist-plan
-          path: plan.json
-          retention-days: 1
-
   build:
     name: Build ${{ matrix.display_name || matrix.targets }}
-    needs: [semantic-release, dist]
+    needs: semantic-release
     if: needs.semantic-release.outputs.new_release_published == 'true'
     strategy:
       fail-fast: false
@@ -148,11 +120,6 @@ jobs:
           cache-on-failure: true
           prefix-key: v0-rust-${{ matrix.targets }}
 
-      - name: Install dist
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-dist@0.14.0
-
       - name: Install cross-compilation tools
         if: contains(matrix.targets, 'aarch64') && runner.os == 'Linux'
         uses: taiki-e/setup-cross-toolchain-action@v1
@@ -164,22 +131,36 @@ jobs:
         with:
           targets: ${{ matrix.targets }}
 
-      - name: Download dist plan
-        uses: actions/download-artifact@v4
-        with:
-          name: dist-plan
-
-      - name: Build artifacts
+      - name: Build binary
         run: |
-          cargo dist build --tag=${{ needs.semantic-release.outputs.new_release_git_tag }} --target=${{ matrix.targets }} --output-format=json > dist-output.json
-          echo "cargo-dist output:"
-          cat dist-output.json
+          cargo build --release --target ${{ matrix.targets }} --bin fastest
+          
+      - name: Create artifacts directory
+        run: mkdir -p artifacts
+
+      - name: Package artifacts
+        run: |
+          # Determine binary name and archive format based on OS
+          if [[ "${{ matrix.targets }}" == *"windows"* ]]; then
+            BINARY_NAME="fastest.exe"
+            ARCHIVE_NAME="fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.zip"
+            cp target/${{ matrix.targets }}/release/fastest.exe artifacts/
+            cd artifacts && zip $ARCHIVE_NAME fastest.exe && cd ..
+          else
+            BINARY_NAME="fastest"
+            ARCHIVE_NAME="fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.tar.gz"
+            cp target/${{ matrix.targets }}/release/fastest artifacts/
+            cd artifacts && tar czf $ARCHIVE_NAME fastest && cd ..
+          fi
+          
+          # Move archive to artifacts directory
+          mv artifacts/$ARCHIVE_NAME artifacts/
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: dist-${{ matrix.targets }}
-          path: target/distrib/*
+          name: artifacts-${{ matrix.targets }}
+          path: artifacts/*
           retention-days: 1
 
   publish:
@@ -198,29 +179,29 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: dist-*
-          path: dist
+          pattern: artifacts-*
+          path: release-artifacts
           merge-multiple: true
 
       - name: List artifacts
         run: |
           echo "Downloaded artifacts:"
-          find dist -type f -name "*" | sort
+          find release-artifacts -type f -name "*" | sort
 
       - name: Create checksums
         run: |
-          cd dist
+          cd release-artifacts
           sha256sum * > checksums.sha256
           echo "Checksums:"
           cat checksums.sha256
 
       - name: Attach artifacts to release
         run: |
-          gh release upload ${{ needs.semantic-release.outputs.new_release_git_tag }} dist/* --clobber
+          gh release upload ${{ needs.semantic-release.outputs.new_release_git_tag }} release-artifacts/* --clobber
 
       # Crates.io publishing removed - not needed for this project
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@v1
         with:
-          subject-path: dist/*
+          subject-path: release-artifacts/*

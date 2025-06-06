@@ -42,31 +42,5 @@ clap = { version = "4.5", features = ["derive"] }
 colored = "2.1"
 indicatif = "0.17"
 
-[workspace.metadata.dist]
-# Use the latest cargo-dist available in CI (no version pin)
-
-# CI backends to support
-ci = ["github"]
-# The installers to generate
-installers = ["shell", "powershell"]
-# Target platforms to build for
-targets = [
-    "x86_64-unknown-linux-gnu",
-    "aarch64-unknown-linux-gnu", 
-    "x86_64-apple-darwin",
-    "aarch64-apple-darwin",
-    "x86_64-pc-windows-msvc"
-]
-# No publish jobs for now (can be re-enabled later)
-publish-jobs = []
-# Whether to install an updater program
-install-updater = false
-# Path to the binary to build
-binaries = ["fastest"]
-# Whether cargo-dist should create the Github Release for you
-create-release = false
-
-[workspace.metadata.dist.github-custom-runners]
-aarch64-unknown-linux-gnu = "ubuntu-latest"
-aarch64-apple-darwin = "macos-latest"
+# cargo-dist configuration removed - using direct cargo build in CI instead
 
