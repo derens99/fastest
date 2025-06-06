@@ -1,3 +1,10 @@
+## [0.3.25](https://github.com/derens99/fastest/compare/v0.3.24...v0.3.25) (2025-06-06)
+
+
+### Bug Fixes
+
+* bin builds ([3cfa301](https://github.com/derens99/fastest/commit/3cfa3017ec9d9bdec45e5c9502be684a00b80f03))
+
 ## [0.3.24](https://github.com/derens99/fastest/compare/v0.3.23...v0.3.24) (2025-06-06)
 
 
