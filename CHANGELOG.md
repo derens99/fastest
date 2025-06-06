@@ -1,3 +1,10 @@
+## [0.3.23](https://github.com/derens99/fastest/compare/v0.3.22...v0.3.23) (2025-06-06)
+
+
+### Bug Fixes
+
+* ci cd ([6f85d55](https://github.com/derens99/fastest/commit/6f85d55eb1deb901ab3c7fc16525011494e53bea))
+
 ## [0.3.22](https://github.com/derens99/fastest/compare/v0.3.21...v0.3.22) (2025-06-06)
 
 
