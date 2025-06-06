@@ -1,3 +1,10 @@
+## [0.3.22](https://github.com/derens99/fastest/compare/v0.3.21...v0.3.22) (2025-06-06)
+
+
+### Bug Fixes
+
+* warnings fix ([dc0310b](https://github.com/derens99/fastest/commit/dc0310bce98cc10eb01ae89ed5f17c2696931e56))
+
 ## [0.3.21](https://github.com/derens99/fastest/compare/v0.3.20...v0.3.21) (2025-06-06)
 
 
