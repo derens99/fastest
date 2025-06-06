@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/derens99/fastest/compare/v1.0.1...v1.0.2) (2025-06-06)
+
+
+### Bug Fixes
+
+* use taiki-e/install-action for cross installation ([622af35](https://github.com/derens99/fastest/commit/622af35dbc413c37d928d5bbba77e59c7233c70f))
+
 ## [1.0.1](https://github.com/derens99/fastest/compare/v1.0.0...v1.0.1) (2025-06-06)
 
 
