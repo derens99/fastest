@@ -1,3 +1,6 @@
+# DISABLED - Using semantic-release.yml instead
+# To re-enable, remove the .disabled extension from the filename
+
 name: Release
 
 on:
