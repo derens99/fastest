@@ -1,7 +1,7 @@
-use fastest_core::{discover_tests, TestItem};
-use crate::error::Result;
 use super::incremental::IncrementalTester as DependencyTracker;
 use super::AdvancedConfig;
+use crate::error::Result;
+use fastest_core::{discover_tests, TestItem};
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -39,7 +39,10 @@ impl TestWatcher {
             watcher,
             receiver: rx,
             watched_paths: Arc::new(Mutex::new(HashSet::new())),
-            dependency_tracker: Arc::new(Mutex::new(DependencyTracker::new(&AdvancedConfig::default()).expect("Failed to create dependency tracker"))),
+            dependency_tracker: Arc::new(Mutex::new(
+                DependencyTracker::new(&AdvancedConfig::default())
+                    .expect("Failed to create dependency tracker"),
+            )),
         })
     }
 

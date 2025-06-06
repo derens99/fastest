@@ -63,7 +63,7 @@ pub enum ChangeType {
 impl IncrementalTester {
     pub fn new(config: &AdvancedConfig) -> Result<Self> {
         let cache_file = config.cache_dir.join("incremental_cache.json");
-        
+
         // Try to open git repository
         let git_repo = Repository::discover(".")
             .map_err(|e| tracing::warn!("Git repository not found: {}", e))
@@ -73,9 +73,9 @@ impl IncrementalTester {
             config: config.clone(),
             git_repo,
             file_hashes: Arc::new(RwLock::new(HashMap::new())),
-            test_cache: Arc::new(RwLock::new(
-                LruCache::new(NonZeroUsize::new(10000).unwrap())
-            )),
+            test_cache: Arc::new(RwLock::new(LruCache::new(
+                NonZeroUsize::new(10000).unwrap(),
+            ))),
             affected_cache: Arc::new(RwLock::new(HashMap::new())),
             cache_file,
         })
@@ -84,10 +84,10 @@ impl IncrementalTester {
     pub async fn initialize(&mut self) -> Result<()> {
         // Load caches
         self.load_cache().await?;
-        
+
         // Initialize file hashes
         self.update_file_hashes().await?;
-        
+
         tracing::info!("Incremental tester initialized");
         Ok(())
     }
@@ -95,7 +95,7 @@ impl IncrementalTester {
     /// Get tests affected by recent changes
     pub async fn get_affected_tests(&self) -> Result<Vec<String>> {
         let changed_files = self.get_changed_files().await?;
-        
+
         if changed_files.is_empty() {
             tracing::info!("No changes detected, running all tests");
             return Ok(vec![]);
@@ -106,7 +106,7 @@ impl IncrementalTester {
 
         for change in &changed_files {
             let file_path = change.file_path.to_string_lossy();
-            
+
             // Direct test file changes
             if file_path.contains("test_") || file_path.ends_with("_test.py") {
                 affected_tests.insert(file_path.to_string());
@@ -122,9 +122,12 @@ impl IncrementalTester {
         }
 
         let result: Vec<String> = affected_tests.into_iter().collect();
-        tracing::info!("Found {} affected tests from {} changed files", 
-                      result.len(), changed_files.len());
-        
+        tracing::info!(
+            "Found {} affected tests from {} changed files",
+            result.len(),
+            changed_files.len()
+        );
+
         Ok(result)
     }
 
@@ -142,9 +145,9 @@ impl IncrementalTester {
         let mut changes = Vec::new();
         let mut status_opts = StatusOptions::new();
         status_opts.include_untracked(true);
-        
+
         let statuses = repo.statuses(Some(&mut status_opts))?;
-        
+
         for entry in statuses.iter() {
             if let Some(path) = entry.path() {
                 let file_path = PathBuf::from(path);
@@ -219,9 +222,9 @@ impl IncrementalTester {
 
         // Requirements files affect all tests
         if file_path.file_name().map_or(false, |name| {
-            name.to_string_lossy().contains("requirements") ||
-            name == "pyproject.toml" ||
-            name == "setup.py"
+            name.to_string_lossy().contains("requirements")
+                || name == "pyproject.toml"
+                || name == "setup.py"
         }) {
             affected.insert("*".to_string());
         }
@@ -232,13 +235,14 @@ impl IncrementalTester {
     /// Analyze Python file dependencies
     async fn analyze_python_impact(&self, file_path: &Path) -> Result<HashSet<String>> {
         let mut affected = HashSet::new();
-        
+
         if !file_path.exists() {
             return Ok(affected);
         }
 
         let _content = std::fs::read_to_string(file_path)?;
-        let file_stem = file_path.file_stem()
+        let file_stem = file_path
+            .file_stem()
             .unwrap_or_default()
             .to_string_lossy()
             .to_string();
@@ -272,9 +276,14 @@ impl IncrementalTester {
     fn is_config_file(&self, file_path: &Path) -> bool {
         if let Some(name) = file_path.file_name() {
             let name_str = name.to_string_lossy();
-            matches!(name_str.as_ref(), 
-                "pytest.ini" | "pyproject.toml" | "setup.cfg" | 
-                "tox.ini" | ".coveragerc" | "conftest.py"
+            matches!(
+                name_str.as_ref(),
+                "pytest.ini"
+                    | "pyproject.toml"
+                    | "setup.cfg"
+                    | "tox.ini"
+                    | ".coveragerc"
+                    | "conftest.py"
             )
         } else {
             false
@@ -292,15 +301,14 @@ impl IncrementalTester {
     /// Calculate hashes for all relevant files
     async fn calculate_all_file_hashes(&self) -> Result<HashMap<PathBuf, String>> {
         let mut hashes = HashMap::new();
-        
+
         // Walk through Python files
         for entry in walkdir::WalkDir::new(".")
             .into_iter()
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.extension().map_or(false, |ext| ext == "py") ||
-                self.is_config_file(path)
+                path.extension().map_or(false, |ext| ext == "py") || self.is_config_file(path)
             })
         {
             let path = entry.path().to_path_buf();
@@ -317,7 +325,7 @@ impl IncrementalTester {
         let new_hashes = self.calculate_all_file_hashes().await?;
         let mut stored_hashes = self.file_hashes.write().await;
         *stored_hashes = new_hashes;
-        
+
         tracing::debug!("Updated {} file hashes", stored_hashes.len());
         Ok(())
     }
@@ -333,19 +341,24 @@ impl IncrementalTester {
     pub async fn can_skip_test(&self, test_id: &str, file_hash: &str) -> bool {
         if let Some(cached_result) = self.test_cache.read().await.peek(test_id) {
             // Skip if file hasn't changed and test previously passed
-            cached_result.file_hash == file_hash && 
-            matches!(cached_result.status, TestStatus::Passed)
+            cached_result.file_hash == file_hash
+                && matches!(cached_result.status, TestStatus::Passed)
         } else {
             false
         }
     }
 
     /// Record test-file affection relationship
-    pub async fn record_test_affection(&self, test_id: &str, affected_files: Vec<String>) -> Result<()> {
+    pub async fn record_test_affection(
+        &self,
+        test_id: &str,
+        affected_files: Vec<String>,
+    ) -> Result<()> {
         let mut cache = self.affected_cache.write().await;
-        
+
         for file in affected_files {
-            cache.entry(file)
+            cache
+                .entry(file)
                 .or_insert_with(HashSet::new)
                 .insert(test_id.to_string());
         }
@@ -364,14 +377,18 @@ impl IncrementalTester {
 
         // Load file hashes
         if let Some(hashes) = data.get("file_hashes") {
-            if let Ok(hashes_map) = serde_json::from_value::<HashMap<PathBuf, String>>(hashes.clone()) {
+            if let Ok(hashes_map) =
+                serde_json::from_value::<HashMap<PathBuf, String>>(hashes.clone())
+            {
                 *self.file_hashes.write().await = hashes_map;
             }
         }
 
         // Load affected cache
         if let Some(affected) = data.get("affected_cache") {
-            if let Ok(affected_map) = serde_json::from_value::<HashMap<String, HashSet<String>>>(affected.clone()) {
+            if let Ok(affected_map) =
+                serde_json::from_value::<HashMap<String, HashSet<String>>>(affected.clone())
+            {
                 *self.affected_cache.write().await = affected_map;
             }
         }
@@ -389,7 +406,7 @@ impl IncrementalTester {
         });
 
         std::fs::write(&self.cache_file, serde_json::to_string_pretty(&data)?)?;
-        
+
         tracing::debug!("Saved incremental cache");
         Ok(())
     }
@@ -397,20 +414,26 @@ impl IncrementalTester {
     /// Get incremental testing statistics
     pub async fn get_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("tracked_files".to_string(), 
-                    serde_json::Value::Number(self.file_hashes.read().await.len().into()));
-        stats.insert("cached_results".to_string(), 
-                    serde_json::Value::Number(self.test_cache.read().await.len().into()));
-        stats.insert("affected_relationships".to_string(), 
-                    serde_json::Value::Number(self.affected_cache.read().await.len().into()));
-        
+
+        stats.insert(
+            "tracked_files".to_string(),
+            serde_json::Value::Number(self.file_hashes.read().await.len().into()),
+        );
+        stats.insert(
+            "cached_results".to_string(),
+            serde_json::Value::Number(self.test_cache.read().await.len().into()),
+        );
+        stats.insert(
+            "affected_relationships".to_string(),
+            serde_json::Value::Number(self.affected_cache.read().await.len().into()),
+        );
+
         if self.git_repo.is_some() {
             stats.insert("git_enabled".to_string(), serde_json::Value::Bool(true));
         } else {
             stats.insert("git_enabled".to_string(), serde_json::Value::Bool(false));
         }
-        
+
         stats
     }
 
@@ -418,17 +441,17 @@ impl IncrementalTester {
     pub async fn cleanup_cache(&self, max_age_days: u64) -> Result<()> {
         let _cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
         let mut cache = self.test_cache.write().await;
-        
+
         // Remove old entries (LRU will handle this automatically)
         let new_cap = cache.cap().get() / 2;
         cache.resize(NonZeroUsize::new(new_cap).unwrap());
-        
+
         self.save_cache().await?;
-        
+
         tracing::info!("Cleaned up incremental cache");
         Ok(())
     }
-    
+
     /// Get tests that depend on a given file (for watch mode compatibility)
     pub fn get_dependents(&self, _file_path: &Path) -> Option<Vec<String>> {
         // This is a synchronous version for compatibility with the watch mode
@@ -436,7 +459,7 @@ impl IncrementalTester {
         // For now, return empty to avoid blocking
         Some(vec![])
     }
-    
+
     /// Update dependency information from discovered tests (for watch mode compatibility)
     pub fn update_from_tests(&mut self, _tests: &[fastest_core::TestItem]) -> Result<()> {
         // This would update internal dependency tracking based on test discovery

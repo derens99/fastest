@@ -55,8 +55,8 @@ pub struct ClassMetadata {
     pub teardown_class: Option<SetupTeardownMethod>,
     pub setup_method: Option<SetupTeardownMethod>,
     pub teardown_method: Option<SetupTeardownMethod>,
-    pub has_setup: bool,  // unittest-style setUp
-    pub has_teardown: bool,  // unittest-style tearDown
+    pub has_setup: bool,    // unittest-style setUp
+    pub has_teardown: bool, // unittest-style tearDown
 }
 
 /// Fixture definition
@@ -78,12 +78,18 @@ pub struct Parser {
 
 /// Check if a method name is a setup/teardown method
 fn is_setup_teardown_method(name: &str) -> bool {
-    matches!(name, 
-        "setup_module" | "teardown_module" |
-        "setup_class" | "teardown_class" |
-        "setup_method" | "teardown_method" |
-        "setup_function" | "teardown_function" |
-        "setUp" | "tearDown"
+    matches!(
+        name,
+        "setup_module"
+            | "teardown_module"
+            | "setup_class"
+            | "teardown_class"
+            | "setup_method"
+            | "teardown_method"
+            | "setup_function"
+            | "teardown_function"
+            | "setUp"
+            | "tearDown"
     )
 }
 
@@ -115,7 +121,12 @@ impl Parser {
     pub fn parse_content(
         &mut self,
         content: &str,
-    ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>, ModuleMetadata, HashMap<String, ClassMetadata>)> {
+    ) -> Result<(
+        Vec<FixtureDefinition>,
+        Vec<TestFunction>,
+        ModuleMetadata,
+        HashMap<String, ClassMetadata>,
+    )> {
         let tree = self
             .parser
             .parse(content, None)
@@ -126,8 +137,9 @@ impl Parser {
         let mut tests = Vec::new();
 
         // First pass: collect all functions with their metadata
-        let (functions, module_setup_teardown, collected_class_metadata) = self.collect_all_functions_and_metadata(root, content)?;
-        
+        let (functions, module_setup_teardown, collected_class_metadata) =
+            self.collect_all_functions_and_metadata(root, content)?;
+
         // Update module metadata
         let module_metadata = module_setup_teardown;
         let class_metadata = collected_class_metadata;
@@ -145,7 +157,15 @@ impl Parser {
         Ok((fixtures, tests, module_metadata, class_metadata))
     }
 
-    fn collect_all_functions_and_metadata(&self, root: Node, content: &str) -> Result<(Vec<FunctionInfo>, ModuleMetadata, HashMap<String, ClassMetadata>)> {
+    fn collect_all_functions_and_metadata(
+        &self,
+        root: Node,
+        content: &str,
+    ) -> Result<(
+        Vec<FunctionInfo>,
+        ModuleMetadata,
+        HashMap<String, ClassMetadata>,
+    )> {
         let mut functions = Vec::new();
         let mut class_map = HashMap::new();
         let mut module_metadata = ModuleMetadata {
@@ -158,7 +178,13 @@ impl Parser {
         self.collect_classes_with_metadata(root, content, &mut class_map, &mut class_metadata)?;
 
         // Then collect all functions and module-level setup/teardown
-        self.collect_functions_with_metadata(root, content, &mut functions, &class_map, &mut module_metadata)?;
+        self.collect_functions_with_metadata(
+            root,
+            content,
+            &mut functions,
+            &class_map,
+            &mut module_metadata,
+        )?;
 
         Ok((functions, module_metadata, class_metadata))
     }
@@ -189,7 +215,13 @@ impl Parser {
 
                     // Find all methods in this class
                     if let Some(body) = node.child_by_field_name("body") {
-                        self.collect_class_methods_with_metadata(body, content, class_name, class_map, &mut metadata)?;
+                        self.collect_class_methods_with_metadata(
+                            body,
+                            content,
+                            class_name,
+                            class_map,
+                            &mut metadata,
+                        )?;
                     }
 
                     // Store the class metadata
@@ -224,7 +256,7 @@ impl Parser {
                         let method_name = name_node.utf8_text(content.as_bytes())?;
                         let is_async = child.child(0).map(|n| n.kind() == "async").unwrap_or(false);
                         let line_number = name_node.start_position().row + 1;
-                        
+
                         // Check for setup/teardown methods
                         match method_name {
                             "setup_class" => {
@@ -271,7 +303,7 @@ impl Parser {
                             }
                             _ => {}
                         }
-                        
+
                         class_map.insert(method_name.to_string(), class_name.to_string());
                     }
                 }
@@ -280,13 +312,15 @@ impl Parser {
                         if def.kind() == "function_definition" {
                             if let Some(name_node) = def.child_by_field_name("name") {
                                 let method_name = name_node.utf8_text(content.as_bytes())?;
-                                let is_async = def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+                                let is_async =
+                                    def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
                                 let line_number = name_node.start_position().row + 1;
                                 let decorators = self.parse_decorators(child, content)?;
-                                
+
                                 // Check if this is a classmethod or staticmethod
-                                let is_classmethod = decorators.iter().any(|d| d.contains("classmethod"));
-                                
+                                let is_classmethod =
+                                    decorators.iter().any(|d| d.contains("classmethod"));
+
                                 // Check for setup/teardown methods
                                 match method_name {
                                     "setup_class" if is_classmethod => {
@@ -309,7 +343,7 @@ impl Parser {
                                     }
                                     _ => {}
                                 }
-                                
+
                                 class_map.insert(method_name.to_string(), class_name.to_string());
                             }
                         }
@@ -373,7 +407,7 @@ impl Parser {
                         if let Some(mut func_info) = self.parse_function(def, content, class_map)? {
                             // Parse decorators
                             func_info.decorators = self.parse_decorators(node, content)?;
-                            
+
                             // Check for module-level setup/teardown with decorators
                             if func_info.class_name.is_none() {
                                 match func_info.name.as_str() {
@@ -387,13 +421,14 @@ impl Parser {
                                         });
                                     }
                                     "teardown_module" => {
-                                        module_metadata.teardown_module = Some(SetupTeardownMethod {
-                                            name: func_info.name.clone(),
-                                            line_number: func_info.line_number,
-                                            is_async: func_info.is_async,
-                                            method_type: SetupTeardownType::Teardown,
-                                            scope: SetupTeardownScope::Module,
-                                        });
+                                        module_metadata.teardown_module =
+                                            Some(SetupTeardownMethod {
+                                                name: func_info.name.clone(),
+                                                line_number: func_info.line_number,
+                                                is_async: func_info.is_async,
+                                                method_type: SetupTeardownType::Teardown,
+                                                scope: SetupTeardownScope::Module,
+                                            });
                                     }
                                     _ => {
                                         functions.push(func_info);
@@ -423,7 +458,13 @@ impl Parser {
                 // Recurse into child nodes
                 let mut cursor = node.walk();
                 for child in node.children(&mut cursor) {
-                    self.collect_functions_with_metadata(child, content, functions, class_map, module_metadata)?;
+                    self.collect_functions_with_metadata(
+                        child,
+                        content,
+                        functions,
+                        class_map,
+                        module_metadata,
+                    )?;
                 }
             }
         }
@@ -479,17 +520,21 @@ impl Parser {
                 "function_definition" => {
                     if let Some(name_node) = child.child_by_field_name("name") {
                         let method_name = name_node.utf8_text(content.as_bytes())?;
-                        
+
                         // Only include test methods (exclude setup/teardown)
-                        if method_name.starts_with("test") && !is_setup_teardown_method(method_name) {
-                            let is_async = child.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-                            
-                            let params = if let Some(params_node) = child.child_by_field_name("parameters") {
+                        if method_name.starts_with("test") && !is_setup_teardown_method(method_name)
+                        {
+                            let is_async =
+                                child.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+
+                            let params = if let Some(params_node) =
+                                child.child_by_field_name("parameters")
+                            {
                                 self.parse_parameters(params_node, content)?
                             } else {
                                 Vec::new()
                             };
-                            
+
                             functions.push(FunctionInfo {
                                 name: method_name.to_string(),
                                 line_number: name_node.start_position().row + 1,
@@ -506,18 +551,23 @@ impl Parser {
                         if def.kind() == "function_definition" {
                             if let Some(name_node) = def.child_by_field_name("name") {
                                 let method_name = name_node.utf8_text(content.as_bytes())?;
-                                
-                                if method_name.starts_with("test") && !is_setup_teardown_method(method_name) {
-                                    let is_async = def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-                                    
-                                    let params = if let Some(params_node) = def.child_by_field_name("parameters") {
+
+                                if method_name.starts_with("test")
+                                    && !is_setup_teardown_method(method_name)
+                                {
+                                    let is_async =
+                                        def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+
+                                    let params = if let Some(params_node) =
+                                        def.child_by_field_name("parameters")
+                                    {
                                         self.parse_parameters(params_node, content)?
                                     } else {
                                         Vec::new()
                                     };
-                                    
+
                                     let decorators = self.parse_decorators(child, content)?;
-                                    
+
                                     functions.push(FunctionInfo {
                                         name: method_name.to_string(),
                                         line_number: name_node.start_position().row + 1,
@@ -690,7 +740,7 @@ def test_simple():
     assert True
 "#;
         let mut parser = Parser::new().unwrap();
-        let (_, tests) = parser.parse_content(content).unwrap();
+        let (_, tests, _, _) = parser.parse_content(content).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_simple");
         assert!(!tests[0].is_async);
@@ -703,7 +753,7 @@ async def test_async():
     await something()
 "#;
         let mut parser = Parser::new().unwrap();
-        let (_, tests) = parser.parse_content(content).unwrap();
+        let (_, tests, _, _) = parser.parse_content(content).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_async");
         assert!(tests[0].is_async);
@@ -717,7 +767,7 @@ def setup_module():
     return "setup"
 "#;
         let mut parser = Parser::new().unwrap();
-        let (fixtures, _) = parser.parse_content(content).unwrap();
+        let (fixtures, _, _, _) = parser.parse_content(content).unwrap();
         assert_eq!(fixtures.len(), 1);
         assert_eq!(fixtures[0].name, "setup_module");
         assert_eq!(fixtures[0].scope, "module");
@@ -732,7 +782,7 @@ def test_add(x, y):
     assert x + y > 0
 "#;
         let mut parser = Parser::new().unwrap();
-        let (_, tests) = parser.parse_content(content).unwrap();
+        let (_, tests, _, _) = parser.parse_content(content).unwrap();
         assert_eq!(tests.len(), 1);
         assert_eq!(tests[0].name, "test_add");
         assert_eq!(tests[0].parameters, vec!["x", "y"]);
@@ -750,7 +800,7 @@ class TestMyClass:
         pass
 "#;
         let mut parser = Parser::new().unwrap();
-        let (_, tests) = parser.parse_content(content).unwrap();
+        let (_, tests, _, _) = parser.parse_content(content).unwrap();
         assert_eq!(tests.len(), 2);
         assert_eq!(tests[0].class_name, Some("TestMyClass".to_string()));
         assert!(!tests[0].is_async);

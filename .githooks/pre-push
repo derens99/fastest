@@ -1,0 +1,9 @@
+#!/bin/bash
+# Git pre-push hook that runs validation checks
+# To enable: git config core.hooksPath .githooks
+
+# Run the pre-push validation script
+./scripts/pre-push-check.sh
+
+# Exit with the same code as the validation script
+exit $?

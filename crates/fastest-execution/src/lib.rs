@@ -11,10 +11,10 @@
 //! - **`infrastructure`**: Supporting systems for parallel execution, output capture, and timeouts  
 //! - **`experimental`**: Cutting-edge optimizations including zero-copy, work-stealing, and JIT compilation
 
-pub mod core;           // Core execution functionality
+pub mod core; // Core execution functionality
+pub mod experimental; // Experimental optimizations
 pub mod infrastructure; // Supporting systems
-pub mod experimental;   // Experimental optimizations
-pub mod utils;          // Utility modules including SIMD optimizations
+pub mod utils; // Utility modules including SIMD optimizations
 
 // Re-export the main execution module that was in mod.rs
 use serde::{Deserialize, Serialize};
@@ -28,7 +28,7 @@ pub enum TestOutcome {
     Failed,
     Skipped { reason: Option<String> },
     XFailed { reason: Option<String> },
-    XPassed,  // Expected to fail but passed
+    XPassed, // Expected to fail but passed
 }
 
 /// Result of running a test
@@ -46,33 +46,38 @@ pub struct TestResult {
 impl TestResult {
     /// Helper method for backward compatibility
     pub fn passed(&self) -> bool {
-        matches!(self.outcome, TestOutcome::Passed | TestOutcome::XFailed { .. })
+        matches!(
+            self.outcome,
+            TestOutcome::Passed | TestOutcome::XFailed { .. }
+        )
     }
 }
 
 // Re-export main types from organized modules
-pub use core::{UltraFastExecutor, DevExperienceConfig, PluginCompatibilityConfig, PythonRuntime, RuntimeConfig};
-pub use infrastructure::{
-    MassiveParallelExecutor, MassiveExecutionStats,
-    CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo,
-    UltraFastTimeoutManager, TimeoutConfig, TimeoutHandle, TimeoutEvent, TimeoutEventType, TimeoutStatistics
+pub use core::{
+    DevExperienceConfig, PluginCompatibilityConfig, PythonRuntime, RuntimeConfig, UltraFastExecutor,
 };
 pub use experimental::{
-    ZeroCopyExecutor, ZeroCopyTestResult, convert_zero_copy_results, ZeroCopyStats,
-    create_zero_copy_executor_with_arena, WorkStealingExecutor, WorkStealingStats, WorkerMetrics,
-    NativeTestExecutor, NativeTestResult, NativeExecutionType, TranspilationStats, 
-    NativeDetailedStats, TestPattern
+    convert_zero_copy_results, create_zero_copy_executor_with_arena, NativeDetailedStats,
+    NativeExecutionType, NativeTestExecutor, NativeTestResult, TestPattern, TranspilationStats,
+    WorkStealingExecutor, WorkStealingStats, WorkerMetrics, ZeroCopyExecutor, ZeroCopyStats,
+    ZeroCopyTestResult,
+};
+pub use infrastructure::{
+    CaptureConfig, CaptureManager, CaptureResult, ExceptionInfo, MassiveExecutionStats,
+    MassiveParallelExecutor, TimeoutConfig, TimeoutEvent, TimeoutEventType, TimeoutHandle,
+    TimeoutStatistics, UltraFastTimeoutManager,
 };
 pub use utils::{
-    init_simd_json, is_simd_json_available, benchmark_json_performance, 
-    SimdJsonConfig, SimdJsonStats, init_simd_json_with_config
+    benchmark_json_performance, init_simd_json, init_simd_json_with_config, is_simd_json_available,
+    SimdJsonConfig, SimdJsonStats,
 };
 
 // 🧹 REMOVED: Legacy executor wrappers eliminated for cleaner architecture
 // All execution now uses UltraFastExecutor directly for maximum performance
 
 // 🎯 CONSOLIDATED: Use UltraFastExecutor directly instead of wrapper types
-// 
+//
 // Migration guide:
 // - OptimizedExecutor::new(workers, verbose) -> UltraFastExecutor::new(verbose)
 // - SimpleExecutor::new(verbose) -> UltraFastExecutor::new(verbose)

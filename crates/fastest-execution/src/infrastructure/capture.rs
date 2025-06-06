@@ -7,13 +7,13 @@
 //! - Resource leak detection
 
 use anyhow::{anyhow, Result};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
-use parking_lot::Mutex;
 use std::time::{Duration, Instant};
 
 // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION (10-20% performance improvement)
@@ -715,13 +715,13 @@ print("FASTEST_CAPTURE_END")
         if let Some(start) = stdout.find("FASTEST_CAPTURE_START") {
             if let Some(end) = stdout.find("FASTEST_CAPTURE_END") {
                 let json_str = &stdout[start + "FASTEST_CAPTURE_START".len()..end].trim();
-                
+
                 // Parse the JSON
                 if let Ok(json_value) = simd_json::from_str::<serde_json::Value>(json_str) {
                     if let Some(memory) = json_value.get("memory") {
                         if let (Some(peak), Some(current)) = (
                             memory.get("peak_mb").and_then(|v| v.as_f64()),
-                            memory.get("current_mb").and_then(|v| v.as_f64())
+                            memory.get("current_mb").and_then(|v| v.as_f64()),
                         ) {
                             return Some(MemoryUsage {
                                 peak_mb: peak,
@@ -734,7 +734,7 @@ print("FASTEST_CAPTURE_END")
         }
         None
     }
-    
+
     /// Detect environment variable changes
     fn detect_env_changes(
         &self,

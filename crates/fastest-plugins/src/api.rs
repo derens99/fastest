@@ -2,9 +2,9 @@
 //!
 //! This module provides the foundational types that all plugins must implement.
 
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::fmt::Debug;
-use serde::{Deserialize, Serialize};
 
 /// Result type for plugin operations
 pub type PluginResult<T> = Result<T, PluginError>;
@@ -14,19 +14,19 @@ pub type PluginResult<T> = Result<T, PluginError>;
 pub enum PluginError {
     #[error("Plugin initialization failed: {0}")]
     InitializationFailed(String),
-    
+
     #[error("Hook execution failed: {0}")]
     HookFailed(String),
-    
+
     #[error("Plugin not found: {0}")]
     NotFound(String),
-    
+
     #[error("Plugin conflict: {0}")]
     Conflict(String),
-    
+
     #[error("Invalid plugin: {0}")]
     Invalid(String),
-    
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -36,22 +36,22 @@ pub enum PluginError {
 pub struct PluginMetadata {
     /// Unique plugin name
     pub name: String,
-    
+
     /// Plugin version
     pub version: String,
-    
+
     /// Plugin description
     pub description: String,
-    
+
     /// Author information
     pub author: Option<String>,
-    
+
     /// Required plugins
     pub requires: Vec<String>,
-    
+
     /// Conflicting plugins
     pub conflicts: Vec<String>,
-    
+
     /// Plugin priority (higher = earlier execution)
     pub priority: i32,
 }
@@ -74,20 +74,20 @@ impl Default for PluginMetadata {
 pub trait Plugin: Debug + Send + Sync {
     /// Get plugin metadata
     fn metadata(&self) -> &PluginMetadata;
-    
+
     /// Initialize the plugin
     fn initialize(&mut self) -> PluginResult<()> {
         Ok(())
     }
-    
+
     /// Shutdown the plugin
     fn shutdown(&mut self) -> PluginResult<()> {
         Ok(())
     }
-    
+
     /// Get the plugin as Any for downcasting
     fn as_any(&self) -> &dyn Any;
-    
+
     /// Get mutable reference as Any
     fn as_any_mut(&mut self) -> &mut dyn Any;
 }
@@ -97,10 +97,10 @@ pub trait Plugin: Debug + Send + Sync {
 pub struct PluginInfo {
     /// Plugin metadata
     pub metadata: PluginMetadata,
-    
+
     /// Plugin type (builtin, python, native)
     pub plugin_type: PluginType,
-    
+
     /// Plugin source (file path, package name, etc)
     pub source: String,
 }
@@ -110,13 +110,13 @@ pub struct PluginInfo {
 pub enum PluginType {
     /// Built-in plugin (part of fastest)
     Builtin,
-    
+
     /// Python plugin (loaded from Python code)
     Python,
-    
+
     /// Native plugin (Rust dynamic library)
     Native,
-    
+
     /// Conftest plugin (loaded from conftest.py)
     Conftest,
 }
@@ -141,37 +141,37 @@ impl PluginBuilder {
             },
         }
     }
-    
+
     pub fn version(mut self, version: impl Into<String>) -> Self {
         self.metadata.version = version.into();
         self
     }
-    
+
     pub fn description(mut self, desc: impl Into<String>) -> Self {
         self.metadata.description = desc.into();
         self
     }
-    
+
     pub fn author(mut self, author: impl Into<String>) -> Self {
         self.metadata.author = Some(author.into());
         self
     }
-    
+
     pub fn requires(mut self, plugin: impl Into<String>) -> Self {
         self.metadata.requires.push(plugin.into());
         self
     }
-    
+
     pub fn conflicts(mut self, plugin: impl Into<String>) -> Self {
         self.metadata.conflicts.push(plugin.into());
         self
     }
-    
+
     pub fn priority(mut self, priority: i32) -> Self {
         self.metadata.priority = priority;
         self
     }
-    
+
     pub fn build(self) -> PluginMetadata {
         self.metadata
     }
@@ -185,11 +185,11 @@ macro_rules! impl_plugin {
             fn metadata(&self) -> &PluginMetadata {
                 &self.metadata
             }
-            
+
             fn as_any(&self) -> &dyn std::any::Any {
                 self
             }
-            
+
             fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
                 self
             }

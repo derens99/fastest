@@ -1,5 +1,5 @@
 //! 🚀 REVOLUTIONARY SIMD-ACCELERATED JSON PROCESSING
-//! 
+//!
 //! This module provides 2-3x faster JSON serialization/deserialization using SIMD instructions
 //! when available, with automatic fallback to standard serde_json for compatibility.
 //!
@@ -14,9 +14,9 @@
 //! cross the Rust ↔ Python boundary due to 2-3x faster JSON processing.
 
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
-use std::io::{Read, Write};
 
 /// Global SIMD JSON availability flag
 static SIMD_JSON_AVAILABLE: AtomicBool = AtomicBool::new(false);
@@ -46,7 +46,7 @@ impl SimdJsonStats {
         let simd_ops = self.simd_serializations + self.simd_deserializations;
         (simd_ops as f64 / total_ops as f64) * 100.0
     }
-    
+
     /// Calculate estimated performance gain
     pub fn estimated_speedup(&self) -> f64 {
         let simd_ratio = self.simd_usage_percentage() / 100.0;
@@ -83,9 +83,15 @@ pub fn init_simd_json() {
     SIMD_INIT.call_once(|| {
         let simd_available = detect_simd_json_support();
         SIMD_JSON_AVAILABLE.store(simd_available, Ordering::Relaxed);
-        
-        eprintln!("🚀 SIMD JSON: {},", 
-                 if simd_available { "enabled (AVX2/NEON detected)" } else { "disabled (fallback to standard JSON)" });
+
+        eprintln!(
+            "🚀 SIMD JSON: {},",
+            if simd_available {
+                "enabled (AVX2/NEON detected)"
+            } else {
+                "disabled (fallback to standard JSON)"
+            }
+        );
     });
 }
 
@@ -123,13 +129,16 @@ where
         // Read all data into buffer for SIMD processing
         let mut buffer = Vec::new();
         let mut reader = reader;
-        reader.read_to_end(&mut buffer).map_err(crate::Error::from)?;
-        
+        reader
+            .read_to_end(&mut buffer)
+            .map_err(crate::Error::from)?;
+
         match simd_json::from_slice(&mut buffer) {
             Ok(result) => Ok(result),
             Err(e) => {
                 eprintln!("⚠️  SIMD JSON from_reader failed, falling back: {}", e);
-                let string_data = String::from_utf8(buffer).map_err(|e| crate::Error::Discovery(format!("UTF-8 error: {}", e)))?;
+                let string_data = String::from_utf8(buffer)
+                    .map_err(|e| crate::Error::Discovery(format!("UTF-8 error: {}", e)))?;
                 let result = serde_json::from_str(&string_data).map_err(crate::Error::from)?;
                 Ok(result)
             }
@@ -152,9 +161,11 @@ where
         match simd_json::to_string(value) {
             Ok(json_string) => {
                 let mut writer = writer;
-                writer.write_all(json_string.as_bytes()).map_err(crate::Error::from)?;
+                writer
+                    .write_all(json_string.as_bytes())
+                    .map_err(crate::Error::from)?;
                 Ok(())
-            },
+            }
             Err(e) => {
                 eprintln!("⚠️  SIMD JSON to_writer failed, falling back: {}", e);
                 serde_json::to_writer(writer, value).map_err(crate::Error::from)?;
@@ -219,7 +230,10 @@ where
         match simd_json::to_string_pretty(value) {
             Ok(result) => Ok(result),
             Err(e) => {
-                eprintln!("⚠️  SIMD JSON pretty serialization failed, falling back: {}", e);
+                eprintln!(
+                    "⚠️  SIMD JSON pretty serialization failed, falling back: {}",
+                    e
+                );
                 let result = serde_json::to_string_pretty(value)?;
                 Ok(result)
             }
@@ -231,7 +245,7 @@ where
 }
 
 /// 🚀 REVOLUTIONARY zero-copy SIMD deserialization from bytes
-/// 
+///
 /// More efficient version that works directly with byte slices when possible.
 pub fn from_slice<T>(bytes: &mut [u8]) -> SIMDResult<T>
 where
@@ -240,9 +254,7 @@ where
     if is_simd_json_available() {
         // Use SIMD-accelerated deserialization directly from bytes
         match simd_json::from_slice(bytes) {
-            Ok(result) => {
-                Ok(result)
-            },
+            Ok(result) => Ok(result),
             Err(e) => {
                 // SIMD deserialization failed, fallback to standard
                 eprintln!("⚠️  SIMD JSON from_slice failed, falling back: {}", e);
@@ -270,22 +282,28 @@ pub fn init_simd_json_with_config(config: SimdJsonConfig) {
         } else {
             detect_simd_json_support()
         };
-        
+
         SIMD_JSON_AVAILABLE.store(simd_available, Ordering::Relaxed);
-        
-        eprintln!("🚀 SIMD JSON: {} (config: force_enable={}, force_disable={}, threshold={}B)", 
-                 if simd_available { "enabled" } else { "disabled" },
-                 config.force_enable,
-                 config.force_disable,
-                 config.simd_threshold_bytes);
+
+        eprintln!(
+            "🚀 SIMD JSON: {} (config: force_enable={}, force_disable={}, threshold={}B)",
+            if simd_available {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            config.force_enable,
+            config.force_disable,
+            config.simd_threshold_bytes
+        );
     });
 }
 
 /// Benchmark SIMD vs standard JSON performance
 pub fn benchmark_json_performance(iterations: usize) -> (f64, f64, f64) {
-    use std::time::Instant;
     use serde_json::Value;
-    
+    use std::time::Instant;
+
     // Create test data
     let test_data = serde_json::json!({
         "test_id": "benchmark_test_12345",
@@ -301,9 +319,9 @@ pub fn benchmark_json_performance(iterations: usize) -> (f64, f64, f64) {
             "class_name": "TestBenchmarkClass"
         }
     });
-    
+
     let _json_string = serde_json::to_string(&test_data).unwrap();
-    
+
     // Benchmark standard JSON
     let start = Instant::now();
     for _ in 0..iterations {
@@ -311,7 +329,7 @@ pub fn benchmark_json_performance(iterations: usize) -> (f64, f64, f64) {
         let _deserialized: Value = serde_json::from_str(&serialized).unwrap();
     }
     let standard_duration = start.elapsed().as_secs_f64();
-    
+
     // Benchmark SIMD JSON (if available)
     let simd_duration = if is_simd_json_available() {
         let start = Instant::now();
@@ -324,14 +342,14 @@ pub fn benchmark_json_performance(iterations: usize) -> (f64, f64, f64) {
     } else {
         standard_duration // No SIMD available
     };
-    
+
     // Calculate speedup
     let speedup = if simd_duration > 0.0 && is_simd_json_available() {
         standard_duration / simd_duration
     } else {
         1.0
     };
-    
+
     (standard_duration, simd_duration, speedup)
 }
 
@@ -339,48 +357,48 @@ pub fn benchmark_json_performance(iterations: usize) -> (f64, f64, f64) {
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
-    
+
     #[derive(Serialize, Deserialize, Debug, PartialEq)]
     struct TestData {
         id: String,
         value: i32,
         nested: Vec<String>,
     }
-    
+
     #[test]
     fn test_simd_json_core_serialization() {
         init_simd_json();
-        
+
         let data = TestData {
             id: "test_core_123".to_string(),
             value: 42,
             nested: vec!["a".to_string(), "b".to_string(), "c".to_string()],
         };
-        
+
         // Test serialization
         let json = to_string(&data).unwrap();
         assert!(json.contains("test_core_123"));
         assert!(json.contains("42"));
-        
+
         // Test deserialization
         let parsed: TestData = from_str(&json).unwrap();
         assert_eq!(parsed, data);
     }
-    
+
     #[test]
     fn test_reader_writer() {
         init_simd_json();
-        
+
         let data = TestData {
             id: "test_rw".to_string(),
             value: 100,
             nested: vec!["x".to_string(), "y".to_string()],
         };
-        
+
         // Test writer
         let mut buffer = Vec::new();
         to_writer(&mut buffer, &data).unwrap();
-        
+
         // Test reader
         let cursor = std::io::Cursor::new(buffer);
         let parsed: TestData = from_reader(cursor).unwrap();

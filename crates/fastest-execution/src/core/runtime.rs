@@ -51,7 +51,7 @@ impl AssertionRewriter {
     pub fn new(config: AssertionConfig) -> Self {
         Self { config }
     }
-    
+
     #[allow(dead_code)]
     pub fn rewrite_source(&self, source: &str) -> Result<String, String> {
         // Stub implementation - just return the source unchanged for now
@@ -108,13 +108,24 @@ struct RuntimeCommand {
 enum CommandType {
     #[allow(dead_code)]
     #[serde(rename = "setup_fixtures")]
-    SetupFixtures { #[allow(dead_code)] fixtures: Vec<FixtureSetupData> },
+    SetupFixtures {
+        #[allow(dead_code)]
+        fixtures: Vec<FixtureSetupData>,
+    },
     #[allow(dead_code)]
     #[serde(rename = "run_tests")]
-    RunTests { #[allow(dead_code)] tests: Vec<TestExecutionData> },
+    RunTests {
+        #[allow(dead_code)]
+        tests: Vec<TestExecutionData>,
+    },
     #[allow(dead_code)]
     #[serde(rename = "cleanup_fixtures")]
-    CleanupFixtures { #[allow(dead_code)] scope: String, #[allow(dead_code)] scope_id: String },
+    CleanupFixtures {
+        #[allow(dead_code)]
+        scope: String,
+        #[allow(dead_code)]
+        scope_id: String,
+    },
     #[allow(dead_code)]
     #[serde(rename = "shutdown")]
     Shutdown,
@@ -1102,7 +1113,7 @@ impl PythonRuntime {
         if !self.config.assertion_rewriting {
             return None;
         }
-        
+
         // Read the test file
         if let Ok(content) = std::fs::read_to_string(&test.path) {
             // Try to rewrite assertions
@@ -1127,7 +1138,9 @@ impl PythonRuntime {
         TestResult {
             test_id: result.id,
             outcome: if is_skip {
-                crate::TestOutcome::Skipped { reason: result.error.clone() }
+                crate::TestOutcome::Skipped {
+                    reason: result.error.clone(),
+                }
             } else if result.passed {
                 crate::TestOutcome::Passed
             } else {

@@ -4,28 +4,26 @@
 
 use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use colored::*;
-use fastest_core::{
-    default_cache_path, discover_tests_with_filtering,
-    filter_by_markers, Config, DiscoveryCache,
-};
-use fastest_execution::UltraFastExecutor;
 use fastest_advanced::{
-    UpdateChecker, AdvancedManager, AdvancedConfig, 
-    CoverageFormat as AdvancedCoverageFormat
+    AdvancedConfig, AdvancedManager, CoverageFormat as AdvancedCoverageFormat, UpdateChecker,
+};
+use fastest_core::{
+    default_cache_path, discover_tests_with_filtering, filter_by_markers, Config, DiscoveryCache,
 };
 use fastest_execution::DevExperienceConfig;
-use fastest_plugins::{PluginManagerBuilder, HookArgs, builtin::*};
+use fastest_execution::UltraFastExecutor;
+use fastest_plugins::{builtin::*, HookArgs, PluginManagerBuilder};
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json;
 use std::path::PathBuf;
-use std::time::Instant;
 use std::sync::Arc;
+use std::time::Instant;
 
 // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION (10-20% performance improvement)
 /// Fast SIMD JSON for CLI output
 mod simd_json_utils {
     use serde::Serialize;
-    
+
     pub fn to_string_pretty<T: Serialize>(value: &T) -> anyhow::Result<String> {
         #[cfg(all(not(target_env = "msvc"), target_arch = "x86_64"))]
         {
@@ -38,17 +36,17 @@ mod simd_json_utils {
                 }
             }
         }
-        
+
         #[cfg(all(not(target_env = "msvc"), target_arch = "aarch64"))]
         {
             match simd_json::to_string_pretty(value) {
                 Ok(result) => return Ok(result),
                 Err(_) => {
-                    // Fallback to standard JSON  
+                    // Fallback to standard JSON
                 }
             }
         }
-        
+
         // Standard fallback
         Ok(serde_json::to_string_pretty(value)?)
     }
@@ -84,7 +82,9 @@ enum CoverageFormat {
 #[derive(Parser, Clone)]
 #[command(name = "fastest")]
 #[command(about = "🚀 Fast Python Test Runner - 3.9x faster than pytest")]
-#[command(long_about = "\nFastest is a fast Python test runner built in Rust.\n\nFEATURES:\n• 3.9x faster than pytest (real benchmarks)\n• Smart coverage collection with real-time optimization\n• Incremental testing - only run affected tests\n• Watch mode with intelligent file monitoring\n• Test prioritization based on failure patterns\n• Dependency analysis for optimal execution order\n• Fixtures: tmp_path, capsys, monkeypatch\n• Parametrized tests with @pytest.mark.parametrize\n• Advanced caching and performance optimization\n\nADVANCED OPTIONS:\n• --coverage: Real-time coverage collection\n• --incremental: Smart change detection\n• --watch: Continuous testing\n• --prioritize: ML-based test ordering\n• --analyze-deps: Dependency optimization")]
+#[command(
+    long_about = "\nFastest is a fast Python test runner built in Rust.\n\nFEATURES:\n• 3.9x faster than pytest (real benchmarks)\n• Smart coverage collection with real-time optimization\n• Incremental testing - only run affected tests\n• Watch mode with intelligent file monitoring\n• Test prioritization based on failure patterns\n• Dependency analysis for optimal execution order\n• Fixtures: tmp_path, capsys, monkeypatch\n• Parametrized tests with @pytest.mark.parametrize\n• Advanced caching and performance optimization\n\nADVANCED OPTIONS:\n• --coverage: Real-time coverage collection\n• --incremental: Smart change detection\n• --watch: Continuous testing\n• --prioritize: ML-based test ordering\n• --analyze-deps: Dependency optimization"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -118,7 +118,12 @@ struct Cli {
     quiet: u8,
 
     /// Output format
-    #[arg(short = 'o', long = "output-format", value_enum, default_value = "pretty")]
+    #[arg(
+        short = 'o',
+        long = "output-format",
+        value_enum,
+        default_value = "pretty"
+    )]
     output_format: OutputFormat,
 
     /// Disable test discovery cache
@@ -132,67 +137,65 @@ struct Cli {
     /// Show local variables in tracebacks
     #[arg(short = 'l', long = "showlocals")]
     showlocals: bool,
-    
+
     /// Start PDB debugger on failures
     #[arg(long = "pdb")]
     pdb: bool,
 
     // === ADVANCED FEATURES ===
-    
     /// Enable code coverage collection
     #[arg(long = "coverage")]
     coverage: bool,
-    
+
     /// Coverage report formats (can specify multiple)
     #[arg(long = "cov-report", value_enum)]
     cov_format: Vec<CoverageFormat>,
-    
+
     /// Only run tests affected by recent changes (requires git)
     #[arg(long = "incremental")]
     incremental: bool,
-    
+
     /// Only run tests for changed files since last commit
     #[arg(long = "changed-only")]
     changed_only: bool,
-    
+
     /// Watch mode - continuously run tests when files change
     #[arg(short = 'f', long = "watch")]
     watch: bool,
-    
+
     /// Enable test prioritization based on failure history
     #[arg(long = "prioritize")]
     prioritize: bool,
-    
+
     /// Analyze and optimize test execution order
     #[arg(long = "analyze-deps")]
     analyze_deps: bool,
-    
+
     /// Maximum number of priority tests to run first
     #[arg(long = "priority-limit", default_value = "50")]
     priority_limit: usize,
-    
+
     // === PLUGIN SYSTEM ===
-    
     /// Disable plugin loading
     #[arg(long = "no-plugins")]
     no_plugins: bool,
-    
+
     /// Additional plugin directories
     #[arg(long = "plugin-dir")]
     plugin_dirs: Vec<PathBuf>,
-    
+
     /// Disable specific plugins
     #[arg(long = "disable-plugin")]
     disabled_plugins: Vec<String>,
-    
+
     /// Plugin configuration options (key=value)
     #[arg(long = "plugin-opt")]
     plugin_opts: Vec<String>,
-    
+
     /// Coverage source directories (for pytest-cov compatibility)
     #[arg(long = "cov")]
     cov_source: Vec<PathBuf>,
-    
+
     /// Generate coverage report in HTML format (pytest-cov compat)
     #[arg(long = "cov-report-html")]
     cov_report_html: Option<PathBuf>,
@@ -212,7 +215,7 @@ enum Commands {
         /// Show detailed version information
         #[arg(long = "detailed")]
         detailed: bool,
-        
+
         /// Check for updates
         #[arg(long = "check-updates")]
         check_updates: bool,
@@ -236,37 +239,32 @@ enum Commands {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     colored::control::set_override(true);
-    
+
     let cli = Cli::parse();
-    
+
     // Load configuration
     let _config = Config::load().unwrap_or_default();
-    
+
     // Show banner unless quiet
     if cli.quiet == 0 && !matches!(cli.output_format, OutputFormat::Json) {
         show_banner(&cli);
     }
-    
+
     // Execute command
     let result = match &cli.command {
-        Some(Commands::Discover { format }) => {
-            discover_command(&cli, format).await
-        },
-        Some(Commands::Version { detailed, check_updates }) => {
-            version_command(&cli, *detailed, *check_updates).await
-        },
-        Some(Commands::Update { check_only }) => {
-            update_command(&cli, *check_only).await
-        },
-        Some(Commands::Benchmark { iterations }) => {
-            benchmark_command(&cli, *iterations).await
-        },
+        Some(Commands::Discover { format }) => discover_command(&cli, format).await,
+        Some(Commands::Version {
+            detailed,
+            check_updates,
+        }) => version_command(&cli, *detailed, *check_updates).await,
+        Some(Commands::Update { check_only }) => update_command(&cli, *check_only).await,
+        Some(Commands::Benchmark { iterations }) => benchmark_command(&cli, *iterations).await,
         None => {
             // Default: Run tests
             run_command(&cli).await
         }
     };
-    
+
     result
 }
 
@@ -275,13 +273,21 @@ fn show_banner(cli: &Cli) {
     if cli.quiet > 0 {
         return;
     }
-    
+
     let version = env!("CARGO_PKG_VERSION");
-    println!("{}", format!("🚀 Fastest v{} - Fast Python Test Runner", version).bold().cyan());
-    
+    println!(
+        "{}",
+        format!("🚀 Fastest v{} - Fast Python Test Runner", version)
+            .bold()
+            .cyan()
+    );
+
     if cli.verbose > 0 {
         println!("{}", "   ⚡ 3.9x faster than pytest (verified)".dimmed());
-        println!("{}", "   🧠 Built with Rust for maximum performance".dimmed());
+        println!(
+            "{}",
+            "   🧠 Built with Rust for maximum performance".dimmed()
+        );
         println!("{}", "   🎯 Basic pytest compatibility".dimmed());
         println!();
     }
@@ -290,7 +296,7 @@ fn show_banner(cli: &Cli) {
 /// Discover tests command
 async fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
     let start = Instant::now();
-    
+
     let mut all_tests = Vec::new();
     let paths = if cli.paths.is_empty() {
         vec![PathBuf::from(".")]
@@ -352,7 +358,11 @@ async fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
         _ => {
             println!("{}", "🔍 Test Discovery Results".bold().green());
             println!("{}", "=".repeat(30));
-            println!("Found {} tests in {:.3}s\n", filtered_tests.len(), duration.as_secs_f64());
+            println!(
+                "Found {} tests in {:.3}s\n",
+                filtered_tests.len(),
+                duration.as_secs_f64()
+            );
 
             if let Some(markers) = &cli.markexpr {
                 println!("  {} {}\n", "Marker filter:".dimmed(), markers.yellow());
@@ -371,24 +381,40 @@ async fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
 async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     // Handle watch mode
     if cli.watch {
-        println!("{}", "⚠️  Watch mode: Framework ready, implementation coming soon!".yellow());
-        println!("{}", "   Running tests once with advanced features enabled...".dimmed());
+        println!(
+            "{}",
+            "⚠️  Watch mode: Framework ready, implementation coming soon!".yellow()
+        );
+        println!(
+            "{}",
+            "   Running tests once with advanced features enabled...".dimmed()
+        );
     }
-    
+
     // Show advanced features status
     if cli.coverage || cli.incremental || cli.changed_only || cli.prioritize || cli.analyze_deps {
         if cli.verbose > 0 {
             eprintln!("🚀 Advanced features requested:");
-            if cli.coverage { eprintln!("  📊 Coverage: Framework ready (implementation pending)"); }
-            if cli.incremental { eprintln!("  ⚡ Incremental: Framework active"); }
-            if cli.changed_only { eprintln!("  🔍 Changed-only: Framework active"); }
-            if cli.prioritize { eprintln!("  🎯 Prioritization: Framework active"); }
-            if cli.analyze_deps { eprintln!("  🔗 Dependencies: Framework active"); }
+            if cli.coverage {
+                eprintln!("  📊 Coverage: Framework ready (implementation pending)");
+            }
+            if cli.incremental {
+                eprintln!("  ⚡ Incremental: Framework active");
+            }
+            if cli.changed_only {
+                eprintln!("  🔍 Changed-only: Framework active");
+            }
+            if cli.prioritize {
+                eprintln!("  🎯 Prioritization: Framework active");
+            }
+            if cli.analyze_deps {
+                eprintln!("  🔗 Dependencies: Framework active");
+            }
         }
     }
-    
+
     let start = Instant::now();
-    
+
     let paths = if cli.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -400,45 +426,44 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         if cli.verbose > 0 {
             eprintln!("🔌 Initializing plugin system...");
         }
-        
+
         let mut builder = PluginManagerBuilder::new()
             .discover_installed(true)
             .load_conftest(true);
-        
+
         // Add plugin directories
         for dir in &cli.plugin_dirs {
             builder = builder.add_plugin_dir(dir.clone());
         }
-        
+
         // Add disabled plugins
         for plugin_name in &cli.disabled_plugins {
             builder = builder.disable_plugin(plugin_name.clone());
         }
-        
+
         // Register built-in plugins
         builder = builder
             .with_plugin(Box::new(FixturePlugin::new()))
             .with_plugin(Box::new(MarkerPlugin::new()))
             .with_plugin(Box::new(ReportingPlugin::new()))
             .with_plugin(Box::new(CapturePlugin::new()));
-        
+
         // Handle pytest-cov compatibility options
-        if cli.coverage || !cli.cov_source.is_empty() || cli.cov_report_html.is_some() {
-            if cli.verbose > 0 {
-                eprintln!("  📊 Enabling pytest-cov compatibility");
-            }
-            // Coverage will be handled by the CoveragePlugin once registered
+        if (cli.coverage || !cli.cov_source.is_empty() || cli.cov_report_html.is_some())
+            && cli.verbose > 0
+        {
+            eprintln!("  📊 Enabling pytest-cov compatibility");
         }
-        
+
         let plugin_manager = builder.build()?;
-        
+
         // Initialize all plugins
         plugin_manager.initialize_all()?;
-        
+
         if cli.verbose > 0 {
             eprintln!("  ✅ Loaded {} plugins", plugin_manager.plugins().len());
         }
-        
+
         Some(Arc::new(plugin_manager))
     } else {
         if cli.verbose > 0 {
@@ -446,28 +471,37 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         }
         None
     };
-    
+
     // Initialize advanced manager if any advanced features are requested
-    let advanced_manager = if cli.coverage || cli.incremental || cli.changed_only || cli.prioritize || cli.analyze_deps {
+    let advanced_manager = if cli.coverage
+        || cli.incremental
+        || cli.changed_only
+        || cli.prioritize
+        || cli.analyze_deps
+    {
         if cli.verbose > 0 {
             eprintln!("🧠 Initializing advanced features manager...");
         }
-        
+
         let advanced_config = AdvancedConfig {
             coverage_enabled: cli.coverage,
-            coverage_formats: cli.cov_format.iter().map(|f| match f {
-                CoverageFormat::Terminal => AdvancedCoverageFormat::Terminal,
-                CoverageFormat::Html => AdvancedCoverageFormat::Html,
-                CoverageFormat::Xml => AdvancedCoverageFormat::Xml,
-                CoverageFormat::Json => AdvancedCoverageFormat::Json,
-                CoverageFormat::Lcov => AdvancedCoverageFormat::Lcov,
-            }).collect(),
+            coverage_formats: cli
+                .cov_format
+                .iter()
+                .map(|f| match f {
+                    CoverageFormat::Terminal => AdvancedCoverageFormat::Terminal,
+                    CoverageFormat::Html => AdvancedCoverageFormat::Html,
+                    CoverageFormat::Xml => AdvancedCoverageFormat::Xml,
+                    CoverageFormat::Json => AdvancedCoverageFormat::Json,
+                    CoverageFormat::Lcov => AdvancedCoverageFormat::Lcov,
+                })
+                .collect(),
             incremental_enabled: cli.incremental || cli.changed_only,
             prioritization_enabled: cli.prioritize,
             dependency_tracking: cli.analyze_deps,
             ..Default::default()
         };
-        
+
         let mut manager = AdvancedManager::new(advanced_config)?;
         manager.initialize().await?;
         Some(manager)
@@ -483,7 +517,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
             }
         }
     }
-    
+
     // Discover tests
     let mut discovered_tests = Vec::new();
     for path in &paths {
@@ -509,17 +543,20 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         };
         discovered_tests.extend(tests);
     }
-    
+
     // Call collection modifyitems hook
     if let Some(ref pm) = plugin_manager {
         let items_json = serde_json::json!(discovered_tests);
-        if let Err(e) = pm.call_hook("pytest_collection_modifyitems", HookArgs::new().arg("items", items_json)) {
+        if let Err(e) = pm.call_hook(
+            "pytest_collection_modifyitems",
+            HookArgs::new().arg("items", items_json),
+        ) {
             if cli.verbose > 0 {
                 eprintln!("Warning: pytest_collection_modifyitems hook failed: {}", e);
             }
         }
     }
-    
+
     // Call collection finish hook
     if let Some(ref pm) = plugin_manager {
         if let Err(e) = pm.call_hook("pytest_collection_finish", HookArgs::new()) {
@@ -534,48 +571,57 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         if cli.verbose > 0 {
             eprintln!("🧠 Applying smart test selection...");
         }
-        
+
         let test_ids: Vec<String> = discovered_tests.iter().map(|t| t.id.clone()).collect();
         let smart_selection = manager.get_smart_test_selection(&test_ids).await?;
-        
+
         // Apply incremental filtering
         if cli.changed_only && !smart_selection.incremental_tests.is_empty() {
             let original_count = discovered_tests.len();
             discovered_tests.retain(|t| smart_selection.incremental_tests.contains(&t.id));
-            
+
             if cli.verbose > 0 {
                 eprintln!(
                     "⚡ Incremental: {} -> {} tests ({:.1}% reduction)",
-                    original_count, 
+                    original_count,
                     discovered_tests.len(),
                     (1.0 - discovered_tests.len() as f64 / original_count as f64) * 100.0
                 );
             }
         }
-        
+
         // Apply prioritization
         if cli.prioritize && !smart_selection.prioritized_order.is_empty() {
             if cli.verbose > 0 {
                 eprintln!("🎯 Applying prioritization (limit: {})", cli.priority_limit);
             }
-            
-            let priority_tests: Vec<String> = smart_selection.prioritized_order.into_iter()
+
+            let priority_tests: Vec<String> = smart_selection
+                .prioritized_order
+                .into_iter()
                 .take(cli.priority_limit.min(discovered_tests.len()))
                 .collect();
-            
+
             discovered_tests.sort_by_key(|t| {
-                priority_tests.iter().position(|id| id == &t.id).unwrap_or(usize::MAX)
+                priority_tests
+                    .iter()
+                    .position(|id| id == &t.id)
+                    .unwrap_or(usize::MAX)
             });
         }
-        
+
         // Apply dependency ordering
         if cli.analyze_deps && !smart_selection.dependency_order.is_empty() {
             if cli.verbose > 0 {
                 eprintln!("🔗 Optimizing execution order");
             }
-            
+
             discovered_tests.sort_by_key(|t| {
-                smart_selection.dependency_order.iter().position(|id| id == &t.id).unwrap_or(usize::MAX)
+                smart_selection
+                    .dependency_order
+                    .iter()
+                    .position(|id| id == &t.id)
+                    .unwrap_or(usize::MAX)
             });
         }
     }
@@ -601,10 +647,14 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     }
 
     println!(
-        "🚀 {} Running {} tests {}", 
-        "✓".green(), 
+        "🚀 {} Running {} tests {}",
+        "✓".green(),
         discovered_tests.len(),
-        if cli.coverage { "with coverage framework" } else { "" }
+        if cli.coverage {
+            "with coverage framework"
+        } else {
+            ""
+        }
     );
 
     // Create progress bar
@@ -618,7 +668,11 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
 
     // Configure executor
     if cli.verbose > 0 {
-        let features = if advanced_manager.is_some() { " with advanced optimizations" } else { "" };
+        let features = if advanced_manager.is_some() {
+            " with advanced optimizations"
+        } else {
+            ""
+        };
         eprintln!("⚡ Using ultra-fast executor{}", features);
     }
 
@@ -634,7 +688,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         }
         executor = executor.with_dev_experience(dev_config);
     }
-    
+
     // Configure plugin manager
     if let Some(ref pm) = plugin_manager {
         executor = executor.with_plugin_manager(pm.clone());
@@ -682,7 +736,11 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
             }
             TestOutcome::XPassed => {
                 xpassed += 1;
-                pb.set_message(format!("{} {} (XPASS)", "X".yellow().bold(), result.test_id));
+                pb.set_message(format!(
+                    "{} {} (XPASS)",
+                    "X".yellow().bold(),
+                    result.test_id
+                ));
             }
         }
     }
@@ -714,7 +772,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         _ => {
             // Build summary parts
             let mut summary_parts = vec![];
-            
+
             if passed > 0 {
                 summary_parts.push(format!("{} passed", passed).green().to_string());
             }
@@ -730,11 +788,15 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
             if xpassed > 0 {
                 summary_parts.push(format!("{} xpassed", xpassed).yellow().bold().to_string());
             }
-            
+
             if summary_parts.is_empty() {
                 println!("No tests were run");
             } else {
-                let emoji = if failed == 0 && xpassed == 0 { "🎉" } else { "💔" };
+                let emoji = if failed == 0 && xpassed == 0 {
+                    "🎉"
+                } else {
+                    "💔"
+                };
                 println!(
                     "{} {} in {:.2}s {}",
                     emoji.bold(),
@@ -766,15 +828,26 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
             // Advanced performance insights
             if cli.verbose > 0 {
                 println!("\n{}", "📊 Performance & Features:".bold().cyan());
-                println!("  Tests per second: {:.0}", results.len() as f64 / duration.as_secs_f64());
+                println!(
+                    "  Tests per second: {:.0}",
+                    results.len() as f64 / duration.as_secs_f64()
+                );
                 println!("  Speedup vs pytest: 3.9x");
-                
+
                 if advanced_manager.is_some() {
                     println!("  🧠 Advanced features framework: Active");
-                    if cli.coverage { println!("    📊 Coverage: Framework ready"); }
-                    if cli.incremental || cli.changed_only { println!("    ⚡ Incremental: Active"); }
-                    if cli.prioritize { println!("    🎯 Prioritization: Active"); }
-                    if cli.analyze_deps { println!("    🔗 Dependencies: Active"); }
+                    if cli.coverage {
+                        println!("    📊 Coverage: Framework ready");
+                    }
+                    if cli.incremental || cli.changed_only {
+                        println!("    ⚡ Incremental: Active");
+                    }
+                    if cli.prioritize {
+                        println!("    🎯 Prioritization: Active");
+                    }
+                    if cli.analyze_deps {
+                        println!("    🔗 Dependencies: Active");
+                    }
                 }
             }
         }
@@ -788,22 +861,21 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     Ok(())
 }
 
-
 /// Version command
 async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> anyhow::Result<()> {
     let version = env!("CARGO_PKG_VERSION");
-    
+
     if detailed {
         println!("{}", format!("🚀 Fastest v{}", version).bold().cyan());
         println!("{}", "Fast Python Test Runner".bold());
         println!();
-        
+
         // System information
         println!("{}", "System Information:".bold().yellow());
         println!("  OS: {}", std::env::consts::OS);
         println!("  Architecture: {}", std::env::consts::ARCH);
         println!("  CPU Cores: {}", num_cpus::get());
-        
+
         // Features
         println!();
         println!("{}", "Core Features:".bold().yellow());
@@ -813,7 +885,7 @@ async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> any
         println!("  ✓ Advanced test filtering and selection");
         println!("  ✓ Intelligent parallel execution");
         println!("  ✓ Smart discovery caching");
-        
+
         println!();
         println!("{}", "Advanced Features:".bold().cyan());
         println!("  ⚡ Real-time code coverage collection (--coverage)");
@@ -823,7 +895,7 @@ async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> any
         println!("  🔗 Dependency analysis for optimal execution (--analyze-deps)");
         println!("  📊 Multi-format coverage reports (HTML, XML, JSON, LCOV)");
         println!("  🚀 Self-updating binary with integrity checks");
-        
+
         // Performance
         println!();
         println!("{}", "Performance:".bold().yellow());
@@ -831,71 +903,90 @@ async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> any
         println!("  • Rust-based execution engine");
         println!("  • Intelligent test discovery caching");
         println!("  • Parallel test execution");
-        
     } else {
         println!("fastest {}", version);
     }
-    
+
     if check_updates {
         println!();
         println!("{}", "Checking for updates...".dimmed());
         let checker = UpdateChecker::new();
         match checker.check_update()? {
             Some(new_version) => {
-                println!("{}", format!("📦 Update available: v{} -> v{}", version, new_version).yellow());
-                println!("{}", "Run 'fastest update' to install the latest version.".dimmed());
+                println!(
+                    "{}",
+                    format!("📦 Update available: v{} -> v{}", version, new_version).yellow()
+                );
+                println!(
+                    "{}",
+                    "Run 'fastest update' to install the latest version.".dimmed()
+                );
             }
             None => {
                 println!("{}", "✓ You're running the latest version!".green());
             }
         }
     }
-    
+
     Ok(())
 }
 
 /// Update command
 async fn update_command(_cli: &Cli, check_only: bool) -> anyhow::Result<()> {
     let checker = UpdateChecker::new();
-    
+
     if check_only {
         println!("{}", "🔍 Checking for updates...".cyan());
-        
+
         match checker.check_update()? {
             Some(new_version) => {
-                println!("{} v{}", "Current version:".dimmed(), env!("CARGO_PKG_VERSION"));
+                println!(
+                    "{} v{}",
+                    "Current version:".dimmed(),
+                    env!("CARGO_PKG_VERSION")
+                );
                 println!("{} v{}", "Latest version:".dimmed(), new_version.green());
                 println!();
                 println!("{}", "📦 An update is available!".yellow());
                 println!("{}", "Run 'fastest update' to install it.".dimmed());
             }
             None => {
-                println!("{} v{}", "✓ You're running the latest version!".green(), env!("CARGO_PKG_VERSION"));
+                println!(
+                    "{} v{}",
+                    "✓ You're running the latest version!".green(),
+                    env!("CARGO_PKG_VERSION")
+                );
             }
         }
     } else {
         println!("{}", "🚀 Updating to the latest version...".cyan());
         checker.update(false)?;
         println!("{}", "✓ Update completed successfully!".green());
-        println!("{}", "Run 'fastest version --detailed' to verify the installation.".dimmed());
+        println!(
+            "{}",
+            "Run 'fastest version --detailed' to verify the installation.".dimmed()
+        );
     }
-    
+
     Ok(())
 }
 
 /// Benchmark command
 async fn benchmark_command(_cli: &Cli, iterations: usize) -> anyhow::Result<()> {
-    println!("{}", format!("📈 Running benchmark with {} iterations...", iterations).cyan());
-    
+    println!(
+        "{}",
+        format!("📈 Running benchmark with {} iterations...", iterations).cyan()
+    );
+
     // This would run the real benchmark script
     let benchmark_script = std::env::current_dir()?.join("benchmarks/real_benchmark.py");
-    
+
     if benchmark_script.exists() {
         println!("🔍 Found benchmark script, running...");
         let output = std::process::Command::new("python")
             .arg(&benchmark_script)
             .output()?;
-        
+
         if output.status.success() {
             println!("{}", String::from_utf8_lossy(&output.stdout));
         } else {
@@ -905,7 +996,7 @@ async fn benchmark_command(_cli: &Cli, iterations: usize) -> anyhow::Result<()> 
     } else {
         // Fallback simple benchmark
         println!("⚠️ Benchmark script not found, running simple test...");
-        
+
         // Create a simple test and time it
         let test_content = r#"
 def test_simple():
@@ -917,33 +1008,33 @@ def test_string():
 def test_math():
     assert 2 * 3 == 6
 "#;
-        
+
         let temp_file = std::env::temp_dir().join("fastest_benchmark.py");
         std::fs::write(&temp_file, test_content)?;
-        
+
         let mut times = Vec::new();
         for i in 0..iterations {
             println!("  Running iteration {}/{}", i + 1, iterations);
             let start = Instant::now();
-            
+
             let output = std::process::Command::new("./target/release/fastest")
                 .arg(&temp_file)
                 .arg("--no-color")
                 .arg("-q")
                 .output()?;
-            
+
             if output.status.success() {
                 times.push(start.elapsed().as_secs_f64());
             }
         }
-        
+
         std::fs::remove_file(&temp_file)?;
-        
+
         if !times.is_empty() {
             let avg = times.iter().sum::<f64>() / times.len() as f64;
             let min = times.iter().fold(f64::INFINITY, |a, &b| a.min(b));
             let max = times.iter().fold(0.0f64, |a, &b| a.max(b));
-            
+
             println!("\n{}", "📊 Benchmark Results:".bold());
             println!("  Average: {:.3}s", avg);
             println!("  Min:     {:.3}s", min);
@@ -951,6 +1042,6 @@ def test_math():
             println!("  Runs:    {}", times.len());
         }
     }
-    
+
     Ok(())
 }

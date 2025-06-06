@@ -9,27 +9,25 @@
 // Core modules
 pub mod cache;
 pub mod config;
+pub mod debug;
 pub mod error;
 pub mod utils;
-pub mod debug;
 
 // Test-related functionality
 pub mod test {
     pub mod discovery;
-    pub mod parser;
     pub mod fixtures;
     pub mod markers;
     pub mod parametrize;
+    pub mod parser;
 }
 
 // Re-export core types
 pub use cache::{default_cache_path, DiscoveryCache};
-pub use test::discovery::{
-    discover_tests, discover_tests_with_filtering, TestItem,
-};
-pub use error::{Error, Result};
-pub use test::parser::{FixtureDefinition, Parser, TestFunction};
 pub use config::Config;
+pub use error::{Error, Result};
+pub use test::discovery::{discover_tests, discover_tests_with_filtering, TestItem};
+pub use test::parser::{FixtureDefinition, Parser, TestFunction};
 
 // Re-export fixture types
 pub use test::fixtures::{

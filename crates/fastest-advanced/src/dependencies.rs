@@ -3,8 +3,8 @@
 //! Fast dependency analysis using petgraph for optimal execution order
 
 use anyhow::Result;
-use petgraph::{algo::toposort, Graph, Direction};
 use petgraph::visit::EdgeRef;
+use petgraph::{algo::toposort, Direction, Graph};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -40,7 +40,7 @@ pub struct TestDependency {
 impl DependencyTracker {
     pub fn new(config: &AdvancedConfig) -> Result<Self> {
         let cache_file = config.cache_dir.join("dependencies.json");
-        
+
         Ok(Self {
             config: config.clone(),
             dependency_graph: Graph::new(),
@@ -52,9 +52,11 @@ impl DependencyTracker {
     pub async fn initialize(&mut self) -> Result<()> {
         // Load cached dependencies
         self.load_cache().await?;
-        
-        tracing::info!("Dependency tracker initialized with {} nodes", 
-                      self.dependency_graph.node_count());
+
+        tracing::info!(
+            "Dependency tracker initialized with {} nodes",
+            self.dependency_graph.node_count()
+        );
         Ok(())
     }
 
@@ -69,7 +71,7 @@ impl DependencyTracker {
             .collect();
 
         let results = futures::future::join_all(parse_futures).await;
-        
+
         for result in results {
             if let Ok(dependencies) = result {
                 for dep in dependencies {
@@ -80,7 +82,7 @@ impl DependencyTracker {
 
         // Save cache
         self.save_cache().await?;
-        
+
         Ok(())
     }
 
@@ -88,27 +90,30 @@ impl DependencyTracker {
     async fn analyze_file_dependencies(&self, file_path: &str) -> Result<Vec<TestDependency>> {
         let mut dependencies = Vec::new();
         let path = Path::new(file_path);
-        
+
         if !path.exists() {
             return Ok(dependencies);
         }
 
         let content = std::fs::read_to_string(path)?;
-        
+
         // Use tree-sitter for fast Python parsing
         let mut parser = Parser::new();
         let language = tree_sitter_python::language();
-        parser.set_language(&language).map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
-        
-        let tree = parser.parse(&content, None)
+        parser
+            .set_language(&language)
+            .map_err(|e| anyhow::anyhow!("Parser error: {:?}", e))?;
+
+        let tree = parser
+            .parse(&content, None)
             .ok_or_else(|| anyhow::anyhow!("Failed to parse Python file"))?;
 
         // Analyze imports
         dependencies.extend(self.analyze_imports(&content, &tree, file_path).await?);
-        
+
         // Analyze fixtures
         dependencies.extend(self.analyze_fixtures(&content, &tree, file_path).await?);
-        
+
         // Analyze class inheritance
         dependencies.extend(self.analyze_inheritance(&content, &tree, file_path).await?);
 
@@ -123,7 +128,7 @@ impl DependencyTracker {
         file_path: &str,
     ) -> Result<Vec<TestDependency>> {
         let mut dependencies = Vec::new();
-        
+
         // Query for import statements - simplified pattern
         let import_query = "(import_statement) @import";
         let query = Query::new(&tree_sitter_python::language(), import_query)
@@ -135,7 +140,7 @@ impl DependencyTracker {
         for m in matches {
             for capture in m.captures {
                 let import_name = &content[capture.node.byte_range()];
-                
+
                 dependencies.push(TestDependency {
                     test_id: file_path.to_string(),
                     depends_on: vec![import_name.to_string()],
@@ -156,7 +161,7 @@ impl DependencyTracker {
         file_path: &str,
     ) -> Result<Vec<TestDependency>> {
         let mut dependencies = Vec::new();
-        
+
         // Query for function definitions - simplified
         let func_query = "(function_definition) @func";
         let query = Query::new(&tree_sitter_python::language(), func_query)
@@ -208,7 +213,7 @@ impl DependencyTracker {
         file_path: &str,
     ) -> Result<Vec<TestDependency>> {
         let mut dependencies = Vec::new();
-        
+
         // Query for class definitions with inheritance
         let query = Query::new(
             &tree_sitter_python::language(),
@@ -258,13 +263,14 @@ impl DependencyTracker {
     async fn add_dependency(&mut self, dependency: TestDependency) -> Result<()> {
         // Get or create node for test
         let test_node = self.get_or_create_node(&dependency.test_id);
-        
+
         // Add dependencies
         for dep in &dependency.depends_on {
             let dep_node = self.get_or_create_node(dep);
-            
+
             // Add edge from dependency to test
-            self.dependency_graph.add_edge(dep_node, test_node, dependency.dependency_type.clone());
+            self.dependency_graph
+                .add_edge(dep_node, test_node, dependency.dependency_type.clone());
         }
 
         Ok(())
@@ -286,7 +292,7 @@ impl DependencyTracker {
         // Filter graph to only include requested tests
         let mut subgraph = Graph::new();
         let mut sub_nodes = HashMap::new();
-        
+
         // Add nodes for requested tests
         for test_id in test_ids {
             if self.node_indices.contains_key(test_id) {
@@ -300,7 +306,10 @@ impl DependencyTracker {
             if let Some(&original_index) = self.node_indices.get(test_id) {
                 if let Some(&sub_index) = sub_nodes.get(test_id) {
                     // Add dependencies that exist in our subgraph
-                    for edge in self.dependency_graph.edges_directed(original_index, Direction::Incoming) {
+                    for edge in self
+                        .dependency_graph
+                        .edges_directed(original_index, Direction::Incoming)
+                    {
                         let dep_node = edge.source();
                         let dep_test = &self.dependency_graph[dep_node];
                         if let Some(&dep_sub_index) = sub_nodes.get(dep_test) {
@@ -318,7 +327,7 @@ impl DependencyTracker {
                     .into_iter()
                     .map(|index| subgraph[index].clone())
                     .collect();
-                
+
                 tracing::debug!("Computed execution order for {} tests", ordered_tests.len());
                 Ok(ordered_tests)
             }
@@ -334,11 +343,18 @@ impl DependencyTracker {
     pub async fn should_skip_test(&self, test_id: &str, failed_tests: &HashSet<String>) -> bool {
         if let Some(&node_index) = self.node_indices.get(test_id) {
             // Check if any dependency failed
-            for edge in self.dependency_graph.edges_directed(node_index, Direction::Incoming) {
+            for edge in self
+                .dependency_graph
+                .edges_directed(node_index, Direction::Incoming)
+            {
                 let dep_node = edge.source();
                 let dep_test = &self.dependency_graph[dep_node];
                 if failed_tests.contains(dep_test) {
-                    tracing::info!("Skipping {} due to failed dependency: {}", test_id, dep_test);
+                    tracing::info!(
+                        "Skipping {} due to failed dependency: {}",
+                        test_id,
+                        dep_test
+                    );
                     return true;
                 }
             }
@@ -359,7 +375,10 @@ impl DependencyTracker {
             self.add_dependency(dep).await?;
         }
 
-        tracing::debug!("Loaded {} dependencies from cache", self.dependency_graph.edge_count());
+        tracing::debug!(
+            "Loaded {} dependencies from cache",
+            self.dependency_graph.edge_count()
+        );
         Ok(())
     }
 
@@ -371,7 +390,7 @@ impl DependencyTracker {
         for edge in self.dependency_graph.edge_references() {
             let test_id = &self.dependency_graph[edge.target()];
             let dep_id = &self.dependency_graph[edge.source()];
-            
+
             dependencies.push(TestDependency {
                 test_id: test_id.clone(),
                 depends_on: vec![dep_id.clone()],
@@ -390,22 +409,28 @@ impl DependencyTracker {
     /// Get dependency statistics
     pub fn get_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("total_nodes".to_string(), 
-                    serde_json::Value::Number(self.dependency_graph.node_count().into()));
-        stats.insert("total_edges".to_string(), 
-                    serde_json::Value::Number(self.dependency_graph.edge_count().into()));
-        
+
+        stats.insert(
+            "total_nodes".to_string(),
+            serde_json::Value::Number(self.dependency_graph.node_count().into()),
+        );
+        stats.insert(
+            "total_edges".to_string(),
+            serde_json::Value::Number(self.dependency_graph.edge_count().into()),
+        );
+
         // Count dependency types
         let mut type_counts = HashMap::new();
         for edge in self.dependency_graph.edge_references() {
             let type_name = format!("{:?}", edge.weight());
             *type_counts.entry(type_name).or_insert(0) += 1;
         }
-        
-        stats.insert("dependency_types".to_string(), 
-                    serde_json::to_value(type_counts).unwrap());
-        
+
+        stats.insert(
+            "dependency_types".to_string(),
+            serde_json::to_value(type_counts).unwrap(),
+        );
+
         stats
     }
 }

@@ -31,17 +31,17 @@ impl Marker {
         if let Some(paren_pos) = marker_str.find('(') {
             let name = marker_str[..paren_pos].to_string();
             let args_str = &marker_str[paren_pos..];
-            
+
             // Remove outer parentheses
             let args_str = args_str.trim_start_matches('(').trim_end_matches(')');
-            
+
             let mut marker = Self::new(name);
-            
+
             // Parse arguments - handle common cases
             if !args_str.is_empty() {
                 // Split by comma but respect nested parentheses and quotes
                 let parts = split_args(args_str);
-                
+
                 for part in parts {
                     let part = part.trim();
                     // Check if it's a kwarg (contains =)
@@ -57,7 +57,7 @@ impl Marker {
                     }
                 }
             }
-            
+
             Ok(marker)
         } else {
             Ok(Self::new(marker_str.to_string()))
@@ -241,7 +241,7 @@ fn split_args(args: &str) -> Vec<String> {
     let mut quote_char = ' ';
     let mut paren_depth = 0;
     let mut chars = args.chars().peekable();
-    
+
     while let Some(ch) = chars.next() {
         match ch {
             '"' | '\'' if paren_depth == 0 => {
@@ -270,25 +270,26 @@ fn split_args(args: &str) -> Vec<String> {
             }
         }
     }
-    
+
     if !current.is_empty() {
         parts.push(current.trim().to_string());
     }
-    
+
     parts
 }
 
 /// Parse a value string into a JSON value
 fn parse_value(value: &str) -> serde_json::Value {
     let trimmed = value.trim();
-    
+
     // String values (quoted)
-    if (trimmed.starts_with('"') && trimmed.ends_with('"')) ||
-       (trimmed.starts_with('\'') && trimmed.ends_with('\'')) {
-        let unquoted = &trimmed[1..trimmed.len()-1];
+    if (trimmed.starts_with('"') && trimmed.ends_with('"'))
+        || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
+    {
+        let unquoted = &trimmed[1..trimmed.len() - 1];
         return serde_json::Value::String(unquoted.to_string());
     }
-    
+
     // Boolean values
     if trimmed == "True" || trimmed == "true" {
         return serde_json::Value::Bool(true);
@@ -296,12 +297,12 @@ fn parse_value(value: &str) -> serde_json::Value {
     if trimmed == "False" || trimmed == "false" {
         return serde_json::Value::Bool(false);
     }
-    
+
     // None/null
     if trimmed == "None" || trimmed == "null" {
         return serde_json::Value::Null;
     }
-    
+
     // Try to parse as number
     if let Ok(num) = trimmed.parse::<i64>() {
         return serde_json::Value::Number(num.into());
@@ -311,7 +312,7 @@ fn parse_value(value: &str) -> serde_json::Value {
             return serde_json::Value::Number(n);
         }
     }
-    
+
     // Otherwise treat as string
     serde_json::Value::String(trimmed.to_string())
 }
@@ -320,7 +321,7 @@ fn parse_value(value: &str) -> serde_json::Value {
 /// TODO: Implement proper Python expression evaluation
 fn should_skip_condition(condition: &str) -> bool {
     let condition = condition.trim();
-    
+
     // Handle some common conditions
     match condition {
         "True" | "true" | "1" => true,
@@ -341,7 +342,7 @@ fn should_skip_condition(condition: &str) -> bool {
                     return condition.contains("linux");
                 }
             }
-            
+
             // Handle sys.version_info checks
             if condition.contains("sys.version_info") {
                 // For now, assume Python 3.7+ so skip tests for older versions
@@ -352,7 +353,7 @@ fn should_skip_condition(condition: &str) -> bool {
                     return true;
                 }
             }
-            
+
             // By default, don't skip
             false
         }

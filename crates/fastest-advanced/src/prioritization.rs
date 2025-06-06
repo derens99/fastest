@@ -49,11 +49,11 @@ pub struct PriorityWeights {
 impl Default for PriorityWeights {
     fn default() -> Self {
         Self {
-            failure_rate_weight: 0.4,  // Prioritize frequently failing tests
-            duration_weight: 0.1,      // Slightly prefer faster tests
-            recency_weight: 0.2,       // Prefer recently modified files
-            modification_weight: 0.2,   // Prefer tests for recently changed files
-            dependency_weight: 0.1,     // Consider dependency relationships
+            failure_rate_weight: 0.4, // Prioritize frequently failing tests
+            duration_weight: 0.1,     // Slightly prefer faster tests
+            recency_weight: 0.2,      // Prefer recently modified files
+            modification_weight: 0.2, // Prefer tests for recently changed files
+            dependency_weight: 0.1,   // Consider dependency relationships
         }
     }
 }
@@ -68,7 +68,7 @@ pub struct PrioritizedTest {
 impl TestPrioritizer {
     pub fn new(config: &AdvancedConfig) -> Result<Self> {
         let cache_file = config.cache_dir.join("prioritization_cache.json");
-        
+
         Ok(Self {
             config: config.clone(),
             test_history: HashMap::new(),
@@ -80,19 +80,21 @@ impl TestPrioritizer {
     pub async fn initialize(&mut self) -> Result<()> {
         // Load cached test history
         self.load_cache().await?;
-        
+
         // Apply machine learning to adjust weights
         self.optimize_weights().await?;
-        
-        tracing::info!("Test prioritizer initialized with {} test histories", 
-                      self.test_history.len());
+
+        tracing::info!(
+            "Test prioritizer initialized with {} test histories",
+            self.test_history.len()
+        );
         Ok(())
     }
 
     /// Prioritize tests using multiple smart strategies
     pub async fn prioritize_tests(&self, test_ids: &[String]) -> Result<Vec<String>> {
         let mut priority_queue = PriorityQueue::new();
-        
+
         for test_id in test_ids {
             let score = self.calculate_priority_score(test_id).await?;
             priority_queue.push(test_id.clone(), (score * 1000.0) as i64); // Scale for integer priority
@@ -127,7 +129,7 @@ impl TestPrioritizer {
 
         // 2. Duration score (slightly prefer faster tests)
         if let Some(h) = history {
-            let duration_score = (1.0 / (h.average_duration_ms / 1000.0 + 1.0)) 
+            let duration_score = (1.0 / (h.average_duration_ms / 1000.0 + 1.0))
                 * self.priority_weights.duration_weight;
             score += duration_score;
         }
@@ -137,8 +139,8 @@ impl TestPrioritizer {
             let hours_since_last = chrono::Utc::now()
                 .signed_duration_since(h.last_execution)
                 .num_hours() as f64;
-            let recency_score = (1.0 / (hours_since_last / 24.0 + 1.0)) 
-                * self.priority_weights.recency_weight;
+            let recency_score =
+                (1.0 / (hours_since_last / 24.0 + 1.0)) * self.priority_weights.recency_weight;
             score += recency_score;
         }
 
@@ -171,7 +173,7 @@ impl TestPrioritizer {
                 let hours_since_modified = chrono::Utc::now()
                     .signed_duration_since(modified_time)
                     .num_hours() as f64;
-                
+
                 // Higher score for recently modified files
                 return Ok(1.0 / (hours_since_modified / 24.0 + 1.0));
             }
@@ -195,8 +197,14 @@ impl TestPrioritizer {
     }
 
     /// Record test execution for learning
-    pub async fn record_execution(&mut self, test_id: &str, execution: TestExecution) -> Result<()> {
-        let history = self.test_history.entry(test_id.to_string())
+    pub async fn record_execution(
+        &mut self,
+        test_id: &str,
+        execution: TestExecution,
+    ) -> Result<()> {
+        let history = self
+            .test_history
+            .entry(test_id.to_string())
             .or_insert_with(|| TestHistory {
                 test_id: test_id.to_string(),
                 recent_results: Vec::new(),
@@ -226,13 +234,13 @@ impl TestPrioritizer {
         }
 
         // Calculate average duration
-        let total_duration: u64 = history.recent_results.iter()
-            .map(|e| e.duration_ms)
-            .sum();
+        let total_duration: u64 = history.recent_results.iter().map(|e| e.duration_ms).sum();
         history.average_duration_ms = total_duration as f64 / history.recent_results.len() as f64;
 
         // Calculate failure rate
-        let failures = history.recent_results.iter()
+        let failures = history
+            .recent_results
+            .iter()
             .filter(|e| matches!(e.status, TestStatus::Failed | TestStatus::Error))
             .count();
         history.failure_rate = failures as f64 / history.recent_results.len() as f64;
@@ -270,7 +278,10 @@ impl TestPrioritizer {
             self.priority_weights.recency_weight = 0.3;
         }
 
-        tracing::debug!("Optimized priority weights based on {} executions", total_executions);
+        tracing::debug!(
+            "Optimized priority weights based on {} executions",
+            total_executions
+        );
         Ok(())
     }
 
@@ -286,7 +297,7 @@ impl TestPrioritizer {
     /// Get recently modified tests
     pub async fn get_recently_modified_tests(&self, hours: u64) -> Vec<String> {
         let cutoff = chrono::Utc::now() - chrono::Duration::hours(hours as i64);
-        
+
         self.test_history
             .values()
             .filter(|h| h.last_execution > cutoff)
@@ -313,7 +324,9 @@ impl TestPrioritizer {
         let data: serde_json::Value = serde_json::from_str(&content)?;
 
         if let Some(history) = data.get("test_history") {
-            if let Ok(history_map) = serde_json::from_value::<HashMap<String, TestHistory>>(history.clone()) {
+            if let Ok(history_map) =
+                serde_json::from_value::<HashMap<String, TestHistory>>(history.clone())
+            {
                 self.test_history = history_map;
             }
         }
@@ -324,7 +337,10 @@ impl TestPrioritizer {
             }
         }
 
-        tracing::debug!("Loaded {} test histories from cache", self.test_history.len());
+        tracing::debug!(
+            "Loaded {} test histories from cache",
+            self.test_history.len()
+        );
         Ok(())
     }
 
@@ -337,7 +353,7 @@ impl TestPrioritizer {
         });
 
         std::fs::write(&self.cache_file, serde_json::to_string_pretty(&data)?)?;
-        
+
         tracing::debug!("Saved {} test histories to cache", self.test_history.len());
         Ok(())
     }
@@ -345,34 +361,52 @@ impl TestPrioritizer {
     /// Get prioritization statistics
     pub async fn get_stats(&self) -> HashMap<String, serde_json::Value> {
         let mut stats = HashMap::new();
-        
-        stats.insert("tracked_tests".to_string(), 
-                    serde_json::Value::Number(self.test_history.len().into()));
+
+        stats.insert(
+            "tracked_tests".to_string(),
+            serde_json::Value::Number(self.test_history.len().into()),
+        );
 
         let failed_tests = self.get_failed_tests().await;
-        stats.insert("failed_tests".to_string(), 
-                    serde_json::Value::Number(failed_tests.len().into()));
+        stats.insert(
+            "failed_tests".to_string(),
+            serde_json::Value::Number(failed_tests.len().into()),
+        );
 
         let slow_tests = self.get_slow_tests(5000).await; // 5 second threshold
-        stats.insert("slow_tests".to_string(), 
-                    serde_json::Value::Number(slow_tests.len().into()));
+        stats.insert(
+            "slow_tests".to_string(),
+            serde_json::Value::Number(slow_tests.len().into()),
+        );
 
         if !self.test_history.is_empty() {
-            let avg_duration: f64 = self.test_history.values()
+            let avg_duration: f64 = self
+                .test_history
+                .values()
                 .map(|h| h.average_duration_ms)
-                .sum::<f64>() / self.test_history.len() as f64;
-            stats.insert("average_duration_ms".to_string(), 
-                        serde_json::Value::Number(serde_json::Number::from_f64(avg_duration).unwrap()));
+                .sum::<f64>()
+                / self.test_history.len() as f64;
+            stats.insert(
+                "average_duration_ms".to_string(),
+                serde_json::Value::Number(serde_json::Number::from_f64(avg_duration).unwrap()),
+            );
 
-            let avg_failure_rate: f64 = self.test_history.values()
+            let avg_failure_rate: f64 = self
+                .test_history
+                .values()
                 .map(|h| h.failure_rate)
-                .sum::<f64>() / self.test_history.len() as f64;
-            stats.insert("average_failure_rate".to_string(), 
-                        serde_json::Value::Number(serde_json::Number::from_f64(avg_failure_rate).unwrap()));
+                .sum::<f64>()
+                / self.test_history.len() as f64;
+            stats.insert(
+                "average_failure_rate".to_string(),
+                serde_json::Value::Number(serde_json::Number::from_f64(avg_failure_rate).unwrap()),
+            );
         }
 
-        stats.insert("priority_weights".to_string(), 
-                    serde_json::to_value(&self.priority_weights).unwrap());
+        stats.insert(
+            "priority_weights".to_string(),
+            serde_json::to_value(&self.priority_weights).unwrap(),
+        );
 
         stats
     }
@@ -380,13 +414,12 @@ impl TestPrioritizer {
     /// Cleanup old test history
     pub async fn cleanup_history(&mut self, max_age_days: u64) -> Result<()> {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(max_age_days as i64);
-        
-        self.test_history.retain(|_, history| {
-            history.last_execution > cutoff
-        });
+
+        self.test_history
+            .retain(|_, history| history.last_execution > cutoff);
 
         self.save_cache().await?;
-        
+
         tracing::info!("Cleaned up test history older than {} days", max_age_days);
         Ok(())
     }

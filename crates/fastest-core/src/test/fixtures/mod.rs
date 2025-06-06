@@ -1,22 +1,22 @@
-pub mod builtin;
-pub mod session;
 pub mod advanced;
+pub mod builtin;
 pub mod conftest;
+pub mod session;
 
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+pub use advanced::{
+    parse_fixture_decorator, AdvancedFixtureManager, FixtureCacheStats, FixtureDefinition,
+    FixtureInstance, FixtureInstanceKey, FixtureRequest,
+};
 pub use builtin::{
     generate_builtin_fixture_code, get_builtin_fixture_metadata, is_builtin_fixture,
 };
-pub use session::{SessionFixtureManager, SessionFixture, SessionStats};
-pub use advanced::{
-    AdvancedFixtureManager, FixtureDefinition, FixtureRequest,
-    FixtureInstance, FixtureInstanceKey, FixtureCacheStats, parse_fixture_decorator,
-};
 pub use conftest::{ConftestDiscovery, ConftestFile};
+pub use session::{SessionFixture, SessionFixtureManager, SessionStats};
 
 // Simple fixture execution for core (advanced execution moved to fastest-execution)
 pub fn generate_test_code_with_fixtures(

@@ -44,7 +44,7 @@ pub struct CoverageReport {
 impl SmartCoverage {
     pub fn new(config: &AdvancedConfig) -> Result<Self> {
         let cache_file = config.cache_dir.join("coverage_cache.gz");
-        
+
         Ok(Self {
             config: config.clone(),
             cache_file,
@@ -55,10 +55,10 @@ impl SmartCoverage {
     pub async fn initialize(&mut self) -> Result<()> {
         // Load cached coverage data
         self.load_cache().await?;
-        
+
         // Verify coverage tools are available
         self.verify_coverage_tools().await?;
-        
+
         tracing::info!("Smart coverage initialized");
         Ok(())
     }
@@ -73,7 +73,7 @@ impl SmartCoverage {
             let result = self.collect_file_coverage(file).await;
             results.push(result);
         }
-        
+
         let mut total_lines = 0;
         let mut covered_lines = 0;
         let mut files = HashMap::new();
@@ -109,10 +109,10 @@ impl SmartCoverage {
     /// Fast file coverage using memory-mapped files
     async fn collect_file_coverage(&mut self, file_path: &str) -> Result<FileCoverage> {
         let path = Path::new(file_path);
-        
+
         // Calculate file hash for cache validation
         let file_hash = self.calculate_file_hash(path).await?;
-        
+
         // Check cache first
         if let Some(cached) = self.coverage_data.get(file_path) {
             if cached.file_hash == file_hash {
@@ -129,7 +129,8 @@ impl SmartCoverage {
         };
 
         // Cache the result
-        self.coverage_data.insert(file_path.to_string(), coverage.clone());
+        self.coverage_data
+            .insert(file_path.to_string(), coverage.clone());
 
         Ok(coverage)
     }
@@ -154,7 +155,7 @@ impl SmartCoverage {
             .output()?;
 
         let coverage_json: serde_json::Value = serde_json::from_slice(&report_output.stdout)?;
-        
+
         let file_data = coverage_json["files"]
             .get(file_path.to_string_lossy().as_ref())
             .ok_or_else(|| anyhow::anyhow!("File not found in coverage report"))?;
@@ -166,9 +167,7 @@ impl SmartCoverage {
             .filter_map(|v| v.as_u64().map(|n| n as u32))
             .collect();
 
-        let total_lines = file_data["summary"]["num_statements"]
-            .as_u64()
-            .unwrap_or(0) as u32;
+        let total_lines = file_data["summary"]["num_statements"].as_u64().unwrap_or(0) as u32;
 
         let coverage_percent = file_data["summary"]["percent_covered"]
             .as_f64()
@@ -189,7 +188,7 @@ impl SmartCoverage {
         // Memory-mapped file reading for speed
         let file = File::open(file_path)?;
         let mmap = unsafe { MmapOptions::new().map(&file)? };
-        
+
         let content = std::str::from_utf8(&mmap)?;
         let lines: Vec<&str> = content.lines().collect();
         let total_lines = lines.len() as u32;
@@ -212,7 +211,7 @@ impl SmartCoverage {
     async fn calculate_file_hash(&self, file_path: &Path) -> Result<String> {
         let file = File::open(file_path)?;
         let mmap = unsafe { MmapOptions::new().map(&file)? };
-        
+
         let mut hasher = Hasher::new();
         hasher.update(&mmap);
         Ok(hasher.finalize().to_hex().to_string())
@@ -231,7 +230,10 @@ impl SmartCoverage {
 
         if !data.is_empty() {
             self.coverage_data = serde_json::from_slice(&data)?;
-            tracing::debug!("Loaded {} cached coverage entries", self.coverage_data.len());
+            tracing::debug!(
+                "Loaded {} cached coverage entries",
+                self.coverage_data.len()
+            );
         }
 
         Ok(())
@@ -245,7 +247,10 @@ impl SmartCoverage {
         encoder.write_all(&data)?;
         encoder.finish()?;
 
-        tracing::debug!("Saved {} coverage entries to cache", self.coverage_data.len());
+        tracing::debug!(
+            "Saved {} coverage entries to cache",
+            self.coverage_data.len()
+        );
         Ok(())
     }
 
@@ -287,12 +292,15 @@ impl SmartCoverage {
     async fn generate_terminal_report(&self, report: &CoverageReport) -> Result<()> {
         println!("\n📊 Coverage Report");
         println!("Total Coverage: {:.1}%", report.coverage_percent);
-        println!("Lines Covered: {}/{}", report.covered_lines, report.total_lines);
-        
+        println!(
+            "Lines Covered: {}/{}",
+            report.covered_lines, report.total_lines
+        );
+
         for (file, coverage) in &report.files {
             println!("  {}: {:.1}%", file, coverage.coverage_percent);
         }
-        
+
         Ok(())
     }
 
@@ -301,7 +309,7 @@ impl SmartCoverage {
         let _output = Command::new("python")
             .args(["-m", "coverage", "html", "-d", "htmlcov"])
             .output();
-        
+
         tracing::info!("HTML coverage report generated in htmlcov/");
         Ok(())
     }
@@ -311,7 +319,7 @@ impl SmartCoverage {
         let _output = Command::new("python")
             .args(["-m", "coverage", "xml"])
             .output();
-        
+
         tracing::info!("XML coverage report generated as coverage.xml");
         Ok(())
     }
@@ -320,7 +328,7 @@ impl SmartCoverage {
         let json_file = self.config.cache_dir.join("coverage.json");
         let file = File::create(json_file)?;
         serde_json::to_writer_pretty(file, report)?;
-        
+
         tracing::info!("JSON coverage report generated");
         Ok(())
     }
@@ -330,7 +338,7 @@ impl SmartCoverage {
         let _output = Command::new("python")
             .args(["-m", "coverage", "lcov"])
             .output();
-        
+
         tracing::info!("LCOV coverage report generated");
         Ok(())
     }

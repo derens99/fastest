@@ -34,26 +34,26 @@ static ALLOCATOR_TYPE: &str = "mimalloc";
 
 use anyhow::{anyhow, Result};
 use dashmap::DashMap;
+use fastest_core::utils::simd_json;
 use once_cell::sync::Lazy;
+use parking_lot::Mutex;
 use petgraph::algo::toposort;
 use petgraph::graph::{DiGraph, NodeIndex};
 use rayon::prelude::*;
 use rmp_serde::Serializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use fastest_core::utils::simd_json;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::Write;
 use std::sync::Arc;
-use parking_lot::Mutex;
 use tokio::sync::Semaphore;
 use tracing::{debug, trace};
 
-use fastest_core::{Fixture, FixtureScope};
 use fastest_core::TestItem;
+use fastest_core::{Fixture, FixtureScope};
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyModule, PyList};
+use pyo3::types::{PyDict, PyList, PyModule};
 // Removed pyo3-serde dependency - using manual conversion
 
 /// Class instance for shared class instances and lifecycle management
@@ -170,51 +170,70 @@ struct AllocationPerformanceMetrics {
 impl AllocationPerformanceMetrics {
     /// Calculate allocation efficiency percentage
     fn allocation_efficiency_percent(&self) -> f64 {
-        let total_attempts = self.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
-        let failures = self.allocation_failures.load(std::sync::atomic::Ordering::Relaxed);
-        
+        let total_attempts = self
+            .total_allocations
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let failures = self
+            .allocation_failures
+            .load(std::sync::atomic::Ordering::Relaxed);
+
         if total_attempts == 0 {
             return 100.0;
         }
-        
+
         let successful = total_attempts.saturating_sub(failures);
         (successful as f64 / total_attempts as f64) * 100.0
     }
-    
+
     /// Get average allocation time in microseconds
     fn average_allocation_time_us(&self) -> f64 {
-        let total_time = self.total_allocation_time_ns.load(std::sync::atomic::Ordering::Relaxed);
-        let total_allocs = self.total_allocations.load(std::sync::atomic::Ordering::Relaxed);
-        
+        let total_time = self
+            .total_allocation_time_ns
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let total_allocs = self
+            .total_allocations
+            .load(std::sync::atomic::Ordering::Relaxed);
+
         if total_allocs == 0 {
             return 0.0;
         }
-        
+
         (total_time as f64 / total_allocs as f64) / 1000.0 // Convert ns to μs
     }
-    
+
     /// Get memory utilization ratio
     fn memory_utilization_ratio(&self) -> f64 {
-        let current = self.current_memory_usage.load(std::sync::atomic::Ordering::Relaxed);
-        let peak = self.peak_memory_usage.load(std::sync::atomic::Ordering::Relaxed);
-        
+        let current = self
+            .current_memory_usage
+            .load(std::sync::atomic::Ordering::Relaxed);
+        let peak = self
+            .peak_memory_usage
+            .load(std::sync::atomic::Ordering::Relaxed);
+
         if peak == 0 {
             return 0.0;
         }
-        
+
         current as f64 / peak as f64
     }
-    
+
     /// Get allocator performance summary
     fn get_allocator_summary(&self) -> AllocatorSummary {
         AllocatorSummary {
             allocator_type: ALLOCATOR_TYPE.to_string(),
-            total_allocations: self.total_allocations.load(std::sync::atomic::Ordering::Relaxed),
+            total_allocations: self
+                .total_allocations
+                .load(std::sync::atomic::Ordering::Relaxed),
             efficiency_percent: self.allocation_efficiency_percent(),
             average_allocation_time_us: self.average_allocation_time_us(),
-            peak_memory_mb: self.peak_memory_usage.load(std::sync::atomic::Ordering::Relaxed) as f64 / (1024.0 * 1024.0),
+            peak_memory_mb: self
+                .peak_memory_usage
+                .load(std::sync::atomic::Ordering::Relaxed) as f64
+                / (1024.0 * 1024.0),
             memory_utilization: self.memory_utilization_ratio(),
-            fragmentation_events: self.fragmentation_events.load(std::sync::atomic::Ordering::Relaxed),
+            fragmentation_events: self
+                .fragmentation_events
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }
@@ -222,43 +241,43 @@ impl AllocationPerformanceMetrics {
 impl Clone for AllocationPerformanceMetrics {
     fn clone(&self) -> Self {
         use std::sync::atomic::Ordering;
-        
+
         Self {
             total_allocations: std::sync::atomic::AtomicU64::new(
-                self.total_allocations.load(Ordering::Relaxed)
+                self.total_allocations.load(Ordering::Relaxed),
             ),
             total_deallocations: std::sync::atomic::AtomicU64::new(
-                self.total_deallocations.load(Ordering::Relaxed)
+                self.total_deallocations.load(Ordering::Relaxed),
             ),
             peak_memory_usage: std::sync::atomic::AtomicU64::new(
-                self.peak_memory_usage.load(Ordering::Relaxed)
+                self.peak_memory_usage.load(Ordering::Relaxed),
             ),
             current_memory_usage: std::sync::atomic::AtomicU64::new(
-                self.current_memory_usage.load(Ordering::Relaxed)
+                self.current_memory_usage.load(Ordering::Relaxed),
             ),
             total_allocation_time_ns: std::sync::atomic::AtomicU64::new(
-                self.total_allocation_time_ns.load(Ordering::Relaxed)
+                self.total_allocation_time_ns.load(Ordering::Relaxed),
             ),
             total_deallocation_time_ns: std::sync::atomic::AtomicU64::new(
-                self.total_deallocation_time_ns.load(Ordering::Relaxed)
+                self.total_deallocation_time_ns.load(Ordering::Relaxed),
             ),
             allocation_failures: std::sync::atomic::AtomicU64::new(
-                self.allocation_failures.load(Ordering::Relaxed)
+                self.allocation_failures.load(Ordering::Relaxed),
             ),
             fragmentation_events: std::sync::atomic::AtomicU64::new(
-                self.fragmentation_events.load(Ordering::Relaxed)
+                self.fragmentation_events.load(Ordering::Relaxed),
             ),
             large_allocations: std::sync::atomic::AtomicU64::new(
-                self.large_allocations.load(Ordering::Relaxed)
+                self.large_allocations.load(Ordering::Relaxed),
             ),
             small_allocations: std::sync::atomic::AtomicU64::new(
-                self.small_allocations.load(Ordering::Relaxed)
+                self.small_allocations.load(Ordering::Relaxed),
             ),
             average_allocation_size: std::sync::atomic::AtomicU64::new(
-                self.average_allocation_size.load(Ordering::Relaxed)
+                self.average_allocation_size.load(Ordering::Relaxed),
             ),
             allocator_efficiency: std::sync::atomic::AtomicU64::new(
-                self.allocator_efficiency.load(Ordering::Relaxed)
+                self.allocator_efficiency.load(Ordering::Relaxed),
             ),
         }
     }
@@ -304,7 +323,7 @@ impl ClassInstanceManager {
             performance_metrics: Arc::new(Mutex::new(ClassPerformanceMetrics::default())),
         }
     }
-    
+
     /// Get or create a class instance with smart instantiation
     fn get_or_create_class_instance(
         &self,
@@ -313,23 +332,24 @@ impl ClassInstanceManager {
         module_obj: &PyObject,
     ) -> PyResult<ClassInstance> {
         let start_time = std::time::Instant::now();
-        
+
         // Check if instance already exists
         if let Some(existing) = self.class_instances.get(class_name) {
             let mut instance = existing.clone();
             instance.ref_count += 1;
-            self.class_instances.insert(class_name.to_string(), instance.clone());
+            self.class_instances
+                .insert(class_name.to_string(), instance.clone());
             return Ok(instance);
         }
-        
+
         // Create new instance using smart instantiation strategies
         let module: &PyModule = module_obj.downcast(py)?;
         let class_obj = module.getattr(class_name)?;
-        
+
         let instance_obj = self.create_instance_with_strategies(py, &class_obj, class_name)?;
-        
+
         let setup_time = start_time.elapsed();
-        
+
         let class_instance = ClassInstance {
             instance: instance_obj.into(),
             class_name: class_name.to_string(),
@@ -339,21 +359,22 @@ impl ClassInstanceManager {
             setup_time: Some(setup_time),
             teardown_time: None,
         };
-        
+
         // Execute setup_class if available
         self.execute_setup_class(py, &class_instance)?;
-        
+
         // Update performance metrics
         {
             let mut metrics = self.performance_metrics.lock();
             metrics.classes_instantiated += 1;
             metrics.total_class_setup_time += setup_time;
         }
-        
-        self.class_instances.insert(class_name.to_string(), class_instance.clone());
+
+        self.class_instances
+            .insert(class_name.to_string(), class_instance.clone());
         Ok(class_instance)
     }
-    
+
     /// Smart class instantiation with multiple fallback strategies
     fn create_instance_with_strategies<'py>(
         &self,
@@ -364,27 +385,37 @@ impl ClassInstanceManager {
         for strategy in &self.instantiation_strategies {
             match self.try_instantiation_strategy(py, class_obj, strategy) {
                 Ok(instance) => {
-                    trace!("Successfully instantiated {} using strategy {:?}", class_name, strategy);
+                    trace!(
+                        "Successfully instantiated {} using strategy {:?}",
+                        class_name,
+                        strategy
+                    );
                     return Ok(instance);
-                },
+                }
                 Err(e) => {
-                    trace!("Instantiation strategy {:?} failed for {}: {}", strategy, class_name, e);
+                    trace!(
+                        "Instantiation strategy {:?} failed for {}: {}",
+                        strategy,
+                        class_name,
+                        e
+                    );
                     continue;
                 }
             }
         }
-        
+
         // Update error metrics
         {
             let mut metrics = self.performance_metrics.lock();
             metrics.instantiation_failures += 1;
         }
-        
-        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-            format!("Failed to instantiate class {} with all strategies", class_name)
-        ))
+
+        Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+            "Failed to instantiate class {} with all strategies",
+            class_name
+        )))
     }
-    
+
     /// Try a specific instantiation strategy
     fn try_instantiation_strategy<'py>(
         &self,
@@ -393,35 +424,32 @@ impl ClassInstanceManager {
         strategy: &ClassInstantiationStrategy,
     ) -> PyResult<&'py PyAny> {
         match strategy {
-            ClassInstantiationStrategy::Standard => {
-                class_obj.call0()
-            },
-            ClassInstantiationStrategy::NoArgs => {
-                class_obj.call((), None)
-            },
+            ClassInstantiationStrategy::Standard => class_obj.call0(),
+            ClassInstantiationStrategy::NoArgs => class_obj.call((), None),
             ClassInstantiationStrategy::ObjectNew => {
                 let object_class = py.get_type::<pyo3::types::PyType>();
                 let new_method = object_class.getattr("__new__")?;
                 new_method.call1((class_obj,))
-            },
+            }
             ClassInstantiationStrategy::InspectBased => {
                 // Use inspect to determine the best instantiation approach
                 let inspect_module = PyModule::import(py, "inspect")?;
                 let signature_fn = inspect_module.getattr("signature")?;
                 let init_method = class_obj.getattr("__init__")?;
-                
+
                 match signature_fn.call1((init_method,)) {
                     Ok(sig) => {
                         let parameters = sig.getattr("parameters")?;
                         let param_count: usize = parameters.call_method0("__len__")?.extract()?;
-                        
-                        if param_count <= 1 { // Only 'self' parameter
+
+                        if param_count <= 1 {
+                            // Only 'self' parameter
                             class_obj.call0()
                         } else {
                             // Try with minimal default arguments
                             class_obj.call((), None)
                         }
-                    },
+                    }
                     Err(_) => {
                         // Fallback to no-args if signature inspection fails
                         class_obj.call0()
@@ -430,115 +458,124 @@ impl ClassInstanceManager {
             }
         }
     }
-    
+
     /// Execute setup_class method if available
     fn execute_setup_class(&self, py: Python, class_instance: &ClassInstance) -> PyResult<()> {
         let start_time = std::time::Instant::now();
-        
+
         let instance_obj = class_instance.instance.as_ref(py);
-        
+
         // Check for setup_class method
         if instance_obj.hasattr("setup_class")? {
             let setup_method = instance_obj.getattr("setup_class")?;
             match setup_method.call0() {
                 Ok(_) => {
                     let setup_time = start_time.elapsed();
-                    
+
                     // Update lifecycle state
                     self.class_lifecycle.insert(
-                        class_instance.class_name.clone(), 
-                        ClassLifecycleState::SetupComplete
+                        class_instance.class_name.clone(),
+                        ClassLifecycleState::SetupComplete,
                     );
-                    
+
                     // Update metrics
                     {
                         let mut metrics = self.performance_metrics.lock();
                         metrics.setup_class_calls += 1;
                         metrics.total_class_setup_time += setup_time;
                     }
-                    
-                    trace!("setup_class completed for {} in {:?}", 
-                           class_instance.class_name, setup_time);
-                },
-                Err(e) => {
-                    let error_msg = format!("setup_class failed for {}: {}", 
-                                           class_instance.class_name, e);
-                    
-                    self.class_lifecycle.insert(
-                        class_instance.class_name.clone(), 
-                        ClassLifecycleState::Error(error_msg.clone())
+
+                    trace!(
+                        "setup_class completed for {} in {:?}",
+                        class_instance.class_name,
+                        setup_time
                     );
-                    
+                }
+                Err(e) => {
+                    let error_msg = format!(
+                        "setup_class failed for {}: {}",
+                        class_instance.class_name, e
+                    );
+
+                    self.class_lifecycle.insert(
+                        class_instance.class_name.clone(),
+                        ClassLifecycleState::Error(error_msg.clone()),
+                    );
+
                     {
                         let mut metrics = self.performance_metrics.lock();
                         metrics.lifecycle_errors += 1;
                     }
-                    
+
                     return Err(PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(error_msg));
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute teardown_class method if available
     fn execute_teardown_class(&self, py: Python, class_name: &str) -> PyResult<()> {
         let start_time = std::time::Instant::now();
-        
+
         if let Some(class_instance) = self.class_instances.get(class_name) {
             // Mark as teardown in progress
             self.class_lifecycle.insert(
-                class_name.to_string(), 
-                ClassLifecycleState::TeardownInProgress
+                class_name.to_string(),
+                ClassLifecycleState::TeardownInProgress,
             );
-            
+
             let instance_obj = class_instance.instance.as_ref(py);
-            
+
             // Check for teardown_class method
             if instance_obj.hasattr("teardown_class")? {
                 let teardown_method = instance_obj.getattr("teardown_class")?;
                 match teardown_method.call0() {
                     Ok(_) => {
                         let teardown_time = start_time.elapsed();
-                        
+
                         // Mark teardown complete
                         self.class_lifecycle.insert(
-                            class_name.to_string(), 
-                            ClassLifecycleState::TeardownComplete
+                            class_name.to_string(),
+                            ClassLifecycleState::TeardownComplete,
                         );
-                        
+
                         // Update metrics
                         {
                             let mut metrics = self.performance_metrics.lock();
                             metrics.teardown_class_calls += 1;
                             metrics.total_class_teardown_time += teardown_time;
                         }
-                        
-                        trace!("teardown_class completed for {} in {:?}", class_name, teardown_time);
-                    },
+
+                        trace!(
+                            "teardown_class completed for {} in {:?}",
+                            class_name,
+                            teardown_time
+                        );
+                    }
                     Err(e) => {
                         let error_msg = format!("teardown_class failed for {}: {}", class_name, e);
-                        
+
                         self.class_lifecycle.insert(
-                            class_name.to_string(), 
-                            ClassLifecycleState::Error(error_msg.clone())
+                            class_name.to_string(),
+                            ClassLifecycleState::Error(error_msg.clone()),
                         );
-                        
+
                         {
                             let mut metrics = self.performance_metrics.lock();
                             metrics.lifecycle_errors += 1;
                         }
-                        
+
                         eprintln!("Warning: {}", error_msg);
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get or create a @classmethod fixture
     fn get_or_create_classmethod_fixture(
         &self,
@@ -548,7 +585,7 @@ impl ClassInstanceManager {
         fixture_fn: &PyAny,
     ) -> PyResult<PyObject> {
         let cache_key = format!("{}::{}", class_name, fixture_name);
-        
+
         // Check cache first
         if let Some(cached_value) = self.classmethod_fixtures.get(&cache_key) {
             {
@@ -557,32 +594,36 @@ impl ClassInstanceManager {
             }
             return Ok(cached_value.clone());
         }
-        
+
         // Execute @classmethod fixture
-        let class_instance = self.class_instances.get(class_name)
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(
-                format!("Class instance not found for {}", class_name)
-            ))?;
-        
+        let class_instance = self.class_instances.get(class_name).ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!(
+                "Class instance not found for {}",
+                class_name
+            ))
+        })?;
+
         let class_obj = class_instance.instance.as_ref(py).get_type();
         let result = fixture_fn.call1((class_obj,))?;
-        
+
         // Cache the result
         let result_obj: PyObject = result.into();
-        self.classmethod_fixtures.insert(cache_key, result_obj.clone());
-        
+        self.classmethod_fixtures
+            .insert(cache_key, result_obj.clone());
+
         // Update metrics
         {
             let mut metrics = self.performance_metrics.lock();
             metrics.classmethod_fixtures_created += 1;
         }
-        
+
         Ok(result_obj)
     }
-    
+
     /// Cleanup class instances and related resources
     fn cleanup_class_instances(&self, py: Python, class_scope_id: &str) -> Result<()> {
-        let instances_to_cleanup: Vec<String> = self.class_instances
+        let instances_to_cleanup: Vec<String> = self
+            .class_instances
             .iter()
             .filter(|entry| {
                 let class_name = entry.key();
@@ -591,31 +632,35 @@ impl ClassInstanceManager {
             })
             .map(|entry| entry.key().clone())
             .collect();
-        
+
         for class_name in instances_to_cleanup {
             if let Err(e) = self.execute_teardown_class(py, &class_name) {
-                eprintln!("Warning: Failed to execute teardown_class for {}: {}", class_name, e);
+                eprintln!(
+                    "Warning: Failed to execute teardown_class for {}: {}",
+                    class_name, e
+                );
             }
-            
+
             // Remove from caches
             self.class_instances.remove(&class_name);
             self.class_lifecycle.remove(&class_name);
-            
+
             // Remove related @classmethod fixtures
-            let classmethod_keys: Vec<String> = self.classmethod_fixtures
+            let classmethod_keys: Vec<String> = self
+                .classmethod_fixtures
                 .iter()
                 .filter(|entry| entry.key().starts_with(&format!("{}::", class_name)))
                 .map(|entry| entry.key().clone())
                 .collect();
-            
+
             for key in classmethod_keys {
                 self.classmethod_fixtures.remove(&key);
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Get performance metrics for monitoring
     fn get_performance_metrics(&self) -> ClassPerformanceMetrics {
         self.performance_metrics.lock().clone()
@@ -709,10 +754,10 @@ impl FixtureValue {
     /// Get performance statistics for PyObject caching
     pub fn get_cache_performance(&self) -> (u64, u64, f64) {
         let total = self.pyobject_cache_hits + self.json_fallback_uses;
-        let hit_rate = if total > 0 { 
-            self.pyobject_cache_hits as f64 / total as f64 
-        } else { 
-            0.0 
+        let hit_rate = if total > 0 {
+            self.pyobject_cache_hits as f64 / total as f64
+        } else {
+            0.0
         };
         (self.pyobject_cache_hits, self.json_fallback_uses, hit_rate)
     }
@@ -1048,14 +1093,14 @@ impl PythonRuntimeManager {
     fn new() -> PyResult<Self> {
         Python::with_gil(|py| {
             let mut common_modules = HashMap::new();
-            
+
             // Pre-load commonly used modules for performance
             common_modules.insert("json", PyModule::import(py, "json")?.into());
             common_modules.insert("inspect", PyModule::import(py, "inspect")?.into());
             common_modules.insert("sys", PyModule::import(py, "sys")?.into());
             common_modules.insert("os", PyModule::import(py, "os")?.into());
             common_modules.insert("pathlib", PyModule::import(py, "pathlib")?.into());
-            
+
             Ok(Self {
                 module_cache: Arc::new(DashMap::with_capacity(256)),
                 common_modules,
@@ -1064,28 +1109,34 @@ impl PythonRuntimeManager {
             })
         })
     }
-    
+
     /// Get or import a module with caching
-    fn get_or_import_module(&mut self, py: Python, module_path: &std::path::Path) -> PyResult<PyObject> {
+    fn get_or_import_module(
+        &mut self,
+        py: Python,
+        module_path: &std::path::Path,
+    ) -> PyResult<PyObject> {
         let module_name = module_path
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Invalid module path"))?
             .to_string();
-            
+
         // Check cache first
         if let Some(cached_module) = self.module_cache.get(&module_name) {
             self.stats.cache_hits += 1;
             return Ok(cached_module.clone());
         }
-        
+
         // Add parent directory to sys.path if needed
         let parent_dir = module_path
             .parent()
-            .ok_or_else(|| PyErr::new::<pyo3::exceptions::PyValueError, _>("Module has no parent directory"))?
+            .ok_or_else(|| {
+                PyErr::new::<pyo3::exceptions::PyValueError, _>("Module has no parent directory")
+            })?
             .to_string_lossy()
             .to_string();
-            
+
         if !self.path_cache.contains_key(&parent_dir) {
             let sys_module = &self.common_modules["sys"];
             let sys_path_obj = sys_module.getattr(py, "path")?;
@@ -1095,18 +1146,18 @@ impl PythonRuntimeManager {
             }
             self.path_cache.insert(parent_dir, module_name.clone());
         }
-        
+
         // Import the module
         let module = PyModule::import(py, module_name.as_str())?;
         let module_obj: PyObject = module.into();
-        
+
         // Cache it
         self.module_cache.insert(module_name, module_obj.clone());
         self.stats.module_imports += 1;
-        
+
         Ok(module_obj)
     }
-    
+
     /// Convert serde_json::Value to Python object using manual conversion
     fn json_to_python(&self, py: Python, value: &serde_json::Value) -> PyResult<PyObject> {
         match value {
@@ -1120,7 +1171,7 @@ impl PythonRuntimeManager {
                 } else {
                     Ok(n.to_string().into_py(py))
                 }
-            },
+            }
             serde_json::Value::String(s) => Ok(s.into_py(py)),
             serde_json::Value::Array(arr) => {
                 let py_list = pyo3::types::PyList::empty(py);
@@ -1129,7 +1180,7 @@ impl PythonRuntimeManager {
                     py_list.append(py_item)?;
                 }
                 Ok(py_list.into())
-            },
+            }
             serde_json::Value::Object(obj) => {
                 let py_dict = pyo3::types::PyDict::new(py);
                 for (key, val) in obj {
@@ -1140,11 +1191,11 @@ impl PythonRuntimeManager {
             }
         }
     }
-    
+
     /// Convert Python object to serde_json::Value using manual conversion
     fn python_to_json(&self, py: Python, obj: &PyObject) -> PyResult<serde_json::Value> {
         let obj_ref = obj.as_ref(py);
-        
+
         if obj_ref.is_none() {
             Ok(serde_json::Value::Null)
         } else if let Ok(b) = obj_ref.extract::<bool>() {
@@ -1177,7 +1228,7 @@ impl PythonRuntimeManager {
             Ok(serde_json::Value::String(str_repr))
         }
     }
-    
+
     fn get_stats(&self) -> RuntimeStats {
         RuntimeStats {
             module_imports: self.stats.module_imports,
@@ -1215,13 +1266,13 @@ impl PerformanceTracker {
             ..Default::default()
         }
     }
-    
+
     fn record_pyo3_execution(&mut self, duration: std::time::Duration, success: bool) {
         self.pyo3_execution_times.push(duration);
         if self.pyo3_execution_times.len() > 100 {
             self.pyo3_execution_times.remove(0); // Keep only recent samples
         }
-        
+
         // Update success rate with exponential decay
         if success {
             self.pyo3_success_rate = 0.9 * self.pyo3_success_rate + 0.1;
@@ -1229,42 +1280,48 @@ impl PerformanceTracker {
             self.pyo3_success_rate *= 0.9;
         }
     }
-    
+
     fn record_subprocess_execution(&mut self, duration: std::time::Duration, success: bool) {
         self.subprocess_execution_times.push(duration);
         if self.subprocess_execution_times.len() > 100 {
             self.subprocess_execution_times.remove(0);
         }
-        
+
         if success {
             self.subprocess_success_rate = 0.9 * self.subprocess_success_rate + 0.1;
         } else {
             self.subprocess_success_rate *= 0.9;
         }
     }
-    
+
     fn should_use_pyo3(&mut self, fixture: &Fixture) -> bool {
         self.decisions_made += 1;
-        
+
         // Always prefer PyO3 for simple fixtures
         if fixture.dependencies.len() <= 2 && self.pyo3_success_rate > 0.8 {
             self.pyo3_preferred += 1;
             return true;
         }
-        
+
         // Adaptive decision based on performance
         let avg_pyo3_time = if !self.pyo3_execution_times.is_empty() {
-            self.pyo3_execution_times.iter().sum::<std::time::Duration>() / self.pyo3_execution_times.len() as u32
+            self.pyo3_execution_times
+                .iter()
+                .sum::<std::time::Duration>()
+                / self.pyo3_execution_times.len() as u32
         } else {
             std::time::Duration::from_millis(5) // Optimistic default
         };
-        
+
         let avg_subprocess_time = if !self.subprocess_execution_times.is_empty() {
-            self.subprocess_execution_times.iter().sum::<std::time::Duration>() / self.subprocess_execution_times.len() as u32
+            self.subprocess_execution_times
+                .iter()
+                .sum::<std::time::Duration>()
+                / self.subprocess_execution_times.len() as u32
         } else {
             std::time::Duration::from_millis(50) // Conservative default
         };
-        
+
         let use_pyo3 = avg_pyo3_time < avg_subprocess_time && self.pyo3_success_rate > 0.7;
         if use_pyo3 {
             self.pyo3_preferred += 1;
@@ -1406,9 +1463,9 @@ impl FixtureExecutor {
     pub fn new() -> Self {
         // 🚀 Initialize SIMD JSON for 2-3x faster fixture serialization
         simd_json::init_simd_json();
-        
+
         let max_parallel = num_cpus::get().min(8); // Limit parallel Python processes
-        
+
         // Initialize Python runtime with error handling
         let python_runtime = Python::with_gil(|_py| {
             PythonRuntimeManager::new()
@@ -1422,13 +1479,16 @@ impl FixtureExecutor {
                 path_cache: HashMap::new(),
             }
         });
-        
+
         // 🚀 Initialize allocation performance metrics
         let allocation_metrics = Arc::new(AllocationPerformanceMetrics::default());
-        
+
         // Log allocator initialization
-        eprintln!("🚀 FixtureExecutor initialized with {} allocator for 8-15% performance improvement", ALLOCATOR_TYPE);
-        
+        eprintln!(
+            "🚀 FixtureExecutor initialized with {} allocator for 8-15% performance improvement",
+            ALLOCATOR_TYPE
+        );
+
         Self {
             fixture_code: HashMap::new(),
             cache: Arc::new(DashMap::with_capacity(1000)), // Pre-allocate for better performance
@@ -1468,50 +1528,93 @@ impl FixtureExecutor {
             let _ = self.generate_fixture_execution_code(&fixture, &HashMap::new());
         }
     }
-    
+
     /// 🚀 REVOLUTIONARY: Get comprehensive allocation performance metrics
-    /// 
+    ///
     /// Returns detailed allocation performance data for monitoring the impact of mimalloc
     /// vs system allocator on fixture-heavy workloads.
     pub fn get_allocation_metrics(&self) -> AllocatorSummary {
         self.allocation_metrics.get_allocator_summary()
     }
-    
+
     /// Get detailed allocation statistics for performance analysis
     pub fn get_detailed_allocation_stats(&self) -> HashMap<String, serde_json::Value> {
         use std::sync::atomic::Ordering;
-        
+
         let mut stats = HashMap::new();
-        stats.insert("allocator_type".to_string(), serde_json::Value::String(ALLOCATOR_TYPE.to_string()));
-        stats.insert("total_allocations".to_string(), serde_json::Value::Number(
-            serde_json::Number::from(self.allocation_metrics.total_allocations.load(Ordering::Relaxed))
-        ));
-        stats.insert("total_deallocations".to_string(), serde_json::Value::Number(
-            serde_json::Number::from(self.allocation_metrics.total_deallocations.load(Ordering::Relaxed))
-        ));
-        stats.insert("peak_memory_mb".to_string(), serde_json::Value::Number(
-            serde_json::Number::from_f64(
-                self.allocation_metrics.peak_memory_usage.load(Ordering::Relaxed) as f64 / (1024.0 * 1024.0)
-            ).unwrap_or(serde_json::Number::from(0))
-        ));
-        stats.insert("efficiency_percent".to_string(), serde_json::Value::Number(
-            serde_json::Number::from_f64(self.allocation_metrics.allocation_efficiency_percent())
-                .unwrap_or(serde_json::Number::from(0))
-        ));
-        stats.insert("average_allocation_time_us".to_string(), serde_json::Value::Number(
-            serde_json::Number::from_f64(self.allocation_metrics.average_allocation_time_us())
-                .unwrap_or(serde_json::Number::from(0))
-        ));
-        stats.insert("large_allocations".to_string(), serde_json::Value::Number(
-            serde_json::Number::from(self.allocation_metrics.large_allocations.load(Ordering::Relaxed))
-        ));
-        stats.insert("small_allocations".to_string(), serde_json::Value::Number(
-            serde_json::Number::from(self.allocation_metrics.small_allocations.load(Ordering::Relaxed))
-        ));
-        stats.insert("fragmentation_events".to_string(), serde_json::Value::Number(
-            serde_json::Number::from(self.allocation_metrics.fragmentation_events.load(Ordering::Relaxed))
-        ));
-        
+        stats.insert(
+            "allocator_type".to_string(),
+            serde_json::Value::String(ALLOCATOR_TYPE.to_string()),
+        );
+        stats.insert(
+            "total_allocations".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.allocation_metrics
+                    .total_allocations
+                    .load(Ordering::Relaxed),
+            )),
+        );
+        stats.insert(
+            "total_deallocations".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.allocation_metrics
+                    .total_deallocations
+                    .load(Ordering::Relaxed),
+            )),
+        );
+        stats.insert(
+            "peak_memory_mb".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(
+                    self.allocation_metrics
+                        .peak_memory_usage
+                        .load(Ordering::Relaxed) as f64
+                        / (1024.0 * 1024.0),
+                )
+                .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "efficiency_percent".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(
+                    self.allocation_metrics.allocation_efficiency_percent(),
+                )
+                .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "average_allocation_time_us".to_string(),
+            serde_json::Value::Number(
+                serde_json::Number::from_f64(self.allocation_metrics.average_allocation_time_us())
+                    .unwrap_or(serde_json::Number::from(0)),
+            ),
+        );
+        stats.insert(
+            "large_allocations".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.allocation_metrics
+                    .large_allocations
+                    .load(Ordering::Relaxed),
+            )),
+        );
+        stats.insert(
+            "small_allocations".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.allocation_metrics
+                    .small_allocations
+                    .load(Ordering::Relaxed),
+            )),
+        );
+        stats.insert(
+            "fragmentation_events".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(
+                self.allocation_metrics
+                    .fragmentation_events
+                    .load(Ordering::Relaxed),
+            )),
+        );
+
         stats
     }
 
@@ -1571,7 +1674,7 @@ impl FixtureExecutor {
         let ordered_fixtures = self
             .dependency_resolver
             .resolve_dependencies(required_fixtures)?;
-        
+
         if ordered_fixtures.is_empty() {
             return Ok(Vec::new());
         }
@@ -1582,11 +1685,8 @@ impl FixtureExecutor {
 
         // First pass: Group class-scoped fixtures by class and compute basic levels
         for fixture_name in &ordered_fixtures {
-            let fixture_info = self
-                .dependency_resolver
-                .fixture_registry
-                .get(fixture_name);
-                
+            let fixture_info = self.dependency_resolver.fixture_registry.get(fixture_name);
+
             let deps = fixture_info
                 .map(|f| f.dependencies.clone())
                 .unwrap_or_else(Vec::new);
@@ -1597,38 +1697,40 @@ impl FixtureExecutor {
                     current_level = current_level.max(dep_level + 1);
                 }
             }
-            
+
             // Handle class-scoped fixtures specially
             if let Some(fixture) = fixture_info {
                 if fixture.scope == FixtureScope::Class {
                     // Extract class name from fixture path or use a default grouping
                     let class_key = self.extract_class_key_from_fixture(fixture);
-                    class_fixture_groups.entry(class_key)
+                    class_fixture_groups
+                        .entry(class_key)
                         .or_insert_with(Vec::new)
                         .push(fixture_name.clone());
-                    
+
                     // Class fixtures should be at higher priority to ensure proper setup
                     current_level += 10; // Ensure class fixtures are prioritized
                 }
             }
-            
+
             fixture_levels.insert(fixture_name.clone(), current_level);
             max_level = max_level.max(current_level);
         }
 
         // Second pass: Organize fixtures into batches with class awareness
         let mut level_to_fixtures: Vec<Vec<String>> = vec![Vec::new(); max_level + 1];
-        
+
         // Process class fixture groups first to ensure proper batching
         for (_class_key, class_fixtures) in class_fixture_groups {
             if class_fixtures.len() > 1 {
                 // Multiple fixtures for same class should be in same batch when possible
-                let min_level = class_fixtures.iter()
+                let min_level = class_fixtures
+                    .iter()
                     .filter_map(|name| fixture_levels.get(name))
                     .min()
                     .copied()
                     .unwrap_or(0);
-                
+
                 // Place all class fixtures at the minimum level to batch them together
                 for fixture_name in class_fixtures {
                     if min_level < level_to_fixtures.len() {
@@ -1637,14 +1739,15 @@ impl FixtureExecutor {
                 }
             }
         }
-        
+
         // Process remaining fixtures
         for fixture_name in ordered_fixtures {
             if let Some(level) = fixture_levels.get(&fixture_name) {
                 // Check if this fixture was already added as part of a class group
-                let already_added = level_to_fixtures.iter()
+                let already_added = level_to_fixtures
+                    .iter()
                     .any(|level_fixtures| level_fixtures.contains(&fixture_name));
-                
+
                 if !already_added && *level < level_to_fixtures.len() {
                     level_to_fixtures[*level].push(fixture_name.clone());
                 }
@@ -1655,10 +1758,7 @@ impl FixtureExecutor {
             .into_iter()
             .filter(|fixtures_in_level| !fixtures_in_level.is_empty())
             .enumerate()
-            .map(|(level, fixtures)| FixtureBatch {
-                fixtures,
-                level,
-            })
+            .map(|(level, fixtures)| FixtureBatch { fixtures, level })
             .collect();
 
         // Enhanced logging with class awareness
@@ -1668,21 +1768,29 @@ impl FixtureExecutor {
                 batches.len()
             );
             for (i, batch) in batches.iter().enumerate() {
-                let class_fixtures: Vec<&String> = batch.fixtures.iter()
+                let class_fixtures: Vec<&String> = batch
+                    .fixtures
+                    .iter()
                     .filter(|name| {
-                        self.dependency_resolver.fixture_registry.get(*name)
+                        self.dependency_resolver
+                            .fixture_registry
+                            .get(*name)
                             .map_or(false, |f| f.scope == FixtureScope::Class)
                     })
                     .collect();
-                    
-                trace!("  Batch {}: {} fixtures ({} class-scoped)", 
-                       i, batch.fixtures.len(), class_fixtures.len());
+
+                trace!(
+                    "  Batch {}: {} fixtures ({} class-scoped)",
+                    i,
+                    batch.fixtures.len(),
+                    class_fixtures.len()
+                );
             }
         }
 
         Ok(batches)
     }
-    
+
     /// Extract a class key from fixture for grouping class-scoped fixtures
     fn extract_class_key_from_fixture(&self, fixture: &Fixture) -> String {
         // Try to extract class name from fixture path or name
@@ -1691,7 +1799,7 @@ impl FixtureExecutor {
                 return format!("{}:{}", name_str, fixture.scope.clone() as u8);
             }
         }
-        
+
         // Fallback to fixture name for grouping
         format!("class_scope:{}", fixture.name)
     }
@@ -1737,11 +1845,14 @@ impl FixtureExecutor {
 
         // Check enhanced cache first for class-aware fixtures
         if let Some(enhanced_cached) = self.enhanced_cache.get(&cache_key) {
-            trace!("Enhanced cache hit for fixture: {} (class: {:?})", 
-                   fixture_name, enhanced_cached.class_name);
+            trace!(
+                "Enhanced cache hit for fixture: {} (class: {:?})",
+                fixture_name,
+                enhanced_cached.class_name
+            );
             return Ok(enhanced_cached.base.clone());
         }
-        
+
         // Check regular cache for backward compatibility
         if let Some(cached_value) = self.cache.get(&cache_key) {
             trace!("Cache hit for fixture: {}", fixture_name);
@@ -1763,8 +1874,9 @@ impl FixtureExecutor {
                 is_classmethod: self.is_classmethod_fixture(fixture_name),
                 class_instance_ref: test.class_name.clone(),
             };
-            
-            self.enhanced_cache.insert(cache_key.clone(), enhanced_value);
+
+            self.enhanced_cache
+                .insert(cache_key.clone(), enhanced_value);
             self.cache.insert(cache_key.clone(), fixture_value.clone());
 
             // Add to teardown stack if needed
@@ -1779,9 +1891,13 @@ impl FixtureExecutor {
 
         Ok(fixture_value)
     }
-    
+
     /// Enhanced fixture instance creation with class management
-    fn create_fixture_instance_enhanced(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
+    fn create_fixture_instance_enhanced(
+        &self,
+        fixture: &Fixture,
+        test: &TestItem,
+    ) -> Result<FixtureValue> {
         let _start_time = std::time::Instant::now();
 
         // Handle class-scoped fixtures with special logic
@@ -1792,12 +1908,20 @@ impl FixtureExecutor {
         // For non-class fixtures, use the original logic
         self.create_fixture_instance(fixture, test)
     }
-    
+
     /// Create class-scoped fixture with proper class instance management
-    fn create_class_scoped_fixture(&self, fixture: &Fixture, test: &TestItem) -> Result<FixtureValue> {
+    fn create_class_scoped_fixture(
+        &self,
+        fixture: &Fixture,
+        test: &TestItem,
+    ) -> Result<FixtureValue> {
         let start_time = std::time::Instant::now();
-        let class_name = test.class_name.as_ref()
-            .ok_or_else(|| anyhow!("Class name required for class-scoped fixture {}", fixture.name))?;
+        let class_name = test.class_name.as_ref().ok_or_else(|| {
+            anyhow!(
+                "Class name required for class-scoped fixture {}",
+                fixture.name
+            )
+        })?;
 
         // Use PyO3 for class fixture execution when possible
         let value = if self.can_use_pyo3_execution(fixture) {
@@ -1808,8 +1932,12 @@ impl FixtureExecutor {
         };
 
         let duration = start_time.elapsed();
-        trace!("Created class-scoped fixture '{}' for class '{}' in {:?}", 
-               fixture.name, class_name, duration);
+        trace!(
+            "Created class-scoped fixture '{}' for class '{}' in {:?}",
+            fixture.name,
+            class_name,
+            duration
+        );
 
         Ok(FixtureValue {
             name: fixture.name.clone(),
@@ -1830,7 +1958,7 @@ impl FixtureExecutor {
             json_fallback_uses: 0,
         })
     }
-    
+
     /// Execute class-scoped fixture using PyO3 with class management
     fn execute_class_fixture_pyo3(
         &self,
@@ -1842,27 +1970,43 @@ impl FixtureExecutor {
             let mut runtime = self.python_runtime.lock();
 
             // Import the module containing the fixture
-            let module_obj = runtime.get_or_import_module(py, &fixture.func_path)
-                .map_err(|e| anyhow!("Failed to import module for class fixture '{}': {}", fixture.name, e))?;
+            let module_obj = runtime
+                .get_or_import_module(py, &fixture.func_path)
+                .map_err(|e| {
+                    anyhow!(
+                        "Failed to import module for class fixture '{}': {}",
+                        fixture.name,
+                        e
+                    )
+                })?;
 
             // Get or create class instance
-            let class_instance = self.class_manager.get_or_create_class_instance(
-                py, class_name, &module_obj
-            ).map_err(|e| anyhow!("Failed to get class instance for {}: {}", class_name, e))?;
+            let class_instance = self
+                .class_manager
+                .get_or_create_class_instance(py, class_name, &module_obj)
+                .map_err(|e| anyhow!("Failed to get class instance for {}: {}", class_name, e))?;
 
             // Get the fixture function
-            let module: &PyModule = module_obj.downcast(py)
+            let module: &PyModule = module_obj
+                .downcast(py)
                 .map_err(|e| anyhow!("Module object is not a PyModule: {}", e))?;
-            let fixture_fn = module.getattr(&*fixture.name)
-                .map_err(|e| anyhow!("Class fixture '{}' not found in module: {}", fixture.name, e))?;
+            let fixture_fn = module.getattr(&*fixture.name).map_err(|e| {
+                anyhow!(
+                    "Class fixture '{}' not found in module: {}",
+                    fixture.name,
+                    e
+                )
+            })?;
 
             // Check if this is a @classmethod fixture
             if self.is_classmethod_fixture(&fixture.name) {
-                let result_obj = self.class_manager.get_or_create_classmethod_fixture(
-                    py, &fixture.name, class_name, fixture_fn
-                ).map_err(|e| anyhow!("Failed to execute @classmethod fixture: {}", e))?;
-                
-                return runtime.python_to_json(py, &result_obj)
+                let result_obj = self
+                    .class_manager
+                    .get_or_create_classmethod_fixture(py, &fixture.name, class_name, fixture_fn)
+                    .map_err(|e| anyhow!("Failed to execute @classmethod fixture: {}", e))?;
+
+                return runtime
+                    .python_to_json(py, &result_obj)
                     .map_err(|e| anyhow!("Failed to convert @classmethod fixture result: {}", e));
             }
 
@@ -1871,14 +2015,16 @@ impl FixtureExecutor {
             // Add 'self' parameter for instance methods
             kwargs.set_item("self", class_instance.instance.as_ref(py))?;
 
-            let result = fixture_fn.call((), Some(kwargs))
+            let result = fixture_fn
+                .call((), Some(kwargs))
                 .map_err(|e| anyhow!("Class fixture '{}' execution failed: {}", fixture.name, e))?;
 
-            runtime.python_to_json(py, &result.into())
+            runtime
+                .python_to_json(py, &result.into())
                 .map_err(|e| anyhow!("Failed to convert class fixture result: {}", e))
         })
     }
-    
+
     /// Execute class-scoped fixture using subprocess (fallback)
     fn execute_class_fixture_subprocess(
         &self,
@@ -1887,8 +2033,9 @@ impl FixtureExecutor {
         class_name: &str,
     ) -> Result<serde_json::Value> {
         // Generate enhanced code for class fixtures
-        let execution_code = self.generate_class_fixture_execution_code(fixture, test, class_name)?;
-        
+        let execution_code =
+            self.generate_class_fixture_execution_code(fixture, test, class_name)?;
+
         let mut command = std::process::Command::new("python");
         command
             .arg("-c")
@@ -1897,21 +2044,23 @@ impl FixtureExecutor {
             .env("FASTEST_CLASS_NAME", class_name)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        
-        let output = command.output()
+
+        let output = command
+            .output()
             .map_err(|e| anyhow!("Failed to execute class fixture subprocess: {}", e))?;
-        
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(anyhow!(
-                "Class fixture '{}' execution failed: {}", 
-                fixture.name, stderr.trim()
+                "Class fixture '{}' execution failed: {}",
+                fixture.name,
+                stderr.trim()
             ));
         }
-        
+
         self.parse_subprocess_output(&output.stdout, &fixture.name)
     }
-    
+
     /// Generate Python code for class fixture execution
     fn generate_class_fixture_execution_code(
         &self,
@@ -1920,7 +2069,7 @@ impl FixtureExecutor {
         class_name: &str,
     ) -> Result<String> {
         let mut code = String::with_capacity(2048);
-        
+
         write!(
             &mut code,
             r#"
@@ -1984,10 +2133,10 @@ finally:
             class_name,
             fixture.name
         )?;
-        
+
         Ok(code)
     }
-    
+
     /// Check if a fixture is a @classmethod fixture
     fn is_classmethod_fixture(&self, fixture_name: &str) -> bool {
         // This would ideally check the fixture metadata or decorators
@@ -2064,7 +2213,7 @@ finally:
         if self.python_runtime.lock().common_modules.is_empty() {
             return false;
         }
-        
+
         // Use performance tracker for adaptive decision making
         {
             let mut tracker = self.performance_tracker.lock();
@@ -2081,31 +2230,40 @@ finally:
     ) -> Result<serde_json::Value> {
         let start_time = std::time::Instant::now();
         let mut execution_success = false;
-        
+
         let result = Python::with_gil(|py| -> Result<(serde_json::Value, Option<PyObject>)> {
             // Get runtime manager and update stats
             let mut runtime = self.python_runtime.lock();
             runtime.stats.pyo3_executions += 1;
             let interpreter_id = runtime.get_interpreter_id(py);
             drop(runtime); // Release lock early for better performance
-            
+
             // 1. Import the fixture module using advanced caching
             let mut runtime = self.python_runtime.lock();
-            let module_obj = runtime.get_or_import_module(py, &fixture.func_path)
-                .map_err(|e| anyhow!("Failed to import module for fixture '{}': {}", fixture.name, e))?;
+            let module_obj = runtime
+                .get_or_import_module(py, &fixture.func_path)
+                .map_err(|e| {
+                    anyhow!(
+                        "Failed to import module for fixture '{}': {}",
+                        fixture.name,
+                        e
+                    )
+                })?;
             drop(runtime); // Release lock early
-            
+
             // 2. Get the fixture function
-            let module: &PyModule = module_obj.downcast(py)
+            let module: &PyModule = module_obj
+                .downcast(py)
                 .map_err(|e| anyhow!("Module object is not a PyModule: {}", e))?;
-            let fixture_fn = module.getattr(&*fixture.name)
+            let fixture_fn = module
+                .getattr(&*fixture.name)
                 .map_err(|e| anyhow!("Fixture '{}' not found in module: {}", fixture.name, e))?;
-            
+
             // 🚀 PERFORMANCE: 3. Convert dependency values with PyObject caching optimization
             let kwargs = PyDict::new(py);
             let mut cache_hits = 0u64;
             let mut cache_misses = 0u64;
-            
+
             for (key, value) in &dep_values {
                 // Try to get cached PyObject for this dependency first
                 let cache_key = FixtureCacheKey {
@@ -2114,82 +2272,100 @@ finally:
                     scope: FixtureScope::Function,
                     param_id: None,
                 };
-                
+
                 let py_value = if let Some(mut cached_fixture) = self.cache.get_mut(&cache_key) {
-                    if let Some(cached_pyobj) = cached_fixture.get_cached_pyobject(&interpreter_id) {
+                    if let Some(cached_pyobj) = cached_fixture.get_cached_pyobject(&interpreter_id)
+                    {
                         cache_hits += 1;
                         trace!("🚀 PyObject cache HIT for dependency '{}' - skipping JSON deserialization", key);
                         cached_pyobj.as_ref().clone_ref(py)
                     } else {
                         cache_misses += 1;
-                        trace!("PyObject cache miss for dependency '{}' - using JSON conversion", key);
+                        trace!(
+                            "PyObject cache miss for dependency '{}' - using JSON conversion",
+                            key
+                        );
                         let runtime = self.python_runtime.lock();
-                        runtime.json_to_python(py, value)
+                        runtime
+                            .json_to_python(py, value)
                             .map_err(|e| anyhow!("Failed to convert dependency '{}': {}", key, e))?
                     }
                 } else {
                     cache_misses += 1;
                     let runtime = self.python_runtime.lock();
-                    runtime.json_to_python(py, value)
+                    runtime
+                        .json_to_python(py, value)
                         .map_err(|e| anyhow!("Failed to convert dependency '{}': {}", key, e))?
                 };
-                
+
                 kwargs.set_item(key, py_value)?;
             }
-            
+
             if cache_hits > 0 {
-                debug!("🚀 PyObject cache performance: {} hits, {} misses ({:.1}% hit rate)", 
-                       cache_hits, cache_misses, 
-                       cache_hits as f64 / (cache_hits + cache_misses) as f64 * 100.0);
+                debug!(
+                    "🚀 PyObject cache performance: {} hits, {} misses ({:.1}% hit rate)",
+                    cache_hits,
+                    cache_misses,
+                    cache_hits as f64 / (cache_hits + cache_misses) as f64 * 100.0
+                );
             }
-            
+
             // 4. Check if this is a generator function (yield fixture)
             let runtime = self.python_runtime.lock();
             let inspect_module = &runtime.common_modules["inspect"];
-            let is_generator_fn = inspect_module.getattr(py, "isgeneratorfunction")?
+            let is_generator_fn = inspect_module
+                .getattr(py, "isgeneratorfunction")?
                 .call1(py, (fixture_fn,))?
                 .extract::<bool>(py)?;
             drop(runtime); // Release lock early
-            
+
             // 5. Execute the fixture function and cache the PyObject result
             let (result_json, cached_pyobj) = if is_generator_fn {
                 // Handle generator fixtures (yield fixtures)
                 let mut runtime = self.python_runtime.lock();
-                let json_result = self.execute_generator_fixture_pyo3(py, fixture, fixture_fn, kwargs, &mut runtime)?;
+                let json_result = self.execute_generator_fixture_pyo3(
+                    py,
+                    fixture,
+                    fixture_fn,
+                    kwargs,
+                    &mut runtime,
+                )?;
                 drop(runtime);
                 (json_result, None) // Generators are more complex to cache
             } else {
                 // Handle regular fixtures
-                let py_result = fixture_fn.call((), Some(kwargs))
+                let py_result = fixture_fn
+                    .call((), Some(kwargs))
                     .map_err(|e| anyhow!("Fixture '{}' execution failed: {}", fixture.name, e))?;
-                
+
                 // 🚀 PERFORMANCE: Cache the PyObject before converting to JSON
                 let py_obj: PyObject = py_result.into();
                 let cached_obj = Some(py_obj.clone());
-                
+
                 // Convert result to JSON for backward compatibility
                 let runtime = self.python_runtime.lock();
-                let json_result = runtime.python_to_json(py, &py_obj)
+                let json_result = runtime
+                    .python_to_json(py, &py_obj)
                     .map_err(|e| anyhow!("Failed to convert result from Python: {}", e))?;
                 drop(runtime);
-                
+
                 (json_result, cached_obj)
             };
-            
+
             execution_success = true;
             Ok((result_json, cached_pyobj))
         });
-        
+
         // Handle the result and cache PyObject if available
         let (json_result, pyobj_to_cache) = result?;
-        
+
         // 🚀 PERFORMANCE: Cache the PyObject for future reuse (if applicable)
         if let Some(py_obj) = pyobj_to_cache {
             let interpreter_id = Python::with_gil(|py| {
                 let runtime = self.python_runtime.lock();
                 runtime.get_interpreter_id(py)
             });
-            
+
             // Create cache key for this fixture result
             let cache_key = FixtureCacheKey {
                 name: fixture.name.clone(),
@@ -2197,24 +2373,24 @@ finally:
                 scope: fixture.scope.clone(),
                 param_id: None,
             };
-            
+
             // Cache the PyObject in the existing FixtureValue if it exists
             if let Some(mut cached_fixture) = self.cache.get_mut(&cache_key) {
                 cached_fixture.cache_pyobject(py_obj, interpreter_id);
                 trace!("🚀 Cached PyObject for fixture '{}' - future reuse will skip JSON serialization", fixture.name);
             }
         }
-        
+
         // Record performance metrics
         let execution_time = start_time.elapsed();
         {
             let mut tracker = self.performance_tracker.lock();
             tracker.record_pyo3_execution(execution_time, execution_success);
         }
-        
+
         Ok(json_result)
     }
-    
+
     /// Execute a generator fixture (yield fixture) with proper teardown handling
     fn execute_generator_fixture_pyo3(
         &self,
@@ -2225,14 +2401,20 @@ finally:
         runtime: &mut PythonRuntimeManager,
     ) -> Result<serde_json::Value> {
         // Call the generator function
-        let generator = fixture_fn.call((), Some(kwargs))
+        let generator = fixture_fn
+            .call((), Some(kwargs))
             .map_err(|e| anyhow!("Generator fixture '{}' call failed: {}", fixture.name, e))?;
-        
+
         // Get the yielded value
         let next_fn = generator.getattr("__next__")?;
-        let yielded_value = next_fn.call0()
-            .map_err(|e| anyhow!("Generator fixture '{}' failed to yield: {}", fixture.name, e))?;
-        
+        let yielded_value = next_fn.call0().map_err(|e| {
+            anyhow!(
+                "Generator fixture '{}' failed to yield: {}",
+                fixture.name,
+                e
+            )
+        })?;
+
         // Store the generator for teardown
         let cache_key = FixtureCacheKey::new(
             fixture.name.clone(),
@@ -2240,14 +2422,15 @@ finally:
             "current_scope".to_string(), // TODO: proper scope ID
             None,
         );
-        
+
         self.generator_teardown_stack
             .entry("current_scope".to_string())
             .or_insert_with(Vec::new)
             .push((cache_key, generator.into()));
-        
+
         // Convert the yielded value to JSON
-        runtime.python_to_json(py, &yielded_value.into())
+        runtime
+            .python_to_json(py, &yielded_value.into())
             .map_err(|e| anyhow!("Failed to convert generator result: {}", e))
     }
 
@@ -2260,17 +2443,24 @@ finally:
         dep_values: HashMap<String, serde_json::Value>,
     ) -> Result<serde_json::Value> {
         let start_time = std::time::Instant::now();
-        
+
         // Try daemon pool first (2-5ms execution time)
         let result = if self.daemon_pool.config.pool_size > 0 {
-            trace!("🚀 Using daemon pool for fixture '{}' - ultra-fast execution", fixture.name);
-            self.daemon_pool.execute_fixture(&fixture.name, &fixture.func_path, dep_values)
+            trace!(
+                "🚀 Using daemon pool for fixture '{}' - ultra-fast execution",
+                fixture.name
+            );
+            self.daemon_pool
+                .execute_fixture(&fixture.name, &fixture.func_path, dep_values)
         } else {
             // Fallback to legacy subprocess execution (40-60ms)
-            trace!("Using legacy subprocess for fixture '{}' - daemon pool unavailable", fixture.name);
+            trace!(
+                "Using legacy subprocess for fixture '{}' - daemon pool unavailable",
+                fixture.name
+            );
             self.execute_subprocess_with_timeout(fixture, dep_values)
         };
-        
+
         // Record performance metrics for adaptive optimization
         let execution_time = start_time.elapsed();
         {
@@ -2278,15 +2468,19 @@ finally:
             let execution_success = result.is_ok();
             tracker.record_subprocess_execution(execution_time, execution_success);
         }
-        
+
         if result.is_ok() {
-            debug!("🚀 Subprocess fixture '{}' completed in {:?} (daemon pool: {})", 
-                   fixture.name, execution_time, self.daemon_pool.config.pool_size > 0);
+            debug!(
+                "🚀 Subprocess fixture '{}' completed in {:?} (daemon pool: {})",
+                fixture.name,
+                execution_time,
+                self.daemon_pool.config.pool_size > 0
+            );
         }
-        
+
         result
     }
-    
+
     /// Execute subprocess with advanced timeout and resource management
     fn execute_subprocess_with_timeout(
         &self,
@@ -2295,11 +2489,13 @@ finally:
     ) -> Result<serde_json::Value> {
         // Generate optimized execution code with proper error handling
         let execution_code = self.generate_fixture_execution_code(fixture, &dep_values)?;
-        
+
         // Acquire semaphore to limit concurrent subprocess execution
-        let _permit = self.execution_semaphore.try_acquire()
+        let _permit = self
+            .execution_semaphore
+            .try_acquire()
             .map_err(|_| anyhow!("Too many concurrent subprocess executions, system overloaded"))?;
-        
+
         // Enhanced subprocess execution with timeout and resource limits
         let mut command = std::process::Command::new("python");
         command
@@ -2309,49 +2505,71 @@ finally:
             .env("FASTEST_FIXTURE_TIMEOUT", "30") // 30 second timeout
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
-        
+
         // Execute with proper timeout handling
-        let output = command.output()
+        let output = command
+            .output()
             .map_err(|e| anyhow!("Failed to execute fixture subprocess: {}", e))?;
-        
+
         // Enhanced error handling with detailed diagnostics
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            
+
             // Check for specific error patterns
             if stderr.contains("timeout") || stderr.contains("TimeoutError") {
-                return Err(anyhow!("Fixture '{}' execution timed out after 30 seconds", fixture.name));
+                return Err(anyhow!(
+                    "Fixture '{}' execution timed out after 30 seconds",
+                    fixture.name
+                ));
             }
             if stderr.contains("MemoryError") {
-                return Err(anyhow!("Fixture '{}' execution failed due to memory exhaustion", fixture.name));
+                return Err(anyhow!(
+                    "Fixture '{}' execution failed due to memory exhaustion",
+                    fixture.name
+                ));
             }
             if stderr.contains("ImportError") || stderr.contains("ModuleNotFoundError") {
-                return Err(anyhow!("Fixture '{}' execution failed due to missing dependencies: {}", fixture.name, stderr.trim()));
+                return Err(anyhow!(
+                    "Fixture '{}' execution failed due to missing dependencies: {}",
+                    fixture.name,
+                    stderr.trim()
+                ));
             }
-            
+
             return Err(anyhow!(
-                "Fixture '{}' execution failed (exit code: {:?}):\nSTDERR: {}\nSTDOUT: {}", 
-                fixture.name, output.status.code(), stderr.trim(), stdout.trim()
+                "Fixture '{}' execution failed (exit code: {:?}):\nSTDERR: {}\nSTDOUT: {}",
+                fixture.name,
+                output.status.code(),
+                stderr.trim(),
+                stdout.trim()
             ));
         }
-        
+
         // Enhanced result parsing with fallback strategies
         self.parse_subprocess_output(&output.stdout, &fixture.name)
     }
-    
+
     /// Parse subprocess output with enhanced error recovery
-    fn parse_subprocess_output(&self, stdout: &[u8], fixture_name: &str) -> Result<serde_json::Value> {
+    fn parse_subprocess_output(
+        &self,
+        stdout: &[u8],
+        fixture_name: &str,
+    ) -> Result<serde_json::Value> {
         // Try MessagePack first (most efficient)
-        if stdout.starts_with(b"\x82") || stdout.starts_with(b"\x83") || stdout.starts_with(b"\x84") {
+        if stdout.starts_with(b"\x82") || stdout.starts_with(b"\x83") || stdout.starts_with(b"\x84")
+        {
             match rmp_serde::from_slice(stdout) {
                 Ok(value) => return Ok(value),
                 Err(e) => {
-                    debug!("MessagePack parsing failed for fixture '{}', trying JSON: {}", fixture_name, e);
+                    debug!(
+                        "MessagePack parsing failed for fixture '{}', trying JSON: {}",
+                        fixture_name, e
+                    );
                 }
             }
         }
-        
+
         // Try SIMD JSON parsing
         let stdout_str = String::from_utf8_lossy(stdout);
         match simd_json::from_str(&stdout_str) {
@@ -2369,7 +2587,7 @@ finally:
                         }
                     }
                 }
-                
+
                 // Last resort: wrap the output as a string value
                 if !stdout_str.trim().is_empty() {
                     Ok(serde_json::Value::String(stdout_str.trim().to_string()))
@@ -2390,9 +2608,18 @@ finally:
     }
 
     /// Generate optimized Python code to execute a fixture
-    fn generate_fixture_execution_code(&self, fixture: &Fixture, dependency_values: &HashMap<String, serde_json::Value>) -> Result<String> {
+    fn generate_fixture_execution_code(
+        &self,
+        fixture: &Fixture,
+        dependency_values: &HashMap<String, serde_json::Value>,
+    ) -> Result<String> {
         // Check code cache first
-        let cache_key = format!("fixture-{}-{:?}-deps-{}", fixture.name, fixture.func_path, fixture.dependencies.join(","));
+        let cache_key = format!(
+            "fixture-{}-{:?}-deps-{}",
+            fixture.name,
+            fixture.func_path,
+            fixture.dependencies.join(",")
+        );
         if let Some(cached_code) = self.code_cache.get(&cache_key) {
             return Ok(cached_code.clone());
         }
@@ -2603,7 +2830,8 @@ existing_fixtures = {}
 "#,
             test_dir,
             module_name,
-            simd_json::to_string(existing_values).map_err(|e| anyhow!("Failed to serialize existing values: {}", e))?
+            simd_json::to_string(existing_values)
+                .map_err(|e| anyhow!("Failed to serialize existing values: {}", e))?
         )?;
 
         // Add code to execute each fixture
@@ -2668,19 +2896,22 @@ except Exception as e:
     /// Comprehensive fixture cleanup with advanced teardown logic (enhanced with class management)
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         let cleanup_start = std::time::Instant::now();
-        
+
         // Handle class-specific cleanup first
         if scope == FixtureScope::Class {
             Python::with_gil(|py| {
                 if let Err(e) = self.class_manager.cleanup_class_instances(py, scope_id) {
-                    eprintln!("Warning: Class instance cleanup failed for {}: {}", scope_id, e);
+                    eprintln!(
+                        "Warning: Class instance cleanup failed for {}: {}",
+                        scope_id, e
+                    );
                 }
             });
         }
-        
+
         // Find fixtures to cleanup with proper ordering
         let mut keys_to_remove = Vec::new();
-        
+
         // Check enhanced cache first
         self.enhanced_cache.iter().for_each(|entry| {
             let key = entry.key();
@@ -2688,7 +2919,7 @@ except Exception as e:
                 keys_to_remove.push(key.clone());
             }
         });
-        
+
         // Also check regular cache
         self.cache.iter().for_each(|entry| {
             let key = entry.key();
@@ -2700,19 +2931,26 @@ except Exception as e:
         });
 
         if keys_to_remove.is_empty() {
-            debug!("No fixtures to cleanup for scope {:?} with id '{}'", scope, scope_id);
+            debug!(
+                "No fixtures to cleanup for scope {:?} with id '{}'",
+                scope, scope_id
+            );
             return Ok(());
         }
-        
-        debug!("Cleaning up {} fixtures for scope {:?} with id '{}' (class-aware)", 
-               keys_to_remove.len(), scope, scope_id);
+
+        debug!(
+            "Cleaning up {} fixtures for scope {:?} with id '{}' (class-aware)",
+            keys_to_remove.len(),
+            scope,
+            scope_id
+        );
 
         // Execute PyO3 generator teardowns first (highest priority)
         self.execute_pyo3_generator_teardowns(scope_id)?;
-        
+
         // Execute regular fixture teardowns
         self.execute_regular_fixture_teardowns(scope_id, &keys_to_remove)?;
-        
+
         // Remove fixtures from both caches with performance tracking
         let mut removed_count = 0;
         for key in &keys_to_remove {
@@ -2726,67 +2964,95 @@ except Exception as e:
 
         // Clean up teardown stacks
         self.cleanup_teardown_stacks(&scope, scope_id);
-        
+
         let cleanup_duration = cleanup_start.elapsed();
         debug!(
-            "Enhanced cleanup completed: removed {} fixtures in {:?} for scope {:?}", 
+            "Enhanced cleanup completed: removed {} fixtures in {:?} for scope {:?}",
             removed_count, cleanup_duration, scope
         );
 
         Ok(())
     }
-    
+
     /// Execute PyO3 generator teardowns with proper error handling
     fn execute_pyo3_generator_teardowns(&self, scope_id: &str) -> Result<()> {
         if let Some(generator_teardowns) = self.generator_teardown_stack.get(scope_id) {
             let teardown_items: Vec<_> = generator_teardowns.value().clone();
-            
-            debug!("Executing {} PyO3 generator teardowns for scope '{}'", teardown_items.len(), scope_id);
-            
+
+            debug!(
+                "Executing {} PyO3 generator teardowns for scope '{}'",
+                teardown_items.len(),
+                scope_id
+            );
+
             // Execute generator teardowns in reverse order (LIFO)
             for (cache_key, generator) in teardown_items.into_iter().rev() {
                 match self.execute_generator_teardown(&cache_key, &generator) {
                     Ok(_) => {
-                        trace!("Successfully executed generator teardown for fixture '{}'", cache_key.name);
-                    },
+                        trace!(
+                            "Successfully executed generator teardown for fixture '{}'",
+                            cache_key.name
+                        );
+                    }
                     Err(e) => {
                         // Log error but continue with other teardowns
-                        eprintln!("Warning: Generator teardown failed for fixture '{}': {}", cache_key.name, e);
+                        eprintln!(
+                            "Warning: Generator teardown failed for fixture '{}': {}",
+                            cache_key.name, e
+                        );
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute a single generator teardown using PyO3
-    fn execute_generator_teardown(&self, cache_key: &FixtureCacheKey, generator: &PyObject) -> Result<()> {
+    fn execute_generator_teardown(
+        &self,
+        cache_key: &FixtureCacheKey,
+        generator: &PyObject,
+    ) -> Result<()> {
         Python::with_gil(|py| -> Result<()> {
             let gen_obj = generator.as_ref(py);
-            
+
             // Try to continue the generator to execute teardown code
             match gen_obj.call_method0("__next__") {
                 Ok(_) => {
                     // Generator yielded another value unexpectedly
-                    eprintln!("Warning: Generator fixture '{}' yielded unexpected value during teardown", cache_key.name);
-                },
+                    eprintln!(
+                        "Warning: Generator fixture '{}' yielded unexpected value during teardown",
+                        cache_key.name
+                    );
+                }
                 Err(py_err) => {
                     // Check if it's a StopIteration (expected) or a real error
                     if py_err.is_instance_of::<pyo3::exceptions::PyStopIteration>(py) {
-                        trace!("Generator teardown completed successfully for fixture '{}'", cache_key.name);
+                        trace!(
+                            "Generator teardown completed successfully for fixture '{}'",
+                            cache_key.name
+                        );
                     } else {
-                        return Err(anyhow!("Generator teardown error for fixture '{}': {}", cache_key.name, py_err));
+                        return Err(anyhow!(
+                            "Generator teardown error for fixture '{}': {}",
+                            cache_key.name,
+                            py_err
+                        ));
                     }
                 }
             }
-            
+
             Ok(())
         })
     }
-    
+
     /// Execute regular fixture teardowns (non-generator)
-    fn execute_regular_fixture_teardowns(&self, scope_id: &str, keys_to_remove: &[FixtureCacheKey]) -> Result<()> {
+    fn execute_regular_fixture_teardowns(
+        &self,
+        scope_id: &str,
+        keys_to_remove: &[FixtureCacheKey],
+    ) -> Result<()> {
         if let Some(teardown_list) = self.teardown_stack.get(scope_id) {
             let teardown_items: Vec<_> = teardown_list
                 .iter()
@@ -2794,31 +3060,45 @@ except Exception as e:
                 .cloned()
                 .collect();
 
-            debug!("Executing {} regular fixture teardowns for scope '{}'", teardown_items.len(), scope_id);
+            debug!(
+                "Executing {} regular fixture teardowns for scope '{}'",
+                teardown_items.len(),
+                scope_id
+            );
 
             // Execute teardowns in reverse order (LIFO) for proper dependency cleanup
             for (cache_key, teardown_code) in teardown_items.into_iter().rev() {
                 match self.execute_teardown_code(&cache_key, &teardown_code) {
                     Ok(_) => {
-                        trace!("Successfully executed teardown for fixture '{}'", cache_key.name);
-                    },
+                        trace!(
+                            "Successfully executed teardown for fixture '{}'",
+                            cache_key.name
+                        );
+                    }
                     Err(e) => {
                         // Log error but continue with other teardowns
-                        eprintln!("Warning: Teardown failed for fixture '{}': {}", cache_key.name, e);
+                        eprintln!(
+                            "Warning: Teardown failed for fixture '{}': {}",
+                            cache_key.name, e
+                        );
                     }
                 }
             }
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute teardown code using the most appropriate method
-    fn execute_teardown_code(&self, cache_key: &FixtureCacheKey, teardown_code: &str) -> Result<()> {
+    fn execute_teardown_code(
+        &self,
+        cache_key: &FixtureCacheKey,
+        teardown_code: &str,
+    ) -> Result<()> {
         if teardown_code.trim().is_empty() {
             return Ok(());
         }
-        
+
         // Try PyO3 execution first for better performance
         if self.can_use_pyo3_for_teardown(teardown_code) {
             self.execute_teardown_pyo3(cache_key, teardown_code)
@@ -2827,18 +3107,22 @@ except Exception as e:
             self.execute_teardown_subprocess(cache_key, teardown_code)
         }
     }
-    
+
     /// Check if teardown code can be executed using PyO3
     fn can_use_pyo3_for_teardown(&self, teardown_code: &str) -> bool {
         // Simple heuristics for PyO3 compatibility
-        !teardown_code.contains("subprocess") &&
-        !teardown_code.contains("os.system") &&
-        !teardown_code.contains("exec") &&
-        teardown_code.len() < 1000 // Avoid very complex teardowns
+        !teardown_code.contains("subprocess")
+            && !teardown_code.contains("os.system")
+            && !teardown_code.contains("exec")
+            && teardown_code.len() < 1000 // Avoid very complex teardowns
     }
-    
+
     /// Execute teardown code using PyO3
-    fn execute_teardown_pyo3(&self, cache_key: &FixtureCacheKey, teardown_code: &str) -> Result<()> {
+    fn execute_teardown_pyo3(
+        &self,
+        cache_key: &FixtureCacheKey,
+        teardown_code: &str,
+    ) -> Result<()> {
         Python::with_gil(|py| -> Result<()> {
             // Get or create a teardown module
             let teardown_module_code = format!(
@@ -2857,27 +3141,42 @@ def execute_teardown():
 # Execute teardown
 execute_teardown()
 "#,
-                teardown_code.lines()
+                teardown_code
+                    .lines()
                     .map(|line| format!("        {}", line))
                     .collect::<Vec<_>>()
                     .join("\n"),
                 cache_key.name
             );
-            
-            match PyModule::from_code(py, &teardown_module_code, "teardown_module", "teardown_module") {
+
+            match PyModule::from_code(
+                py,
+                &teardown_module_code,
+                "teardown_module",
+                "teardown_module",
+            ) {
                 Ok(_) => {
-                    trace!("PyO3 teardown executed successfully for fixture '{}'", cache_key.name);
+                    trace!(
+                        "PyO3 teardown executed successfully for fixture '{}'",
+                        cache_key.name
+                    );
                     Ok(())
-                },
-                Err(e) => {
-                    Err(anyhow!("PyO3 teardown execution failed for fixture '{}': {}", cache_key.name, e))
                 }
+                Err(e) => Err(anyhow!(
+                    "PyO3 teardown execution failed for fixture '{}': {}",
+                    cache_key.name,
+                    e
+                )),
             }
         })
     }
-    
+
     /// Execute teardown code using subprocess
-    fn execute_teardown_subprocess(&self, cache_key: &FixtureCacheKey, teardown_code: &str) -> Result<()> {
+    fn execute_teardown_subprocess(
+        &self,
+        cache_key: &FixtureCacheKey,
+        teardown_code: &str,
+    ) -> Result<()> {
         let teardown_script = format!(
             r#"
 import sys
@@ -2890,37 +3189,61 @@ except Exception as e:
     traceback.print_exc(file=sys.stderr)
     sys.exit(1)
 "#,
-            teardown_code.lines()
+            teardown_code
+                .lines()
                 .map(|line| format!("    {}", line))
                 .collect::<Vec<_>>()
                 .join("\n"),
             cache_key.name
         );
-        
+
         let output = std::process::Command::new("python")
             .arg("-c")
             .arg(&teardown_script)
             .output()
-            .map_err(|e| anyhow!("Failed to execute teardown subprocess for fixture '{}': {}", cache_key.name, e))?;
-        
+            .map_err(|e| {
+                anyhow!(
+                    "Failed to execute teardown subprocess for fixture '{}': {}",
+                    cache_key.name,
+                    e
+                )
+            })?;
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(anyhow!("Teardown subprocess failed for fixture '{}': {}", cache_key.name, stderr));
+            return Err(anyhow!(
+                "Teardown subprocess failed for fixture '{}': {}",
+                cache_key.name,
+                stderr
+            ));
         }
-        
-        trace!("Subprocess teardown executed successfully for fixture '{}'", cache_key.name);
+
+        trace!(
+            "Subprocess teardown executed successfully for fixture '{}'",
+            cache_key.name
+        );
         Ok(())
     }
-    
+
     /// Clean up teardown stacks after fixture cleanup
     fn cleanup_teardown_stacks(&self, scope: &FixtureScope, scope_id: &str) {
         // Clean up regular teardown stack
-        if *scope == FixtureScope::Session || self.teardown_stack.get(scope_id).map_or(false, |list| list.is_empty()) {
+        if *scope == FixtureScope::Session
+            || self
+                .teardown_stack
+                .get(scope_id)
+                .map_or(false, |list| list.is_empty())
+        {
             self.teardown_stack.remove(scope_id);
         }
-        
+
         // Clean up generator teardown stack
-        if *scope == FixtureScope::Session || self.generator_teardown_stack.get(scope_id).map_or(false, |list| list.is_empty()) {
+        if *scope == FixtureScope::Session
+            || self
+                .generator_teardown_stack
+                .get(scope_id)
+                .map_or(false, |list| list.is_empty())
+        {
             self.generator_teardown_stack.remove(scope_id);
         }
     }
@@ -2984,20 +3307,23 @@ except Exception as e:
             let value = entry.value();
             *stats_by_scope.entry(key.scope.clone()).or_insert(0) += 1;
             total_cached += 1;
-            
+
             // Estimate memory usage
-            total_memory_usage += std::mem::size_of_val(entry.key()) + std::mem::size_of_val(entry.value())
-                + key.name.len() 
+            total_memory_usage += std::mem::size_of_val(entry.key())
+                + std::mem::size_of_val(entry.value())
+                + key.name.len()
                 + key.scope_id.len()
                 + value.name.len()
                 + simd_json::to_string(&value.value).unwrap_or_default().len();
         });
 
         // Calculate cache hit rate from access counts
-        let total_accesses: u64 = self.cache.iter()
+        let total_accesses: u64 = self
+            .cache
+            .iter()
             .map(|entry| entry.value().access_count)
             .sum();
-        
+
         if total_cached > 0 && total_accesses > 0 {
             cache_hit_rate = (total_accesses as f64 - total_cached as f64) / total_accesses as f64;
         }
@@ -3016,79 +3342,95 @@ except Exception as e:
             cache_hit_rate,
         }
     }
-    
+
     /// Advanced cache warming with intelligent preloading
     pub fn warm_cache_intelligently(&self, test_suite: &[TestItem], common_fixtures: &[&str]) {
-        debug!("Starting intelligent cache warming for {} tests with {} common fixtures", 
-               test_suite.len(), common_fixtures.len());
-        
+        debug!(
+            "Starting intelligent cache warming for {} tests with {} common fixtures",
+            test_suite.len(),
+            common_fixtures.len()
+        );
+
         let warming_start = std::time::Instant::now();
-        
+
         // Analyze fixture usage patterns across the test suite
         let fixture_usage = self.analyze_fixture_usage_patterns(test_suite);
-        
+
         // Pre-warm high-frequency fixtures
         for (fixture_name, usage_count) in fixture_usage.iter() {
-            if *usage_count >= 3 { // Warm fixtures used by 3+ tests
+            if *usage_count >= 3 {
+                // Warm fixtures used by 3+ tests
                 if let Some(fixture) = self.dependency_resolver.fixture_registry.get(fixture_name) {
-                    if let Ok(code) = self.generate_fixture_execution_code(fixture, &HashMap::new()) {
+                    if let Ok(code) = self.generate_fixture_execution_code(fixture, &HashMap::new())
+                    {
                         self.code_cache.insert(
                             format!("fixture-{}-{:?}-deps-", fixture.name, fixture.func_path),
-                            code
+                            code,
                         );
-                        trace!("Pre-generated code for high-usage fixture '{}'" , fixture_name);
+                        trace!(
+                            "Pre-generated code for high-usage fixture '{}'",
+                            fixture_name
+                        );
                     }
                 }
             }
         }
-        
+
         // Warm common built-in fixtures
         self.warm_cache(common_fixtures);
-        
+
         let warming_duration = warming_start.elapsed();
         debug!("Cache warming completed in {:?}", warming_duration);
     }
-    
+
     /// Analyze fixture usage patterns to optimize caching
     fn analyze_fixture_usage_patterns(&self, test_suite: &[TestItem]) -> HashMap<String, usize> {
         let mut fixture_usage = HashMap::new();
-        
+
         for test in test_suite {
             for fixture_dep in &test.fixture_deps {
                 *fixture_usage.entry(fixture_dep.clone()).or_insert(0) += 1;
             }
-            
+
             // Also count autouse fixtures
             let autouse_fixtures = self.get_autouse_fixtures(test);
             for fixture_name in autouse_fixtures {
                 *fixture_usage.entry(fixture_name).or_insert(0) += 1;
             }
         }
-        
+
         fixture_usage
     }
-    
+
     /// Intelligent cache eviction based on usage patterns and memory pressure
     pub fn intelligent_cache_eviction(&self, target_size: usize, memory_pressure: bool) {
         let current_stats = self.get_cache_stats();
-        
+
         if current_stats.total_cached <= target_size && !memory_pressure {
             return; // No eviction needed
         }
-        
-        debug!("Starting intelligent cache eviction: current size={}, target={}, memory_pressure={}", 
-               current_stats.total_cached, target_size, memory_pressure);
-        
+
+        debug!(
+            "Starting intelligent cache eviction: current size={}, target={}, memory_pressure={}",
+            current_stats.total_cached, target_size, memory_pressure
+        );
+
         // Collect cache entries with usage statistics
-        let mut cache_entries: Vec<(FixtureCacheKey, std::time::SystemTime, u64, FixtureScope)> = 
-            self.cache.iter()
+        let mut cache_entries: Vec<(FixtureCacheKey, std::time::SystemTime, u64, FixtureScope)> =
+            self.cache
+                .iter()
                 .map(|entry| {
                     let key = entry.key().clone();
                     let value = entry.value();
-                    (key, value.last_accessed, value.access_count, value.scope.clone())
+                    (
+                        key,
+                        value.last_accessed,
+                        value.access_count,
+                        value.scope.clone(),
+                    )
                 })
                 .collect();
-        
+
         // Sort by eviction priority (function scope first, then by access patterns)
         cache_entries.sort_by(|a, b| {
             // Primary: scope priority (function < class < module < session)
@@ -3099,29 +3441,29 @@ except Exception as e:
                 FixtureScope::Session => 3,
                 FixtureScope::Package => 2, // Same priority as module
             };
-            
+
             let scope_cmp = scope_priority(&a.3).cmp(&scope_priority(&b.3));
             if scope_cmp != std::cmp::Ordering::Equal {
                 return scope_cmp;
             }
-            
+
             // Secondary: access count (lower is better for eviction)
             let access_cmp = a.2.cmp(&b.2);
             if access_cmp != std::cmp::Ordering::Equal {
                 return access_cmp;
             }
-            
+
             // Tertiary: last accessed time (older is better for eviction)
             a.1.cmp(&b.1)
         });
-        
+
         // Calculate how many to evict
         let entries_to_evict = if memory_pressure {
             current_stats.total_cached / 3 // Evict 1/3 under memory pressure
         } else {
             current_stats.total_cached - target_size
         };
-        
+
         // Evict entries
         let mut evicted_count = 0;
         for (cache_key, _, _, _) in cache_entries.into_iter().take(entries_to_evict) {
@@ -3130,41 +3472,57 @@ except Exception as e:
                 trace!("Evicted fixture '{}' from cache", cache_key.name);
             }
         }
-        
-        debug!("Cache eviction completed: evicted {} entries", evicted_count);
+
+        debug!(
+            "Cache eviction completed: evicted {} entries",
+            evicted_count
+        );
     }
-    
+
     /// Get comprehensive performance metrics for monitoring and optimization (enhanced with class metrics)
     pub fn get_performance_metrics(&self) -> FixturePerformanceMetrics {
         let cache_stats = self.get_cache_stats();
-        
+
         // Get performance tracker stats
         let (avg_pyo3_time, avg_subprocess_time, pyo3_success_rate, decisions_made) = {
             let tracker = self.performance_tracker.lock();
             let avg_pyo3 = if !tracker.pyo3_execution_times.is_empty() {
-                tracker.pyo3_execution_times.iter().sum::<std::time::Duration>() / tracker.pyo3_execution_times.len() as u32
+                tracker
+                    .pyo3_execution_times
+                    .iter()
+                    .sum::<std::time::Duration>()
+                    / tracker.pyo3_execution_times.len() as u32
             } else {
                 std::time::Duration::ZERO
             };
-            
+
             let avg_subprocess = if !tracker.subprocess_execution_times.is_empty() {
-                tracker.subprocess_execution_times.iter().sum::<std::time::Duration>() / tracker.subprocess_execution_times.len() as u32
+                tracker
+                    .subprocess_execution_times
+                    .iter()
+                    .sum::<std::time::Duration>()
+                    / tracker.subprocess_execution_times.len() as u32
             } else {
                 std::time::Duration::ZERO
             };
-            
-            (avg_pyo3, avg_subprocess, tracker.pyo3_success_rate, tracker.decisions_made)
+
+            (
+                avg_pyo3,
+                avg_subprocess,
+                tracker.pyo3_success_rate,
+                tracker.decisions_made,
+            )
         };
-        
+
         // Get Python runtime stats
         let runtime_stats = {
             let runtime = self.python_runtime.lock();
             runtime.get_stats()
         };
-        
+
         // Get class management metrics
         let class_metrics = self.class_manager.get_performance_metrics();
-        
+
         FixturePerformanceMetrics {
             cache_stats,
             avg_pyo3_execution_time: avg_pyo3_time,
@@ -3188,78 +3546,95 @@ except Exception as e:
             lifecycle_errors: class_metrics.lifecycle_errors,
         }
     }
-    
+
     /// Optimize fixture execution strategy based on collected metrics
     pub fn optimize_execution_strategy(&self) {
         {
             let mut tracker = self.performance_tracker.lock();
             // Adjust thresholds based on historical performance
             let pyo3_avg = if !tracker.pyo3_execution_times.is_empty() {
-                tracker.pyo3_execution_times.iter().sum::<std::time::Duration>() / tracker.pyo3_execution_times.len() as u32
+                tracker
+                    .pyo3_execution_times
+                    .iter()
+                    .sum::<std::time::Duration>()
+                    / tracker.pyo3_execution_times.len() as u32
             } else {
                 return;
             };
-            
+
             let subprocess_avg = if !tracker.subprocess_execution_times.is_empty() {
-                tracker.subprocess_execution_times.iter().sum::<std::time::Duration>() / tracker.subprocess_execution_times.len() as u32
+                tracker
+                    .subprocess_execution_times
+                    .iter()
+                    .sum::<std::time::Duration>()
+                    / tracker.subprocess_execution_times.len() as u32
             } else {
                 return;
             };
-            
+
             // Update adaptive threshold based on performance differential
             if pyo3_avg < subprocess_avg {
                 // PyO3 is faster, be more aggressive
                 tracker.adaptive_threshold = pyo3_avg + (subprocess_avg - pyo3_avg) / 4;
             } else {
-                // Subprocess is faster, be more conservative  
+                // Subprocess is faster, be more conservative
                 tracker.adaptive_threshold = subprocess_avg + (pyo3_avg - subprocess_avg) / 2;
             }
-            
-            debug!("Updated adaptive threshold to {:?} based on performance data", tracker.adaptive_threshold);
+
+            debug!(
+                "Updated adaptive threshold to {:?} based on performance data",
+                tracker.adaptive_threshold
+            );
         }
     }
-    
+
     /// Perform comprehensive health check and optimization
     pub fn health_check_and_optimize(&self) -> FixtureHealthReport {
         let metrics = self.get_performance_metrics();
         let mut issues = Vec::new();
         let mut recommendations = Vec::new();
-        
+
         // Check cache efficiency
         if metrics.cache_stats.cache_hit_rate < 0.5 {
             issues.push("Low cache hit rate detected".to_string());
             recommendations.push("Consider warming cache more aggressively".to_string());
         }
-        
+
         // Check memory usage
-        if metrics.cache_stats.total_memory_usage > 50 * 1024 * 1024 { // 50MB
+        if metrics.cache_stats.total_memory_usage > 50 * 1024 * 1024 {
+            // 50MB
             issues.push("High memory usage detected".to_string());
             recommendations.push("Consider more aggressive cache eviction".to_string());
         }
-        
+
         // Check PyO3 vs subprocess performance
         if metrics.avg_pyo3_execution_time > metrics.avg_subprocess_execution_time * 2 {
             issues.push("PyO3 execution significantly slower than subprocess".to_string());
             recommendations.push("Review PyO3 execution strategy".to_string());
         }
-        
+
         // Check error rates
         if metrics.pyo3_success_rate < 0.8 {
             issues.push("High PyO3 failure rate detected".to_string());
             recommendations.push("Investigate PyO3 execution failures".to_string());
         }
-        
+
         // Perform optimizations if needed
         if !issues.is_empty() {
             self.optimize_execution_strategy();
-            
-            if metrics.cache_stats.total_memory_usage > 100 * 1024 * 1024 { // 100MB
+
+            if metrics.cache_stats.total_memory_usage > 100 * 1024 * 1024 {
+                // 100MB
                 self.intelligent_cache_eviction(1000, true);
             }
         }
-        
+
         FixtureHealthReport {
-            overall_health: if issues.is_empty() { "Healthy".to_string() } else { "Needs Attention".to_string() },
+            overall_health: if issues.is_empty() {
+                "Healthy".to_string()
+            } else {
+                "Needs Attention".to_string()
+            },
             performance_metrics: metrics,
             issues,
             recommendations,
@@ -3278,7 +3653,9 @@ impl PythonDaemonPool {
     /// Create a new daemon pool with the specified configuration
     pub fn new(config: DaemonPoolConfig) -> Result<Self> {
         let pool = Self {
-            daemons: Arc::new(parking_lot::Mutex::new(Vec::with_capacity(config.pool_size))),
+            daemons: Arc::new(parking_lot::Mutex::new(Vec::with_capacity(
+                config.pool_size,
+            ))),
             available: Arc::new(crossbeam::queue::SegQueue::new()),
             config: config.clone(),
             health_monitor: Arc::new(parking_lot::Mutex::new(DaemonHealthMonitor::default())),
@@ -3286,8 +3663,11 @@ impl PythonDaemonPool {
 
         // Spawn initial daemon processes
         pool.spawn_daemons(config.pool_size)?;
-        
-        debug!("🚀 Python daemon pool initialized with {} daemons", config.pool_size);
+
+        debug!(
+            "🚀 Python daemon pool initialized with {} daemons",
+            config.pool_size
+        );
         Ok(pool)
     }
 
@@ -3296,7 +3676,10 @@ impl PythonDaemonPool {
         Self {
             daemons: Arc::new(parking_lot::Mutex::new(Vec::new())),
             available: Arc::new(crossbeam::queue::SegQueue::new()),
-            config: DaemonPoolConfig { pool_size: 0, ..Default::default() },
+            config: DaemonPoolConfig {
+                pool_size: 0,
+                ..Default::default()
+            },
             health_monitor: Arc::new(parking_lot::Mutex::new(DaemonHealthMonitor::default())),
         }
     }
@@ -3304,13 +3687,13 @@ impl PythonDaemonPool {
     /// Spawn the specified number of daemon processes
     fn spawn_daemons(&self, count: usize) -> Result<()> {
         let mut daemons = self.daemons.lock();
-        
+
         for _i in 0..count {
             let daemon = self.spawn_single_daemon(daemons.len())?;
             self.available.push(daemons.len());
             daemons.push(daemon);
         }
-        
+
         Ok(())
     }
 
@@ -3404,9 +3787,13 @@ if __name__ == "__main__":
             .spawn()
             .map_err(|e| anyhow!("Failed to spawn Python daemon {}: {}", id, e))?;
 
-        let stdin = process.stdin.take()
+        let stdin = process
+            .stdin
+            .take()
             .ok_or_else(|| anyhow!("Failed to get stdin for daemon {}", id))?;
-        let stdout = process.stdout.take()
+        let stdout = process
+            .stdout
+            .take()
             .ok_or_else(|| anyhow!("Failed to get stdout for daemon {}", id))?;
 
         Ok(PythonDaemon {
@@ -3432,10 +3819,10 @@ if __name__ == "__main__":
         }
 
         let start_time = std::time::Instant::now();
-        
+
         // Get an available daemon
         let daemon_index = self.get_available_daemon()?;
-        
+
         // Prepare request
         let request_id = {
             let mut monitor = self.health_monitor.lock();
@@ -3456,23 +3843,27 @@ if __name__ == "__main__":
 
         // Execute request
         let result = self.execute_request(daemon_index, request);
-        
+
         // Return daemon to pool
         self.return_daemon(daemon_index);
-        
+
         // Update performance metrics
         let execution_time = start_time.elapsed();
         {
             let mut monitor = self.health_monitor.lock();
             monitor.total_execution_time += execution_time;
-            monitor.average_response_time = monitor.total_execution_time / monitor.total_requests as u32;
-            
+            monitor.average_response_time =
+                monitor.total_execution_time / monitor.total_requests as u32;
+
             if result.is_err() {
                 monitor.failed_requests += 1;
             }
         }
 
-        debug!("🚀 Daemon execution completed in {:?} (vs ~50ms for process spawn)", execution_time);
+        debug!(
+            "🚀 Daemon execution completed in {:?} (vs ~50ms for process spawn)",
+            execution_time
+        );
         result
     }
 
@@ -3480,52 +3871,61 @@ if __name__ == "__main__":
     fn get_available_daemon(&self) -> Result<usize> {
         // Try to get a daemon with timeout
         let start = std::time::Instant::now();
-        
+
         while start.elapsed() < self.config.max_wait_time {
             if let Some(daemon_index) = self.available.pop() {
                 return Ok(daemon_index);
             }
-            
+
             // Brief yield to prevent busy-waiting
             std::thread::sleep(std::time::Duration::from_micros(100));
         }
-        
+
         Err(anyhow!("No daemon available within timeout"))
     }
 
     /// Execute a request on the specified daemon
-    fn execute_request(&self, daemon_index: usize, request: DaemonRequest) -> Result<serde_json::Value> {
+    fn execute_request(
+        &self,
+        daemon_index: usize,
+        request: DaemonRequest,
+    ) -> Result<serde_json::Value> {
         use std::io::{BufRead, Write};
-        
+
         let mut daemons = self.daemons.lock();
         let daemon = &mut daemons[daemon_index];
-        
+
         // Send request with SIMD JSON for 2-3x faster serialization
         let request_json = simd_json::to_string(&request)
             .map_err(|e| anyhow!("Failed to serialize daemon request: {}", e))?;
         writeln!(daemon.stdin, "{}", request_json)?;
         daemon.stdin.flush()?;
-        
+
         // Read response with timeout
         let mut response_line = String::new();
         daemon.stdout.read_line(&mut response_line)?;
-        
+
         let response: DaemonResponse = simd_json::from_str(&response_line.trim())
             .map_err(|e| anyhow!("Failed to deserialize daemon response: {}", e))?;
-        
+
         // Update daemon stats
         daemon.last_used = std::time::Instant::now();
         daemon.requests_handled += 1;
-        
+
         // Check if daemon needs restart
         if daemon.requests_handled >= self.config.restart_after_requests {
             self.restart_daemon(daemon_index)?;
         }
-        
+
         if response.success {
             Ok(response.result.unwrap_or(serde_json::Value::Null))
         } else {
-            Err(anyhow!("Daemon execution failed: {}", response.error.unwrap_or_else(|| "Unknown error".to_string())))
+            Err(anyhow!(
+                "Daemon execution failed: {}",
+                response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string())
+            ))
         }
     }
 
@@ -3537,21 +3937,24 @@ if __name__ == "__main__":
     /// Restart a daemon that has handled too many requests
     fn restart_daemon(&self, daemon_index: usize) -> Result<()> {
         let mut daemons = self.daemons.lock();
-        
+
         // Kill old daemon
         if let Err(e) = daemons[daemon_index].process.kill() {
             eprintln!("Warning: Failed to kill daemon {}: {}", daemon_index, e);
         }
-        
+
         // Spawn new daemon
         daemons[daemon_index] = self.spawn_single_daemon(daemon_index)?;
-        
+
         {
             let mut monitor = self.health_monitor.lock();
             monitor.restart_count += 1;
         }
-        
-        debug!("🔄 Restarted daemon {} after {} requests", daemon_index, self.config.restart_after_requests);
+
+        debug!(
+            "🔄 Restarted daemon {} after {} requests",
+            daemon_index, self.config.restart_after_requests
+        );
         Ok(())
     }
 

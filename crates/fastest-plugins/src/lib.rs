@@ -1,10 +1,10 @@
 //! Fastest Plugin System
-//! 
+//!
 //! A brilliant, type-safe plugin architecture that enables extensibility
 //! while maintaining Fastest's blazing performance.
 //!
 //! # Design Philosophy
-//! 
+//!
 //! - **Everything is a plugin**: Core functionality is implemented as built-in plugins
 //! - **Zero-cost abstractions**: No overhead when plugins aren't used
 //! - **Type safety**: Compile-time guarantees for plugin interfaces
@@ -26,27 +26,21 @@ pub mod minimal;
 // pub mod pytest_compat;
 
 // Re-export core types
-pub use api::{Plugin, PluginMetadata, PluginResult, PluginError};
-pub use minimal::{PluginManager, PluginManagerBuilder, HookArgs};
+pub use api::{Plugin, PluginError, PluginMetadata, PluginResult};
+pub use minimal::{HookArgs, PluginManager, PluginManagerBuilder};
 
 // Re-export built-in plugins
-pub use builtin::{
-    FixturePlugin,
-    MarkerPlugin,
-    ReportingPlugin,
-    CapturePlugin,
-};
-
+pub use builtin::{CapturePlugin, FixturePlugin, MarkerPlugin, ReportingPlugin};
 
 /// Initialize the plugin system with default plugins
 pub fn initialize_default_plugins() -> PluginManager {
     let mut manager = PluginManager::new();
-    
+
     // Register built-in plugins
     manager.register(Box::new(FixturePlugin::new())).unwrap();
     manager.register(Box::new(MarkerPlugin::new())).unwrap();
     manager.register(Box::new(ReportingPlugin::new())).unwrap();
     manager.register(Box::new(CapturePlugin::new())).unwrap();
-    
+
     manager
 }

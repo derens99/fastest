@@ -17,7 +17,20 @@ git clone https://github.com/yourusername/fastest.git
 cd fastest
 ```
 
-### 2. Install Rust
+### 2. Install Rust and Development Tools
+
+```bash
+# Install Rust (if not already installed)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# Install all development tools (rustfmt, clippy, etc.)
+./scripts/install-dev-tools.sh
+
+# Enable Git hooks for automatic validation
+./scripts/setup-hooks.sh
+```
+
+### 3. Quick Start
 
 ```bash
 # Install rustup if you haven't already

@@ -7,8 +7,8 @@ pub mod coverage;
 pub mod dependencies;
 pub mod error;
 pub mod incremental;
-pub mod prioritization;
 pub mod phase3;
+pub mod prioritization;
 pub mod updates;
 pub mod watch;
 
@@ -19,9 +19,9 @@ use std::path::PathBuf;
 // Re-export main types
 pub use coverage::{CoverageReport, SmartCoverage};
 pub use incremental::IncrementalTester;
-pub use watch::TestWatcher;
-pub use updates::{check_for_updates, UpdateChecker};
 pub use phase3::{Phase3Config, Phase3Manager};
+pub use updates::{check_for_updates, UpdateChecker};
+pub use watch::TestWatcher;
 
 /// Advanced features configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

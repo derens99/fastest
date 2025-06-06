@@ -1,5 +1,5 @@
-use crate::test::discovery::TestItem;
 use crate::error::Result;
+use crate::test::discovery::TestItem;
 use crate::utils::simd_json; // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION
 use rustpython_parser::ast;
 use rustpython_parser::Parse;
@@ -23,7 +23,9 @@ pub struct ParamSet {
 }
 
 /// Parse parametrize decorator and extract parameter information
-pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+pub fn parse_parametrize_decorator(
+    decorator: &str,
+) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     // Remove @ prefix if present and extract the call expression
     let cleaned = decorator.trim_start_matches('@');
 
@@ -56,14 +58,18 @@ pub fn parse_parametrize_decorator(decorator: &str) -> Option<(Vec<String>, Vec<
 }
 
 /// Parse parametrize decorator from AST expression
-pub fn parse_parametrize_expr(expr: &ast::Expr) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+pub fn parse_parametrize_expr(
+    expr: &ast::Expr,
+) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     match expr {
         ast::Expr::Call(call) => parse_parametrize_call(call),
         _ => None,
     }
 }
 
-fn parse_parametrize_call(call: &ast::ExprCall) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+fn parse_parametrize_call(
+    call: &ast::ExprCall,
+) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
     // Check if it's a parametrize call
     if !is_parametrize_call(&call.func) {
         return None;
@@ -387,7 +393,9 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
                 format!("@{}", decorator)
             };
 
-            if let Some((names, param_sets, indirect)) = parse_parametrize_decorator(&decorator_with_at) {
+            if let Some((names, param_sets, indirect)) =
+                parse_parametrize_decorator(&decorator_with_at)
+            {
                 param_info_list.push((names, param_sets, indirect));
             }
         }
@@ -451,7 +459,9 @@ struct TestCase {
     is_xfail: bool,
 }
 
-fn generate_test_cases(param_info_list: &[(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)]) -> Vec<TestCase> {
+fn generate_test_cases(
+    param_info_list: &[(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)],
+) -> Vec<TestCase> {
     if param_info_list.is_empty() {
         return vec![];
     }
@@ -553,7 +563,7 @@ mod tests {
         let decorator = r#"@pytest.mark.parametrize("x", [1, 2, 3])"#;
         let result = parse_parametrize_decorator(decorator);
         assert!(result.is_some());
-        let (names, param_sets) = result.unwrap();
+        let (names, param_sets, _ids) = result.unwrap();
         assert_eq!(names, vec!["x"]);
         assert_eq!(param_sets.len(), 3);
         assert_eq!(param_sets[0].values, vec![Value::from(1)]);
@@ -564,7 +574,7 @@ mod tests {
         let decorator = r#"@pytest.mark.parametrize("x,y,expected", [(1,2,3), (4,5,9)])"#;
         let result = parse_parametrize_decorator(decorator);
         assert!(result.is_some());
-        let (names, param_sets) = result.unwrap();
+        let (names, param_sets, _ids) = result.unwrap();
         assert_eq!(names, vec!["x", "y", "expected"]);
         assert_eq!(param_sets.len(), 2);
         assert_eq!(
@@ -578,7 +588,7 @@ mod tests {
         let decorator = r#"@pytest.mark.parametrize("x", [pytest.param(1, id="one"), pytest.param(2, marks=pytest.mark.xfail)])"#;
         let result = parse_parametrize_decorator(decorator);
         assert!(result.is_some());
-        let (names, param_sets) = result.unwrap();
+        let (names, param_sets, _ids) = result.unwrap();
         assert_eq!(names, vec!["x"]);
         assert_eq!(param_sets.len(), 2);
         assert_eq!(param_sets[0].id, Some("one".to_string()));
@@ -590,7 +600,7 @@ mod tests {
         let decorator = r#"@pytest.mark.parametrize("x", [1, 2], ids=["first", "second"])"#;
         let result = parse_parametrize_decorator(decorator);
         assert!(result.is_some());
-        let (names, param_sets) = result.unwrap();
+        let (names, param_sets, _ids) = result.unwrap();
         assert_eq!(names, vec!["x"]);
         assert_eq!(param_sets[0].id, Some("first".to_string()));
         assert_eq!(param_sets[1].id, Some("second".to_string()));

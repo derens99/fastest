@@ -9,18 +9,18 @@
 //!
 //! Performance gains: 95% reduction in timeout overhead, 8x faster timeout detection
 
-use std::sync::atomic::{AtomicU64, AtomicU32, AtomicBool, Ordering};
+use crossbeam::deque::{Injector, Stealer, Worker};
+use parking_lot::{Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use crossbeam::deque::{Injector, Stealer, Worker};
-use parking_lot::{RwLock, Mutex};
 
 #[cfg(target_arch = "x86_64")]
 use std::arch::x86_64::*;
 
 use anyhow::Result;
-use serde::{Deserialize, Serialize};
 use fastest_core::TestItem;
+use serde::{Deserialize, Serialize};
 
 /// Ultra-high-performance timeout manager with lock-free operations
 #[allow(dead_code)]
@@ -163,8 +163,8 @@ impl Default for TimeoutConfig {
             fixture_timeout_ns: 30_000_000_000, // 30 seconds in nanoseconds
             adaptive_scaling: true,
             simd_acceleration: true,
-            check_interval_us: 100,   // 100 microseconds
-            warning_threshold: 800,   // 80% in fixed-point
+            check_interval_us: 100, // 100 microseconds
+            warning_threshold: 800, // 80% in fixed-point
             max_active_timeouts: 10000,
             pool_size: 1000,
         }
@@ -287,13 +287,13 @@ pub struct PerformanceHint {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum PerformanceCategory {
     #[allow(dead_code)]
-    Fast,      // < 1s
+    Fast, // < 1s
     #[allow(dead_code)]
-    Medium,    // 1-10s
+    Medium, // 1-10s
     #[allow(dead_code)]
-    Slow,      // 10-60s
+    Slow, // 10-60s
     #[allow(dead_code)]
-    VerySlow,  // > 60s
+    VerySlow, // > 60s
 }
 
 /// System load detection for adaptive scaling
@@ -301,11 +301,11 @@ pub enum PerformanceCategory {
 #[derive(Debug)]
 struct SystemLoadDetector {
     #[allow(dead_code)]
-    cpu_usage: AtomicU32,    // Percentage * 100
+    cpu_usage: AtomicU32, // Percentage * 100
     #[allow(dead_code)]
     memory_usage: AtomicU32, // Percentage * 100
     #[allow(dead_code)]
-    last_update: AtomicU64,  // Timestamp in nanoseconds
+    last_update: AtomicU64, // Timestamp in nanoseconds
 }
 
 /// Performance data point for adaptive scaling
@@ -368,7 +368,7 @@ impl UltraFastTimeoutManager {
         let adaptive_scaler = AdaptiveTimeoutScaler::new(config.adaptive_scaling);
         let timeout_pools = TimeoutPoolManager::new(config.pool_size);
         let performance_monitor = Arc::new(TimeoutPerformanceMonitor::default());
-        
+
         Self {
             config,
             timeout_tracker,
@@ -378,20 +378,22 @@ impl UltraFastTimeoutManager {
             performance_monitor,
         }
     }
-    
+
     /// 🚀 REVOLUTIONARY TIMEOUT TRACKING with zero allocation hot path
     pub fn start_timeout_tracking(&self, test: &TestItem) -> Result<TimeoutHandle> {
         let start_time = Instant::now();
-        
+
         // Get optimized timeout entry from pool
         let timeout_entry = self.create_timeout_entry(test)?;
-        
+
         // Add to lock-free tracker
         self.timeout_tracker.add_timeout(timeout_entry.clone())?;
-        
+
         // Update performance monitoring
-        self.performance_monitor.timeout_checks.fetch_add(1, Ordering::Relaxed);
-        
+        self.performance_monitor
+            .timeout_checks
+            .fetch_add(1, Ordering::Relaxed);
+
         // Create ultra-fast handle
         Ok(TimeoutHandle {
             entry_id: timeout_entry.test_id,
@@ -399,70 +401,71 @@ impl UltraFastTimeoutManager {
             timeout_manager: self,
         })
     }
-    
+
     /// Ultra-fast timeout checking with SIMD acceleration
     pub fn check_timeouts_batch(&mut self) -> Result<Vec<TimeoutEvent>> {
         let check_start = Instant::now();
-        
+
         // Get current time in nanoseconds
         let current_time_ns = self.get_current_time_ns();
-        
+
         // Process timeouts in batches with SIMD when available
         let timeout_events = if self.batch_processor.simd_enabled {
             self.check_timeouts_simd(current_time_ns)?
         } else {
             self.check_timeouts_sequential(current_time_ns)?
         };
-        
+
         // Update performance metrics
         let check_duration = check_start.elapsed();
-        self.performance_monitor.average_check_time_ns.store(
-            check_duration.as_nanos() as u64, 
-            Ordering::Relaxed
-        );
-        
+        self.performance_monitor
+            .average_check_time_ns
+            .store(check_duration.as_nanos() as u64, Ordering::Relaxed);
+
         // Apply adaptive scaling based on results
         if self.config.adaptive_scaling {
             self.adaptive_scaler.adjust_timeouts(&timeout_events);
         }
-        
+
         Ok(timeout_events)
     }
-    
+
     /// SIMD-accelerated timeout checking for maximum performance
     #[cfg(target_arch = "x86_64")]
     fn check_timeouts_simd(&mut self, current_time_ns: u64) -> Result<Vec<TimeoutEvent>> {
         let mut timeout_events = Vec::new();
-        
+
         // Process timeouts in SIMD batches
         const SIMD_BATCH_SIZE: usize = 8; // AVX2 can handle 8 u64 values
-        
+
         // Collect active timeouts into vectorized buffer
         self.batch_processor.timeout_buffer.clear();
-        let active_timeouts = self.timeout_tracker.get_active_timeouts_batch(SIMD_BATCH_SIZE * 4)?;
-        
+        let active_timeouts = self
+            .timeout_tracker
+            .get_active_timeouts_batch(SIMD_BATCH_SIZE * 4)?;
+
         // Process timeouts in SIMD batches
         for batch in active_timeouts.chunks(SIMD_BATCH_SIZE) {
             // Load timeout deadlines into SIMD register
             let mut deadline_buffer = [0u64; 8];
-            let mut entry_buffer = [None; 8];
-            
+            let mut entry_buffer = [const { None }; 8];
+
             for (i, entry) in batch.iter().enumerate() {
                 if i < 8 {
                     deadline_buffer[i] = entry.start_time_ns + entry.timeout_duration_ns;
                     entry_buffer[i] = Some(entry.clone());
                 }
             }
-            
+
             // SIMD comparison: check if current_time > deadline
             unsafe {
                 let current_times = _mm256_set1_epi64x(current_time_ns as i64);
                 let deadlines = _mm256_loadu_si256(deadline_buffer.as_ptr() as *const __m256i);
                 let timeout_mask = _mm256_cmpgt_epi64(current_times, deadlines);
-                
+
                 // Extract results and create timeout events
                 let mask_bytes = _mm256_movemask_epi8(timeout_mask);
-                
+
                 for i in 0..8 {
                     if mask_bytes & (1 << (i * 4)) != 0 {
                         if let Some(entry) = &entry_buffer[i] {
@@ -477,24 +480,26 @@ impl UltraFastTimeoutManager {
                 }
             }
         }
-        
+
         // Update SIMD statistics
-        self.batch_processor.simd_operations.fetch_add(1, Ordering::Relaxed);
-        
+        self.batch_processor
+            .simd_operations
+            .fetch_add(1, Ordering::Relaxed);
+
         Ok(timeout_events)
     }
-    
+
     /// Fallback sequential timeout checking
     fn check_timeouts_sequential(&self, current_time_ns: u64) -> Result<Vec<TimeoutEvent>> {
         let mut timeout_events = Vec::new();
-        
+
         // Get active timeouts
         let active_timeouts = self.timeout_tracker.get_active_timeouts_batch(1000)?;
-        
+
         // Check timeouts sequentially
         for entry in active_timeouts {
             let elapsed_ns = current_time_ns - entry.start_time_ns;
-            
+
             if elapsed_ns >= entry.timeout_duration_ns {
                 // Timeout occurred
                 timeout_events.push(TimeoutEvent {
@@ -513,34 +518,35 @@ impl UltraFastTimeoutManager {
                 });
             }
         }
-        
+
         Ok(timeout_events)
     }
-    
+
     /// Fallback for non-x86_64 architectures
     #[cfg(not(target_arch = "x86_64"))]
     fn check_timeouts_simd(&mut self, current_time_ns: u64) -> Result<Vec<TimeoutEvent>> {
         self.check_timeouts_sequential(current_time_ns)
     }
-    
+
     /// Create optimized timeout entry with pool reuse
     fn create_timeout_entry(&self, test: &TestItem) -> Result<TimeoutEntry> {
         let test_id_hash = self.hash_test_id(&test.id);
         let current_time_ns = self.get_current_time_ns();
         let test_type = self.classify_test_type(test);
-        
+
         // Get timeout duration with adaptive scaling
         let base_timeout_ns = self.get_base_timeout_ns(test, test_type);
         let scaled_timeout_ns = if self.config.adaptive_scaling {
-            self.adaptive_scaler.scale_timeout(base_timeout_ns, test_type)
+            self.adaptive_scaler
+                .scale_timeout(base_timeout_ns, test_type)
         } else {
             base_timeout_ns
         };
-        
+
         // Calculate warning threshold
-        let warning_time_ns = current_time_ns + 
-            (scaled_timeout_ns * self.config.warning_threshold as u64) / 1000;
-        
+        let warning_time_ns =
+            current_time_ns + (scaled_timeout_ns * self.config.warning_threshold as u64) / 1000;
+
         Ok(TimeoutEntry {
             test_id: test_id_hash,
             test_id_str: test.id.clone(),
@@ -552,7 +558,7 @@ impl UltraFastTimeoutManager {
             worker_affinity: (test_id_hash % 8) as u8, // Distribute across 8 workers
         })
     }
-    
+
     /// Get current time in nanoseconds with high precision
     fn get_current_time_ns(&self) -> u64 {
         std::time::SystemTime::now()
@@ -560,17 +566,17 @@ impl UltraFastTimeoutManager {
             .unwrap_or_default()
             .as_nanos() as u64
     }
-    
+
     /// Fast hash function for test IDs
     fn hash_test_id(&self, test_id: &str) -> u64 {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
-        
+
         let mut hasher = DefaultHasher::new();
         test_id.hash(&mut hasher);
         hasher.finish()
     }
-    
+
     /// Classify test type for specialized timeout handling
     fn classify_test_type(&self, test: &TestItem) -> TestType {
         if test.is_async {
@@ -585,14 +591,14 @@ impl UltraFastTimeoutManager {
             TestType::Regular
         }
     }
-    
+
     /// Get base timeout based on test type
     fn get_base_timeout_ns(&self, test: &TestItem, test_type: TestType) -> u64 {
         // Check for explicit timeout marker
         if let Some(explicit_timeout) = self.extract_timeout_from_decorators(&test.decorators) {
             return explicit_timeout;
         }
-        
+
         // Use type-based defaults
         match test_type {
             TestType::Regular => self.config.default_timeout_ns,
@@ -602,7 +608,7 @@ impl UltraFastTimeoutManager {
             TestType::Performance => self.config.default_timeout_ns * 5, // 5x for performance
         }
     }
-    
+
     /// Extract timeout from test decorators
     fn extract_timeout_from_decorators(&self, decorators: &[String]) -> Option<u64> {
         for decorator in decorators {
@@ -614,7 +620,7 @@ impl UltraFastTimeoutManager {
         }
         None
     }
-    
+
     /// Parse timeout from decorator string
     fn parse_timeout_decorator(&self, decorator: &str) -> Option<String> {
         // Handle @pytest.mark.timeout(30) or @timeout(30)
@@ -628,33 +634,56 @@ impl UltraFastTimeoutManager {
         }
         None
     }
-    
+
     /// Complete timeout tracking for a test
     pub fn complete_timeout_tracking(&self, handle: &TimeoutHandle) -> Result<()> {
         self.timeout_tracker.remove_timeout(handle.entry_id)?;
-        
+
         // Update performance statistics
         let total_duration = handle.start_time.elapsed();
-        self.performance_monitor.total_overhead_ns.fetch_add(
-            total_duration.as_nanos() as u64,
-            Ordering::Relaxed
-        );
-        
+        self.performance_monitor
+            .total_overhead_ns
+            .fetch_add(total_duration.as_nanos() as u64, Ordering::Relaxed);
+
         Ok(())
     }
-    
+
     /// Get comprehensive timeout statistics
     pub fn get_timeout_stats(&self) -> TimeoutStatistics {
         TimeoutStatistics {
             active_timeouts: self.timeout_tracker.active_count.load(Ordering::Relaxed),
-            total_checks: self.performance_monitor.timeout_checks.load(Ordering::Relaxed),
+            total_checks: self
+                .performance_monitor
+                .timeout_checks
+                .load(Ordering::Relaxed),
             simd_operations: self.performance_monitor.simd_checks.load(Ordering::Relaxed),
-            adaptive_adjustments: self.performance_monitor.adaptive_adjustments.load(Ordering::Relaxed),
-            warning_events: self.performance_monitor.warning_events.load(Ordering::Relaxed),
-            timeout_events: self.performance_monitor.timeout_events.load(Ordering::Relaxed),
-            average_overhead_ns: self.performance_monitor.average_check_time_ns.load(Ordering::Relaxed),
-            pool_efficiency: self.timeout_pools.pool_stats.pool_efficiency.load(Ordering::Relaxed) as f64 / 100.0,
-            simd_acceleration_ratio: if self.batch_processor.simd_enabled { 1.8 } else { 1.0 },
+            adaptive_adjustments: self
+                .performance_monitor
+                .adaptive_adjustments
+                .load(Ordering::Relaxed),
+            warning_events: self
+                .performance_monitor
+                .warning_events
+                .load(Ordering::Relaxed),
+            timeout_events: self
+                .performance_monitor
+                .timeout_events
+                .load(Ordering::Relaxed),
+            average_overhead_ns: self
+                .performance_monitor
+                .average_check_time_ns
+                .load(Ordering::Relaxed),
+            pool_efficiency: self
+                .timeout_pools
+                .pool_stats
+                .pool_efficiency
+                .load(Ordering::Relaxed) as f64
+                / 100.0,
+            simd_acceleration_ratio: if self.batch_processor.simd_enabled {
+                1.8
+            } else {
+                1.0
+            },
         }
     }
 }
@@ -711,14 +740,14 @@ impl LockFreeTimeoutTracker {
         let num_workers = num_cpus::get().min(8);
         let mut timeout_workers = Vec::with_capacity(num_workers);
         let mut timeout_stealers = Vec::with_capacity(num_workers);
-        
+
         for _ in 0..num_workers {
             let worker = Worker::new_fifo();
             let stealer = worker.stealer();
             timeout_workers.push(worker);
             timeout_stealers.push(stealer);
         }
-        
+
         Self {
             active_timeouts: Injector::new(),
             timeout_workers,
@@ -728,22 +757,22 @@ impl LockFreeTimeoutTracker {
             shutdown_flag: AtomicBool::new(false),
         }
     }
-    
+
     fn add_timeout(&self, entry: TimeoutEntry) -> Result<()> {
         self.active_timeouts.push(entry);
         self.active_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
-    
+
     fn remove_timeout(&self, _entry_id: u64) -> Result<()> {
         // Implementation would mark entry as completed
         self.resolved_count.fetch_add(1, Ordering::Relaxed);
         Ok(())
     }
-    
+
     fn get_active_timeouts_batch(&self, batch_size: usize) -> Result<Vec<TimeoutEntry>> {
         let mut entries = Vec::with_capacity(batch_size);
-        
+
         // Steal from injector and workers
         for _ in 0..batch_size {
             if let crossbeam::deque::Steal::Success(entry) = self.active_timeouts.steal() {
@@ -752,7 +781,7 @@ impl LockFreeTimeoutTracker {
                 break;
             }
         }
-        
+
         Ok(entries)
     }
 }
@@ -760,7 +789,7 @@ impl LockFreeTimeoutTracker {
 impl SIMDTimeoutBatchProcessor {
     fn new(simd_enabled: bool) -> Self {
         let actual_simd_enabled = simd_enabled && Self::detect_simd_support();
-        
+
         Self {
             simd_enabled: actual_simd_enabled,
             batch_size: if actual_simd_enabled { 64 } else { 32 },
@@ -769,7 +798,7 @@ impl SIMDTimeoutBatchProcessor {
             batch_operations: AtomicU64::new(0),
         }
     }
-    
+
     fn detect_simd_support() -> bool {
         #[cfg(target_arch = "x86_64")]
         {
@@ -791,16 +820,16 @@ impl AdaptiveTimeoutScaler {
             adaptive_enabled: AtomicBool::new(enabled),
         }
     }
-    
+
     fn scale_timeout(&self, base_timeout_ns: u64, _test_type: TestType) -> u64 {
         if !self.adaptive_enabled.load(Ordering::Relaxed) {
             return base_timeout_ns;
         }
-        
+
         let multiplier = self.base_multiplier.load(Ordering::Relaxed);
         (base_timeout_ns * multiplier) / 1000
     }
-    
+
     fn adjust_timeouts(&self, _events: &[TimeoutEvent]) {
         // Implementation would analyze events and adjust multiplier
         // This is a simplified version
@@ -810,7 +839,7 @@ impl AdaptiveTimeoutScaler {
 impl SystemLoadDetector {
     fn new() -> Self {
         Self {
-            cpu_usage: AtomicU32::new(5000), // 50% default
+            cpu_usage: AtomicU32::new(5000),    // 50% default
             memory_usage: AtomicU32::new(3000), // 30% default
             last_update: AtomicU64::new(0),
         }
@@ -830,11 +859,11 @@ impl TimeoutPoolManager {
 /// Utility functions for timeout formatting and parsing
 pub mod utils {
     use super::*;
-    
+
     /// Parse timeout string to nanoseconds
     pub fn parse_timeout_to_ns(timeout_str: &str) -> Result<u64> {
         let timeout_str = timeout_str.trim().to_lowercase();
-        
+
         if let Some(seconds_str) = timeout_str.strip_suffix('s') {
             let seconds: f64 = seconds_str.parse()?;
             Ok((seconds * 1_000_000_000.0) as u64)
@@ -850,12 +879,12 @@ pub mod utils {
             Ok((seconds * 1_000_000_000.0) as u64)
         }
     }
-    
+
     /// Format nanoseconds to human readable
     pub fn format_duration_from_ns(duration_ns: u64) -> String {
         let duration = Duration::from_nanos(duration_ns);
         let total_ms = duration.as_millis();
-        
+
         if total_ms < 1000 {
             format!("{}ms", total_ms)
         } else if total_ms < 60_000 {
@@ -872,12 +901,12 @@ pub mod utils {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_ultra_fast_timeout_manager() {
         let config = TimeoutConfig::default();
         let manager = UltraFastTimeoutManager::new(config);
-        
+
         let test = TestItem {
             id: "test_example".to_string(),
             path: std::path::PathBuf::from("test.py"),
@@ -890,15 +919,15 @@ mod tests {
             fixture_deps: vec![],
             is_xfail: false,
         };
-        
+
         let handle = manager.start_timeout_tracking(&test).unwrap();
         assert!(handle.entry_id > 0);
     }
-    
+
     #[test]
     fn test_simd_detection() {
         let processor = SIMDTimeoutBatchProcessor::new(true);
-        
+
         #[cfg(target_arch = "x86_64")]
         {
             // SIMD support depends on CPU capabilities
@@ -909,7 +938,7 @@ mod tests {
             assert!(!processor.simd_enabled);
         }
     }
-    
+
     #[test]
     fn test_timeout_parsing() {
         assert_eq!(utils::parse_timeout_to_ns("5s").unwrap(), 5_000_000_000);
@@ -917,7 +946,7 @@ mod tests {
         assert_eq!(utils::parse_timeout_to_ns("2m").unwrap(), 120_000_000_000);
         assert_eq!(utils::parse_timeout_to_ns("1.5").unwrap(), 1_500_000_000);
     }
-    
+
     #[test]
     fn test_duration_formatting() {
         assert_eq!(utils::format_duration_from_ns(500_000_000), "500ms");

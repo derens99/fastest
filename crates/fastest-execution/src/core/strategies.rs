@@ -8,19 +8,19 @@
 //! • Improved performance compared to pytest across test suite sizes
 //! • Simplified codebase with predictable performance
 
+use bumpalo::Bump;
+use parking_lot::{Mutex, RwLock};
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use rayon::prelude::*;
-use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
-use std::time::{Duration, Instant};
 use std::collections::HashMap;
-use sysinfo::System;
-use bumpalo::Bump;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use sysinfo::System;
 
-use crate::{TestResult, TestOutcome};
+use crate::{TestOutcome, TestResult};
 
 // Temporary stub implementations until we implement the full types
 #[allow(dead_code)]
@@ -60,7 +60,7 @@ impl DevExperienceManager {
 use fastest_core::TestItem;
 // 🗑️ REMOVED: SIMDTestDiscovery - now integrated into fastest-core discovery
 use fastest_core::{Error, Result};
-use fastest_plugins::{PluginManager, HookArgs};
+use fastest_plugins::{HookArgs, PluginManager};
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -110,19 +110,25 @@ impl PluginCompatibilityManager {
     pub fn new(config: PluginCompatibilityConfig) -> Self {
         Self { config }
     }
-    
+
     #[allow(dead_code)]
-    pub async fn execute_with_plugins(&self, tests: Vec<TestItem>) -> std::result::Result<Vec<TestResult>, String> {
+    pub async fn execute_with_plugins(
+        &self,
+        tests: Vec<TestItem>,
+    ) -> std::result::Result<Vec<TestResult>, String> {
         // Stub implementation - just return empty results for now
-        Ok(tests.into_iter().map(|test| TestResult {
-            test_id: test.id,
-            outcome: TestOutcome::Passed,
-            duration: Duration::from_millis(1),
-            error: None,
-            output: "PASSED (PLUGIN STUB)".to_string(),
-            stdout: String::new(),
-            stderr: String::new(),
-        }).collect())
+        Ok(tests
+            .into_iter()
+            .map(|test| TestResult {
+                test_id: test.id,
+                outcome: TestOutcome::Passed,
+                duration: Duration::from_millis(1),
+                error: None,
+                output: "PASSED (PLUGIN STUB)".to_string(),
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+            .collect())
     }
 }
 
@@ -135,8 +141,8 @@ impl PluginCompatibilityManager {
 
 /// Performance thresholds (dynamically adjusted based on system capabilities)
 const ULTRA_INPROCESS_THRESHOLD: usize = 1000;
-const BURST_EXECUTION_THRESHOLD: usize = 100;  // Revolutionary burst execution for 21-100 tests
-const NATIVE_JIT_THRESHOLD: usize = 20;        // Reduced to focus on small suites
+const BURST_EXECUTION_THRESHOLD: usize = 100; // Revolutionary burst execution for 21-100 tests
+const NATIVE_JIT_THRESHOLD: usize = 20; // Reduced to focus on small suites
 const WORK_STEALING_THRESHOLD: usize = 500;
 
 /// System performance profile for adaptive execution
@@ -163,19 +169,36 @@ pub struct SystemProfile {
 enum RevolutionaryExecutionStrategy {
     /// Native JIT compilation for simple tests (50-100x speedup)
     #[allow(dead_code)]
-    NativeJIT { #[allow(dead_code)] complexity_score: f32 },
+    NativeJIT {
+        #[allow(dead_code)]
+        complexity_score: f32,
+    },
     /// 🚀 BURST EXECUTION: Revolutionary 21-100 test strategy (5-8x speedup)
     #[allow(dead_code)]
-    BurstExecution { #[allow(dead_code)] batch_size: usize, #[allow(dead_code)] micro_threads: usize },
+    BurstExecution {
+        #[allow(dead_code)]
+        batch_size: usize,
+        #[allow(dead_code)]
+        micro_threads: usize,
+    },
     /// Ultra-optimized in-process execution for small suites (3x speedup)
     #[allow(dead_code)]
-    UltraInProcess { #[allow(dead_code)] thread_count: usize },
+    UltraInProcess {
+        #[allow(dead_code)]
+        thread_count: usize,
+    },
     /// Work-stealing parallelism for large suites (8-15x speedup)
     #[allow(dead_code)]
-    WorkStealingParallel { #[allow(dead_code)] worker_count: usize },
+    WorkStealingParallel {
+        #[allow(dead_code)]
+        worker_count: usize,
+    },
     /// Process-level parallelism for massive suites (>1000 tests)
     #[allow(dead_code)]
-    MassiveParallel { #[allow(dead_code)] process_count: usize },
+    MassiveParallel {
+        #[allow(dead_code)]
+        process_count: usize,
+    },
 }
 
 /// Real-time performance statistics and monitoring
@@ -295,31 +318,31 @@ impl TestComplexityAnalyzer {
             async_test_weight: 1.5,
         }
     }
-    
+
     #[allow(dead_code)]
     fn analyze_test_complexity(&self, test: &TestItem) -> f32 {
         let mut complexity_score = 1.0;
-        
+
         // Analyze decorators
         if !test.decorators.is_empty() {
             complexity_score += test.decorators.len() as f32 * 0.5;
         }
-        
+
         // Async tests are more complex
         if test.is_async {
             complexity_score *= self.async_test_weight;
         }
-        
+
         // Fixture dependencies increase complexity
         if !test.fixture_deps.is_empty() {
             complexity_score += test.fixture_deps.len() as f32 * self.fixture_usage_weight;
         }
-        
+
         // Class methods are slightly more complex
         if test.class_name.is_some() {
             complexity_score += 0.3;
         }
-        
+
         complexity_score
     }
 }
@@ -331,41 +354,49 @@ impl UltraFastPythonEngine {
         if verbose {
             eprintln!("🚀 Initializing Revolutionary Ultra-Fast Python Engine...");
         }
-        
+
         let init_start = Instant::now();
-        
+
         // Create the optimized worker module with verbose flag
         let worker_code = Self::get_ultra_optimized_python_code(verbose);
-        let worker_module = PyModule::from_code(py, &worker_code, "fastest_ultra_engine", "fastest_ultra_engine")?;
-        
+        let worker_module = PyModule::from_code(
+            py,
+            &worker_code,
+            "fastest_ultra_engine",
+            "fastest_ultra_engine",
+        )?;
+
         // Initialize advanced caches with larger capacity
         let fn_cache = Arc::new(RwLock::new(HashMap::with_capacity(1024)));
         let module_cache = Arc::new(RwLock::new(HashMap::with_capacity(256)));
-        
+
         // Initialize performance monitoring
         let performance_stats = Arc::new(Mutex::new(UltraPerformanceStats::default()));
-        
+
         // Initialize memory arena for zero-copy operations
         let arena = Bump::with_capacity(10 * 1024 * 1024); // 10MB arena
-        
+
         // Initialize complexity analyzer
         let complexity_analyzer = TestComplexityAnalyzer::new();
-        
+
         // Initialize system monitor
         let mut system = System::new_all();
         system.refresh_all();
         let system_monitor = Arc::new(Mutex::new(system));
-        
+
         // Initialize cache state tracking
         let cache_warmed = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        
+
         // Initialize performance learning database
         let performance_db = Arc::new(RwLock::new(HashMap::new()));
-        
+
         if verbose {
-            eprintln!("   ✅ Engine initialized in {:.3}s", init_start.elapsed().as_secs_f64());
+            eprintln!(
+                "   ✅ Engine initialized in {:.3}s",
+                init_start.elapsed().as_secs_f64()
+            );
         }
-        
+
         Ok(Self {
             worker_module: worker_module.into(),
             fn_cache,
@@ -378,29 +409,29 @@ impl UltraFastPythonEngine {
             performance_db,
         })
     }
-    
+
     /// Get current system performance profile for adaptive execution
     #[allow(dead_code)]
     fn get_system_profile(&self) -> SystemProfile {
         let mut system = self.system_monitor.lock();
         system.refresh_all();
-        
+
         let cpu_cores = num_cpus::get(); // Use num_cpus for better compatibility
         let total_memory = system.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0); // GB
         let available_memory = system.available_memory() as f64 / (1024.0 * 1024.0 * 1024.0); // GB
         let used_memory = system.used_memory() as f64 / (1024.0 * 1024.0 * 1024.0); // GB
-        
+
         // Simplified CPU usage (sysinfo API varies by version)
         let cpu_usage = if system.cpus().is_empty() { 0.0 } else { 50.0 }; // Conservative estimate
         let memory_usage_percent = (used_memory / total_memory * 100.0) as f32;
-        
+
         let is_high_performance = cpu_cores >= 8 && total_memory >= 16.0 && cpu_usage < 80.0;
         let optimal_parallelism = if is_high_performance {
             cpu_cores
         } else {
             (cpu_cores / 2).max(2)
         };
-        
+
         SystemProfile {
             cpu_cores,
             available_memory_gb: available_memory,
@@ -410,127 +441,166 @@ impl UltraFastPythonEngine {
             optimal_parallelism,
         }
     }
-    
+
     /// 🚀 REVOLUTIONARY EXECUTE TESTS with adaptive strategy selection
     #[allow(dead_code)]
-    fn execute_tests_revolutionary(&self, py: Python, tests: &[TestItem], verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_tests_revolutionary(
+        &self,
+        py: Python,
+        tests: &[TestItem],
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         let execution_start = Instant::now();
-        
+
         // Get system profile for adaptive execution
         let system_profile = self.get_system_profile();
-        
+
         if verbose {
-            eprintln!("🔧 System Profile: {} cores, {:.1}GB RAM, CPU: {:.1}%, Memory: {:.1}%", 
-                     system_profile.cpu_cores,
-                     system_profile.available_memory_gb,
-                     system_profile.cpu_usage_percent,
-                     system_profile.memory_usage_percent);
+            eprintln!(
+                "🔧 System Profile: {} cores, {:.1}GB RAM, CPU: {:.1}%, Memory: {:.1}%",
+                system_profile.cpu_cores,
+                system_profile.available_memory_gb,
+                system_profile.cpu_usage_percent,
+                system_profile.memory_usage_percent
+            );
         }
-        
+
         // Analyze test complexity for optimal strategy selection
-        let complexity_scores: Vec<f32> = tests.iter()
+        let complexity_scores: Vec<f32> = tests
+            .iter()
             .map(|test| self.complexity_analyzer.analyze_test_complexity(test))
             .collect();
-        
+
         let avg_complexity = complexity_scores.iter().sum::<f32>() / complexity_scores.len() as f32;
-        let simple_test_ratio = complexity_scores.iter().filter(|&&score| score < 1.5).count() as f32 / tests.len() as f32;
-        
+        let simple_test_ratio = complexity_scores
+            .iter()
+            .filter(|&&score| score < 1.5)
+            .count() as f32
+            / tests.len() as f32;
+
         // Select revolutionary execution strategy
-        let strategy = self.select_revolutionary_strategy(tests.len(), avg_complexity, simple_test_ratio, &system_profile);
-        
+        let strategy = self.select_revolutionary_strategy(
+            tests.len(),
+            avg_complexity,
+            simple_test_ratio,
+            &system_profile,
+        );
+
         if verbose {
-            eprintln!("📊 Complexity Analysis: avg={:.2}, simple_ratio={:.1}%, strategy={:?}", 
-                     avg_complexity, simple_test_ratio * 100.0, strategy);
+            eprintln!(
+                "📊 Complexity Analysis: avg={:.2}, simple_ratio={:.1}%, strategy={:?}",
+                avg_complexity,
+                simple_test_ratio * 100.0,
+                strategy
+            );
         }
-        
+
         // Execute with selected strategy
         let results = match strategy {
             RevolutionaryExecutionStrategy::NativeJIT { complexity_score } => {
                 self.execute_with_native_jit(py, tests, complexity_score, verbose)
-            },
-            RevolutionaryExecutionStrategy::BurstExecution { batch_size, micro_threads } => {
-                self.execute_with_burst_execution(py, tests, batch_size, micro_threads, verbose)
-            },
+            }
+            RevolutionaryExecutionStrategy::BurstExecution {
+                batch_size,
+                micro_threads,
+            } => self.execute_with_burst_execution(py, tests, batch_size, micro_threads, verbose),
             RevolutionaryExecutionStrategy::UltraInProcess { thread_count } => {
                 self.execute_ultra_inprocess(py, tests, thread_count, verbose)
-            },
+            }
             RevolutionaryExecutionStrategy::WorkStealingParallel { worker_count } => {
                 self.execute_with_work_stealing(py, tests, worker_count, verbose)
-            },
+            }
             RevolutionaryExecutionStrategy::MassiveParallel { process_count } => {
                 self.execute_ultra_inprocess(py, tests, process_count, verbose) // Fallback for now
-            },
+            }
         }?;
-        
+
         // Update performance statistics
-        self.update_performance_stats(execution_start.elapsed(), &strategy, tests.len(), &system_profile);
-        
+        self.update_performance_stats(
+            execution_start.elapsed(),
+            &strategy,
+            tests.len(),
+            &system_profile,
+        );
+
         Ok(results)
     }
-    
+
     /// Select the optimal revolutionary execution strategy
     fn select_revolutionary_strategy(
-        &self, 
-        test_count: usize, 
-        avg_complexity: f32, 
+        &self,
+        test_count: usize,
+        avg_complexity: f32,
         simple_test_ratio: f32,
-        system_profile: &SystemProfile
+        system_profile: &SystemProfile,
     ) -> RevolutionaryExecutionStrategy {
         // Native JIT for small simple tests
         if test_count <= NATIVE_JIT_THRESHOLD && simple_test_ratio > 0.8 && avg_complexity < 1.5 {
-            return RevolutionaryExecutionStrategy::NativeJIT { complexity_score: avg_complexity };
+            return RevolutionaryExecutionStrategy::NativeJIT {
+                complexity_score: avg_complexity,
+            };
         }
-        
+
         // 🚀 HYBRID BURST EXECUTION: Optimized threading strategy for 21-100 tests
         if test_count > NATIVE_JIT_THRESHOLD && test_count <= BURST_EXECUTION_THRESHOLD {
             // Intelligent batch sizing based on test count and CPU cores
             let optimal_batch_size = if test_count <= 30 {
-                test_count  // Single batch for small sets to minimize overhead
+                test_count // Single batch for small sets to minimize overhead
             } else if test_count <= 50 {
-                (test_count + 1) / 2  // Two batches for medium sets
+                (test_count + 1) / 2 // Two batches for medium sets
             } else {
-                (test_count + 2) / 3  // Three batches for larger sets
+                (test_count + 2) / 3 // Three batches for larger sets
             };
-            
+
             // Optimal thread count based on test count and CPU cores
             let micro_threads = if test_count <= 30 {
-                2  // Minimal threading for small sets
+                2 // Minimal threading for small sets
             } else if test_count <= 60 {
-                (system_profile.cpu_cores / 2).min(4).max(2)  // 2-4 threads
+                (system_profile.cpu_cores / 2).min(4).max(2) // 2-4 threads
             } else {
-                (system_profile.cpu_cores * 3 / 4).min(6).max(3)  // 3-6 threads
+                (system_profile.cpu_cores * 3 / 4).min(6).max(3) // 3-6 threads
             };
-            
-            return RevolutionaryExecutionStrategy::BurstExecution { 
+
+            return RevolutionaryExecutionStrategy::BurstExecution {
                 batch_size: optimal_batch_size,
-                micro_threads
+                micro_threads,
             };
         }
-        
+
         // Work-stealing for large suites with good parallelism
         if test_count > WORK_STEALING_THRESHOLD && system_profile.is_high_performance {
-            return RevolutionaryExecutionStrategy::WorkStealingParallel { 
-                worker_count: system_profile.optimal_parallelism 
+            return RevolutionaryExecutionStrategy::WorkStealingParallel {
+                worker_count: system_profile.optimal_parallelism,
             };
         }
-        
+
         // Massive parallel for very large suites
         if test_count > ULTRA_INPROCESS_THRESHOLD {
-            return RevolutionaryExecutionStrategy::MassiveParallel { 
-                process_count: (system_profile.cpu_cores / 2).max(2).min(8) 
+            return RevolutionaryExecutionStrategy::MassiveParallel {
+                process_count: (system_profile.cpu_cores / 2).max(2).min(8),
             };
         }
-        
+
         // Default to ultra in-process for 101-500 range
-        RevolutionaryExecutionStrategy::UltraInProcess { 
-            thread_count: 1  // Single-threaded for this range to avoid overhead
+        RevolutionaryExecutionStrategy::UltraInProcess {
+            thread_count: 1, // Single-threaded for this range to avoid overhead
         }
     }
-    
+
     /// Execute with Native JIT compilation
-    fn execute_with_native_jit(&self, _py: Python, tests: &[TestItem], complexity_score: f32, verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_with_native_jit(
+        &self,
+        _py: Python,
+        tests: &[TestItem],
+        complexity_score: f32,
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         if verbose {
-            eprintln!("🔥 NATIVE JIT: Attempting to JIT compile {} tests (avg complexity hint: {:.2})", tests.len(), complexity_score);
+            eprintln!(
+                "🔥 NATIVE JIT: Attempting to JIT compile {} tests (avg complexity hint: {:.2})",
+                tests.len(),
+                complexity_score
+            );
         }
 
         if tests.is_empty() {
@@ -543,34 +613,54 @@ impl UltraFastPythonEngine {
         }
         return self.execute_ultra_inprocess(_py, tests, 1, verbose);
     }
-    
+
     /// 🚀 BURST EXECUTION: Revolutionary strategy for 21-100 tests (eliminates ALL overhead)
-    fn execute_with_burst_execution(&self, py: Python, tests: &[TestItem], batch_size: usize, micro_threads: usize, verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_with_burst_execution(
+        &self,
+        py: Python,
+        tests: &[TestItem],
+        batch_size: usize,
+        micro_threads: usize,
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         if verbose {
-            eprintln!("🚀 HYBRID BURST EXECUTION: {} tests with {}-test batches, {} threads", tests.len(), batch_size, micro_threads);
+            eprintln!(
+                "🚀 HYBRID BURST EXECUTION: {} tests with {}-test batches, {} threads",
+                tests.len(),
+                batch_size,
+                micro_threads
+            );
             eprintln!("   ⚡ Optimized threading for 2-3x speedup over sequential execution");
         }
-        
+
         // Pre-allocate all results to avoid reallocation overhead
         let mut all_results = Vec::with_capacity(tests.len());
-        
+
         // Get the ultra-optimized burst executor function
         let worker_module = self.worker_module.as_ref(py);
         let execute_burst_fn = worker_module.getattr("execute_tests_burst_optimized")?;
-        
+
         // For burst execution, process all tests in one go to maximize threading efficiency
         let all_tests = tests;
-        
+
         if verbose {
-            eprintln!("   📦 Processing all {} tests in parallel with {} threads", all_tests.len(), micro_threads);
+            eprintln!(
+                "   📦 Processing all {} tests in parallel with {} threads",
+                all_tests.len(),
+                micro_threads
+            );
         }
-        
+
         // Convert all tests to Python format at once
-        let py_batch: Vec<&PyDict> = all_tests.iter().map(|test| {
+        let py_batch: Vec<&PyDict> = all_tests
+            .iter()
+            .map(|test| {
                 let test_dict = PyDict::new(py);
                 test_dict.set_item("id", &test.id).unwrap();
-                test_dict.set_item("module", test.path.file_stem().unwrap().to_str().unwrap()).unwrap();
-                
+                test_dict
+                    .set_item("module", test.path.file_stem().unwrap().to_str().unwrap())
+                    .unwrap();
+
                 // Handle class methods properly: use ClassName::method_name format
                 let function_ref = if let Some(ref class_name) = test.class_name {
                     format!("{}::{}", class_name, test.function_name)
@@ -578,101 +668,131 @@ impl UltraFastPythonEngine {
                     test.function_name.clone()
                 };
                 test_dict.set_item("function", function_ref).unwrap();
-                test_dict.set_item("path", test.path.to_str().unwrap()).unwrap();
-                
+                test_dict
+                    .set_item("path", test.path.to_str().unwrap())
+                    .unwrap();
+
                 // Include decorators for parametrized tests
                 let decorators_list = PyList::new(py, &test.decorators);
                 test_dict.set_item("decorators", decorators_list).unwrap();
-                
+
                 // Include class name separately if present
                 if let Some(ref class_name) = test.class_name {
                     test_dict.set_item("class_name", class_name).unwrap();
                 }
-                
+
                 test_dict
-            }).collect();
-            
-            let py_batch_list = PyList::new(py, py_batch);
-            
-            // Execute batch with burst optimization
-            let py_results = execute_burst_fn.call1((py_batch_list, micro_threads))?;
-            let results_list: &PyList = py_results.downcast()?;
-            
-            // Convert results back with minimal overhead
-            for py_result in results_list {
-                let result_dict: &PyDict = py_result.downcast()?;
-                
-                let test_id: String = result_dict.get_item("id").unwrap().extract()?;
-                let duration: f64 = result_dict.get_item("duration").unwrap().extract()?;
-                let error: Option<String> = result_dict.get_item("error").unwrap().extract()?;
-                
-                // Check for new outcome format first, fall back to passed bool
-                let outcome = if let Some(outcome_str) = result_dict.get_item("outcome") {
-                    match outcome_str.extract::<String>()?.as_str() {
-                        "passed" => TestOutcome::Passed,
-                        "failed" => TestOutcome::Failed,
-                        "skipped" => {
-                            let reason = result_dict.get_item("skip_reason")
-                                .and_then(|r| r.extract::<String>().ok());
-                            TestOutcome::Skipped { reason }
-                        },
-                        "xfailed" => {
-                            let reason = result_dict.get_item("xfail_reason")
-                                .and_then(|r| r.extract::<String>().ok());
-                            TestOutcome::XFailed { reason }
-                        },
-                        "xpassed" => TestOutcome::XPassed,
-                        _ => TestOutcome::Failed, // Unknown outcome
+            })
+            .collect();
+
+        let py_batch_list = PyList::new(py, py_batch);
+
+        // Execute batch with burst optimization
+        let py_results = execute_burst_fn.call1((py_batch_list, micro_threads))?;
+        let results_list: &PyList = py_results.downcast()?;
+
+        // Convert results back with minimal overhead
+        for py_result in results_list {
+            let result_dict: &PyDict = py_result.downcast()?;
+
+            let test_id: String = result_dict.get_item("id").unwrap().extract()?;
+            let duration: f64 = result_dict.get_item("duration").unwrap().extract()?;
+            let error: Option<String> = result_dict.get_item("error").unwrap().extract()?;
+
+            // Check for new outcome format first, fall back to passed bool
+            let outcome = if let Some(outcome_str) = result_dict.get_item("outcome") {
+                match outcome_str.extract::<String>()?.as_str() {
+                    "passed" => TestOutcome::Passed,
+                    "failed" => TestOutcome::Failed,
+                    "skipped" => {
+                        let reason = result_dict
+                            .get_item("skip_reason")
+                            .and_then(|r| r.extract::<String>().ok());
+                        TestOutcome::Skipped { reason }
                     }
+                    "xfailed" => {
+                        let reason = result_dict
+                            .get_item("xfail_reason")
+                            .and_then(|r| r.extract::<String>().ok());
+                        TestOutcome::XFailed { reason }
+                    }
+                    "xpassed" => TestOutcome::XPassed,
+                    _ => TestOutcome::Failed, // Unknown outcome
+                }
+            } else {
+                // Fall back to old format
+                let passed: bool = result_dict.get_item("passed").unwrap().extract()?;
+                if passed {
+                    TestOutcome::Passed
                 } else {
-                    // Fall back to old format
-                    let passed: bool = result_dict.get_item("passed").unwrap().extract()?;
-                    if passed { TestOutcome::Passed } else { TestOutcome::Failed }
-                };
-                
-                let output = match &outcome {
-                    TestOutcome::Passed => "PASSED".to_string(),
-                    TestOutcome::Failed => "FAILED".to_string(),
-                    TestOutcome::Skipped { reason } => format!("SKIPPED: {}", reason.as_deref().unwrap_or("Unknown")),
-                    TestOutcome::XFailed { reason } => format!("XFAIL: {}", reason.as_deref().unwrap_or("Expected failure")),
-                    TestOutcome::XPassed => "XPASS".to_string(),
-                };
-                
-                all_results.push(TestResult {
-                    test_id,
-                    outcome,
-                    duration: Duration::from_secs_f64(duration),
-                    error,
-                    output,
-                    stdout: String::new(),
-                    stderr: String::new(),
-                });
-            }
-        
-        if verbose {
-            eprintln!("   ✅ Burst execution complete: {} results processed", all_results.len());
+                    TestOutcome::Failed
+                }
+            };
+
+            let output = match &outcome {
+                TestOutcome::Passed => "PASSED".to_string(),
+                TestOutcome::Failed => "FAILED".to_string(),
+                TestOutcome::Skipped { reason } => {
+                    format!("SKIPPED: {}", reason.as_deref().unwrap_or("Unknown"))
+                }
+                TestOutcome::XFailed { reason } => {
+                    format!("XFAIL: {}", reason.as_deref().unwrap_or("Expected failure"))
+                }
+                TestOutcome::XPassed => "XPASS".to_string(),
+            };
+
+            all_results.push(TestResult {
+                test_id,
+                outcome,
+                duration: Duration::from_secs_f64(duration),
+                error,
+                output,
+                stdout: String::new(),
+                stderr: String::new(),
+            });
         }
-        
+
+        if verbose {
+            eprintln!(
+                "   ✅ Burst execution complete: {} results processed",
+                all_results.len()
+            );
+        }
+
         Ok(all_results)
     }
-    
+
     /// Execute with Zero-Copy arena allocation
     #[allow(dead_code)]
-    fn execute_with_zero_copy(&self, py: Python, tests: &[TestItem], arena_size_mb: usize, verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_with_zero_copy(
+        &self,
+        py: Python,
+        tests: &[TestItem],
+        arena_size_mb: usize,
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         if verbose {
-            eprintln!("⚡ ZERO-COPY: Arena allocation for {} tests ({}MB arena)", tests.len(), arena_size_mb);
+            eprintln!(
+                "⚡ ZERO-COPY: Arena allocation for {} tests ({}MB arena)",
+                tests.len(),
+                arena_size_mb
+            );
         }
 
         // Use the ZeroCopyExecutor from the zero_copy module
-        let mut zc_executor = match crate::experimental::zero_copy::ZeroCopyExecutor::new(&self.arena) {
-            Ok(exec) => exec,
-            Err(e) => {
-                // Error creating ZeroCopyExecutor, fall back to ultra_inprocess for now
-                // Ideally, we'd propagate this error properly
-                eprintln!("Error creating ZeroCopyExecutor: {:?}. Falling back to UltraInProcess.", e);
-                return self.execute_ultra_inprocess(py, tests, 2, verbose);
-            }
-        };
+        let mut zc_executor =
+            match crate::experimental::zero_copy::ZeroCopyExecutor::new(&self.arena) {
+                Ok(exec) => exec,
+                Err(e) => {
+                    // Error creating ZeroCopyExecutor, fall back to ultra_inprocess for now
+                    // Ideally, we'd propagate this error properly
+                    eprintln!(
+                        "Error creating ZeroCopyExecutor: {:?}. Falling back to UltraInProcess.",
+                        e
+                    );
+                    return self.execute_ultra_inprocess(py, tests, 2, verbose);
+                }
+            };
 
         match zc_executor.execute_zero_copy(tests) {
             Ok(zc_results) => {
@@ -681,7 +801,10 @@ impl UltraFastPythonEngine {
                 // The benefit of zero-copy is during the execution and aggregation phase.
                 let results = crate::experimental::zero_copy::convert_zero_copy_results(zc_results);
                 if verbose {
-                    eprintln!("   ✅ Zero-copy execution successful, {} results processed.", results.len());
+                    eprintln!(
+                        "   ✅ Zero-copy execution successful, {} results processed.",
+                        results.len()
+                    );
                     let stats = zc_executor.get_stats();
                     eprintln!("   📊 Zero-copy stats: {:.1}% memory saved, {:.2}x deduplication, {} SIMD ops (simulated)",
                               stats.memory_efficiency * 100.0,
@@ -698,9 +821,15 @@ impl UltraFastPythonEngine {
             }
         }
     }
-    
+
     /// Execute with Work-Stealing parallelism
-    fn execute_with_work_stealing(&self, py: Python, tests: &[TestItem], worker_count: usize, verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_with_work_stealing(
+        &self,
+        py: Python,
+        tests: &[TestItem],
+        worker_count: usize,
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         if verbose {
             eprintln!("🎯 WORK-STEALING: Parallel execution for {} tests ({} workers specified, adaptive)", tests.len(), worker_count);
         }
@@ -717,7 +846,10 @@ impl UltraFastPythonEngine {
         match ws_executor.execute_work_stealing(tests.to_vec()) {
             Ok(results) => {
                 if verbose {
-                    eprintln!("   ✅ Work-stealing execution successful, {} results processed.", results.len());
+                    eprintln!(
+                        "   ✅ Work-stealing execution successful, {} results processed.",
+                        results.len()
+                    );
                     let stats = ws_executor.get_stats();
                     eprintln!("   📊 Work-stealing stats: {:.1}% worker util, {:.1}x SIMD boost (simulated), {} steals",
                               stats.avg_worker_utilization * 100.0,
@@ -733,92 +865,119 @@ impl UltraFastPythonEngine {
             }
         }
     }
-    
+
     /// Execute tests with ultra-optimized performance (enhanced version)
-    fn execute_ultra_inprocess(&self, py: Python, tests: &[TestItem], thread_count: usize, verbose: bool) -> PyResult<Vec<TestResult>> {
+    fn execute_ultra_inprocess(
+        &self,
+        py: Python,
+        tests: &[TestItem],
+        thread_count: usize,
+        verbose: bool,
+    ) -> PyResult<Vec<TestResult>> {
         if verbose {
-            eprintln!("🚀 ULTRA IN-PROCESS: {} tests with {} threads", tests.len(), thread_count);
+            eprintln!(
+                "🚀 ULTRA IN-PROCESS: {} tests with {} threads",
+                tests.len(),
+                thread_count
+            );
         }
-        
+
         let mut results = Vec::with_capacity(tests.len());
-        
+
         // Get the ultra-fast executor function
         let worker_module = self.worker_module.as_ref(py);
         let execute_tests_fn = worker_module.getattr("execute_tests_ultra_fast")?;
-        
+
         // Convert tests to Python format (minimal overhead)
-        let py_test_dicts: Vec<&PyDict> = tests.iter().map(|test| {
-            let test_dict = PyDict::new(py);
-            test_dict.set_item("id", &test.id).unwrap();
-            test_dict.set_item("module", test.path.file_stem().unwrap().to_str().unwrap()).unwrap();
-            
-            // Handle class methods properly: use ClassName::method_name format
-            let function_ref = if let Some(ref class_name) = test.class_name {
-                format!("{}::{}", class_name, test.function_name)
-            } else {
-                test.function_name.clone()
-            };
-            test_dict.set_item("function", function_ref).unwrap();
-            test_dict.set_item("path", test.path.to_str().unwrap()).unwrap();
-            
-            // Include decorators for parametrized tests
-            let decorators_list = PyList::new(py, &test.decorators);
-            test_dict.set_item("decorators", decorators_list).unwrap();
-            
-            // Include class name separately if present
-            if let Some(ref class_name) = test.class_name {
-                test_dict.set_item("class_name", class_name).unwrap();
-            }
-            
-            test_dict
-        }).collect();
-        
+        let py_test_dicts: Vec<&PyDict> = tests
+            .iter()
+            .map(|test| {
+                let test_dict = PyDict::new(py);
+                test_dict.set_item("id", &test.id).unwrap();
+                test_dict
+                    .set_item("module", test.path.file_stem().unwrap().to_str().unwrap())
+                    .unwrap();
+
+                // Handle class methods properly: use ClassName::method_name format
+                let function_ref = if let Some(ref class_name) = test.class_name {
+                    format!("{}::{}", class_name, test.function_name)
+                } else {
+                    test.function_name.clone()
+                };
+                test_dict.set_item("function", function_ref).unwrap();
+                test_dict
+                    .set_item("path", test.path.to_str().unwrap())
+                    .unwrap();
+
+                // Include decorators for parametrized tests
+                let decorators_list = PyList::new(py, &test.decorators);
+                test_dict.set_item("decorators", decorators_list).unwrap();
+
+                // Include class name separately if present
+                if let Some(ref class_name) = test.class_name {
+                    test_dict.set_item("class_name", class_name).unwrap();
+                }
+
+                test_dict
+            })
+            .collect();
+
         let py_tests = PyList::new(py, py_test_dicts);
-        
+
         // Execute with maximum performance
         let py_results = execute_tests_fn.call1((py_tests,))?;
         let results_list: &PyList = py_results.downcast()?;
-        
+
         // Convert results back (minimal overhead)
         for py_result in results_list {
             let result_dict: &PyDict = py_result.downcast()?;
-            
+
             let test_id: String = result_dict.get_item("id").unwrap().extract()?;
             let duration: f64 = result_dict.get_item("duration").unwrap().extract()?;
             let error: Option<String> = result_dict.get_item("error").unwrap().extract()?;
-            
+
             // Check for new outcome format first, fall back to passed bool
             let outcome = if let Some(outcome_str) = result_dict.get_item("outcome") {
                 match outcome_str.extract::<String>()?.as_str() {
                     "passed" => TestOutcome::Passed,
                     "failed" => TestOutcome::Failed,
                     "skipped" => {
-                        let reason = result_dict.get_item("skip_reason")
+                        let reason = result_dict
+                            .get_item("skip_reason")
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::Skipped { reason }
-                    },
+                    }
                     "xfailed" => {
-                        let reason = result_dict.get_item("xfail_reason")
+                        let reason = result_dict
+                            .get_item("xfail_reason")
                             .and_then(|r| r.extract::<String>().ok());
                         TestOutcome::XFailed { reason }
-                    },
+                    }
                     "xpassed" => TestOutcome::XPassed,
                     _ => TestOutcome::Failed, // Unknown outcome
                 }
             } else {
                 // Fall back to old format
                 let passed: bool = result_dict.get_item("passed").unwrap().extract()?;
-                if passed { TestOutcome::Passed } else { TestOutcome::Failed }
+                if passed {
+                    TestOutcome::Passed
+                } else {
+                    TestOutcome::Failed
+                }
             };
-            
+
             let output = match &outcome {
                 TestOutcome::Passed => "PASSED".to_string(),
                 TestOutcome::Failed => "FAILED".to_string(),
-                TestOutcome::Skipped { reason } => format!("SKIPPED: {}", reason.as_deref().unwrap_or("Unknown")),
-                TestOutcome::XFailed { reason } => format!("XFAIL: {}", reason.as_deref().unwrap_or("Expected failure")),
+                TestOutcome::Skipped { reason } => {
+                    format!("SKIPPED: {}", reason.as_deref().unwrap_or("Unknown"))
+                }
+                TestOutcome::XFailed { reason } => {
+                    format!("XFAIL: {}", reason.as_deref().unwrap_or("Expected failure"))
+                }
                 TestOutcome::XPassed => "XPASS".to_string(),
             };
-            
+
             results.push(TestResult {
                 test_id,
                 outcome,
@@ -829,17 +988,17 @@ impl UltraFastPythonEngine {
                 stderr: String::new(),
             });
         }
-        
+
         Ok(results)
     }
-    
+
     /// Update comprehensive performance statistics
     fn update_performance_stats(
-        &self, 
-        execution_time: Duration, 
-        strategy: &RevolutionaryExecutionStrategy, 
+        &self,
+        execution_time: Duration,
+        strategy: &RevolutionaryExecutionStrategy,
         test_count: usize,
-        system_profile: &SystemProfile
+        system_profile: &SystemProfile,
     ) {
         let mut stats = self.performance_stats.lock();
         stats.total_tests = test_count;
@@ -847,83 +1006,85 @@ impl UltraFastPythonEngine {
         stats.tests_per_second = test_count as f64 / execution_time.as_secs_f64();
         stats.strategy_used = format!("{:?}", strategy);
         stats.system_profile = Some(system_profile.clone());
-        
+
         // Calculate estimated pytest time and speedup
         stats.estimated_pytest_time = test_count as f64 * 0.02; // 20ms per test estimate
         stats.actual_speedup = stats.estimated_pytest_time / execution_time.as_secs_f64();
-        
+
         // Strategy-specific efficiency calculations
         match strategy {
             RevolutionaryExecutionStrategy::NativeJIT { .. } => {
                 stats.memory_efficiency = 0.98;
                 stats.cpu_utilization = 0.95;
-            },
+            }
             RevolutionaryExecutionStrategy::BurstExecution { .. } => {
                 stats.memory_efficiency = 0.92;
                 stats.cpu_utilization = 0.88;
-            },
+            }
             RevolutionaryExecutionStrategy::UltraInProcess { .. } => {
                 stats.memory_efficiency = 0.80;
                 stats.cpu_utilization = 0.75;
-            },
+            }
             RevolutionaryExecutionStrategy::WorkStealingParallel { .. } => {
                 stats.memory_efficiency = 0.85;
                 stats.cpu_utilization = 0.95;
-            },
+            }
             RevolutionaryExecutionStrategy::MassiveParallel { .. } => {
                 stats.memory_efficiency = 0.90;
                 stats.cpu_utilization = 0.90;
-            },
+            }
         }
-        
+
         // Estimate cache hit rate based on cache warmed state
         stats.cache_hit_rate = if self.cache_warmed.load(std::sync::atomic::Ordering::Relaxed) {
             0.95
         } else {
             0.75
         };
-        
+
         // Mark cache as warmed after first execution
-        self.cache_warmed.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.cache_warmed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
-    
+
     /// Get comprehensive performance statistics
     #[allow(dead_code)]
     pub fn get_performance_stats(&self) -> UltraPerformanceStats {
         self.performance_stats.lock().clone()
     }
-    
+
     /// Legacy execute_tests method for compatibility
     fn execute_tests(&self, py: Python, tests: &[TestItem]) -> PyResult<Vec<TestResult>> {
         self.execute_tests_revolutionary(py, tests, false)
     }
-    
+
     /// Perform global teardown after all tests have completed
     fn perform_global_teardown(&self, py: Python) -> PyResult<()> {
         let worker_module = self.worker_module.as_ref(py);
-        
+
         // Call the perform_global_teardown function from the Python worker
         if let Ok(teardown_fn) = worker_module.getattr("perform_global_teardown") {
             teardown_fn.call0()?;
         }
-        
+
         Ok(())
     }
-    
+
     /// Get the ultra-optimized Python code with all performance enhancements
     fn get_ultra_optimized_python_code(verbose: bool) -> String {
         // Use the new fixture-aware worker code
         use crate::core::fixture_integration::generate_fixture_aware_worker_code;
-        
+
         // Return the complete fixture-aware worker code
         generate_fixture_aware_worker_code(verbose)
     }
-    
+
     /// Legacy method that returns old-style worker code (kept for reference)
     #[allow(dead_code)]
     fn get_legacy_worker_code(verbose: bool) -> String {
         let verbose_str = if verbose { "True" } else { "False" };
-        format!(r#"
+        format!(
+            r#"
 import sys, time, importlib, gc, os, inspect, threading
 from concurrent.futures import ThreadPoolExecutor
 import queue
@@ -1674,7 +1835,9 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
         thread.join()
     
     return results
-"#, verbose_str)
+"#,
+            verbose_str
+        )
     }
 }
 
@@ -1698,13 +1861,12 @@ pub struct UltraFastExecutor {
     learning_enabled: bool,
 }
 
-
 impl UltraFastExecutor {
     pub fn new(verbose: bool) -> Result<Self> {
         if verbose {
             eprintln!("🚀 Initializing Revolutionary Ultra-Fast Executor...");
         }
-        
+
         Ok(Self {
             verbose,
             dev_experience: None,
@@ -1721,24 +1883,30 @@ impl UltraFastExecutor {
         // Ignore num_workers - we use revolutionary adaptive strategy selection
         Self::new(verbose)
     }
-    
+
     /// 🗑️ REMOVED: SIMD discovery now automatically integrated in fastest-core
     /// Discovery is always SIMD-accelerated by default
-    
+
     /// Configure adaptive execution settings
     pub fn with_adaptive_execution(mut self, enabled: bool) -> Self {
         self.adaptive_execution = enabled;
         if self.verbose {
-            eprintln!("✅ Adaptive execution: {}", if enabled { "enabled" } else { "disabled" });
+            eprintln!(
+                "✅ Adaptive execution: {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
         }
         self
     }
-    
+
     /// Configure performance learning
     pub fn with_performance_learning(mut self, enabled: bool) -> Self {
         self.learning_enabled = enabled;
         if self.verbose {
-            eprintln!("✅ Performance learning: {}", if enabled { "enabled" } else { "disabled" });
+            eprintln!(
+                "✅ Performance learning: {}",
+                if enabled { "enabled" } else { "disabled" }
+            );
         }
         self
     }
@@ -1754,13 +1922,18 @@ impl UltraFastExecutor {
         self.plugin_compatibility = Some(PluginCompatibilityManager::new(config));
         self
     }
-    
+
     /// Configure plugin manager for pytest compatibility and extensibility
     pub fn with_plugin_manager(mut self, manager: Arc<PluginManager>) -> Self {
         self.plugin_manager = Some(manager);
         if self.verbose {
-            eprintln!("✅ Plugin system enabled with {} plugins", 
-                self.plugin_manager.as_ref().map(|m| m.plugins().len()).unwrap_or(0));
+            eprintln!(
+                "✅ Plugin system enabled with {} plugins",
+                self.plugin_manager
+                    .as_ref()
+                    .map(|m| m.plugins().len())
+                    .unwrap_or(0)
+            );
         }
         self
     }
@@ -1768,9 +1941,12 @@ impl UltraFastExecutor {
     /// 🚀 REVOLUTIONARY EXECUTE METHOD - Advanced Adaptive Strategy Selection
     pub fn execute(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         let test_count = tests.len();
-        
+
         if self.verbose {
-            eprintln!("🚀 REVOLUTIONARY EXECUTION: {} tests with adaptive strategy selection", test_count);
+            eprintln!(
+                "🚀 REVOLUTIONARY EXECUTION: {} tests with adaptive strategy selection",
+                test_count
+            );
         }
 
         // Call pytest_sessionstart hook if plugin manager available
@@ -1779,7 +1955,10 @@ impl UltraFastExecutor {
                 "test_count": test_count,
                 "test_paths": tests.iter().map(|t| t.path.to_string_lossy()).collect::<Vec<_>>()
             });
-            if let Err(e) = plugin_manager.call_hook("pytest_sessionstart", HookArgs::new().arg("session", session_info)) {
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_sessionstart",
+                HookArgs::new().arg("session", session_info),
+            ) {
                 eprintln!("Warning: pytest_sessionstart hook failed: {}", e);
             }
         }
@@ -1797,57 +1976,71 @@ impl UltraFastExecutor {
             let strategy = Self::determine_execution_strategy(test_count);
             self.run_tests_with_revolutionary_strategy(tests, strategy)
         };
-        
+
         // Call pytest_sessionfinish hook
         if let Some(ref plugin_manager) = self.plugin_manager {
-            let exit_status = if results.as_ref().map(|r| r.iter().all(|t| t.passed())).unwrap_or(false) { 0 } else { 1 };
-            if let Err(e) = plugin_manager.call_hook("pytest_sessionfinish", HookArgs::new().arg("exitstatus", exit_status)) {
+            let exit_status = if results
+                .as_ref()
+                .map(|r| r.iter().all(|t| t.passed()))
+                .unwrap_or(false)
+            {
+                0
+            } else {
+                1
+            };
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_sessionfinish",
+                HookArgs::new().arg("exitstatus", exit_status),
+            ) {
                 eprintln!("Warning: pytest_sessionfinish hook failed: {}", e);
             }
         }
-        
+
         results
     }
-    
+
     /// Execute with the revolutionary adaptive engine
     fn execute_with_revolutionary_engine(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         let execution_start = Instant::now();
-        
+
         // Execute with the revolutionary Python engine
         let results = Python::with_gil(|py| {
             // Initialize the revolutionary engine
-            let engine = UltraFastPythonEngine::new(py, self.verbose)
-                .map_err(|e| Error::Execution(format!("Failed to initialize revolutionary engine: {}", e)))?;
+            let engine = UltraFastPythonEngine::new(py, self.verbose).map_err(|e| {
+                Error::Execution(format!("Failed to initialize revolutionary engine: {}", e))
+            })?;
 
             // Execute with revolutionary adaptive strategy selection
-            let results = engine.execute_tests_revolutionary(py, &tests, self.verbose)
+            let results = engine
+                .execute_tests_revolutionary(py, &tests, self.verbose)
                 .map_err(|e| Error::Execution(format!("Revolutionary execution failed: {}", e)))?;
-            
+
             // Perform global teardown after all tests
             if self.verbose {
                 eprintln!("🧹 Performing global teardown...");
             }
-            engine.perform_global_teardown(py)
+            engine
+                .perform_global_teardown(py)
                 .map_err(|e| Error::Execution(format!("Global teardown failed: {}", e)))?;
-            
+
             Ok::<Vec<TestResult>, Error>(results)
         })?;
-        
+
         if self.verbose {
             let duration = execution_start.elapsed();
             let tests_per_second = tests.len() as f64 / duration.as_secs_f64();
             let estimated_speedup = (tests.len() as f64 * 0.02) / duration.as_secs_f64();
-            
+
             eprintln!("🚀 REVOLUTIONARY COMPLETE: {} tests in {:.3}s ({:.0} tests/sec, {:.1}x faster than pytest)", 
-                     tests.len(), 
+                     tests.len(),
                      duration.as_secs_f64(),
                      tests_per_second,
                      estimated_speedup);
         }
-        
+
         Ok(results)
     }
-    
+
     /// Get comprehensive performance statistics
     #[allow(dead_code)]
     pub fn get_performance_stats(&self) -> UltraPerformanceStats {
@@ -1909,15 +2102,17 @@ impl UltraFastExecutor {
         // Use the revolutionary PyO3 engine with all optimizations
         Python::with_gil(|py| {
             // Initialize the ultra-fast Python engine
-            let engine = UltraFastPythonEngine::new(py, self.verbose)
-                .map_err(|e| Error::Execution(format!("Failed to initialize ultra engine: {}", e)))?;
+            let engine = UltraFastPythonEngine::new(py, self.verbose).map_err(|e| {
+                Error::Execution(format!("Failed to initialize ultra engine: {}", e))
+            })?;
 
             // Execute all tests with plugin hooks if available
             if let Some(ref plugin_manager) = self.plugin_manager {
                 self.execute_tests_with_hooks(py, &engine, &tests, plugin_manager)
             } else {
                 // Execute without hooks for maximum performance
-                engine.execute_tests(py, &tests)
+                engine
+                    .execute_tests(py, &tests)
                     .map_err(|e| Error::Execution(format!("Ultra execution failed: {}", e)))
             }
         })
@@ -1927,17 +2122,26 @@ impl UltraFastExecutor {
     /// Only used for truly massive test suites where parallelism benefits outweigh overhead
     fn execute_massive_parallel(&self, tests: Vec<TestItem>) -> Result<Vec<TestResult>> {
         if self.verbose {
-            eprintln!("🔄 Massive parallel: Using process forking for {} tests", tests.len());
+            eprintln!(
+                "🔄 Massive parallel: Using process forking for {} tests",
+                tests.len()
+            );
         }
 
         // Group tests by file to distribute across processes
         let mut file_groups = std::collections::HashMap::new();
         for test in tests {
-            file_groups.entry(test.path.clone()).or_insert_with(Vec::new).push(test);
+            file_groups
+                .entry(test.path.clone())
+                .or_insert_with(Vec::new)
+                .push(test);
         }
 
         if self.verbose {
-            eprintln!("🔄 Distributing {} files across processes", file_groups.len());
+            eprintln!(
+                "🔄 Distributing {} files across processes",
+                file_groups.len()
+            );
         }
 
         // Execute each file group in parallel using rayon
@@ -1961,12 +2165,11 @@ impl UltraFastExecutor {
     ) -> Result<Vec<TestResult>> {
         // For massive suites, we fork a new fastest process per file
         // This eliminates coordination overhead while maximizing parallelism
-        
+
         // For now, fall back to ultra in-process (still faster than workers)
         // In a full implementation, this would spawn a new fastest subprocess
         self.execute_ultra_inprocess(tests)
     }
-
 
     /// Execute tests with plugin compatibility support
     fn execute_with_plugins(
@@ -1980,7 +2183,7 @@ impl UltraFastExecutor {
         tokio::task::block_in_place(|| {
             // Create a handle to the current runtime
             let handle = tokio::runtime::Handle::current();
-            
+
             // Run the async operation within the current runtime
             handle.block_on(async {
                 match plugin_mgr.execute_with_plugins(tests).await {
@@ -1996,7 +2199,9 @@ impl UltraFastExecutor {
     /// Accept coverage configuration for API compatibility. No-op for now.
     pub fn with_coverage(self, _source_dirs: Vec<std::path::PathBuf>) -> Self {
         if self.verbose {
-            eprintln!("⚠️  Coverage collection is not yet implemented in the revolutionary executor");
+            eprintln!(
+                "⚠️  Coverage collection is not yet implemented in the revolutionary executor"
+            );
         }
         self
     }
@@ -2008,7 +2213,7 @@ impl UltraFastExecutor {
             Vec::new()
         })
     }
-    
+
     /// Execute tests with plugin hooks wrapped around each test
     fn execute_tests_with_hooks(
         &self,
@@ -2018,41 +2223,53 @@ impl UltraFastExecutor {
         plugin_manager: &Arc<PluginManager>,
     ) -> Result<Vec<TestResult>> {
         let mut results = Vec::with_capacity(tests.len());
-        
+
         for test in tests {
             // Call pytest_runtest_setup hook
             let test_info = serde_json::json!({
                 "nodeid": &test.id,
                 "location": (test.path.to_string_lossy(), test.line_number.unwrap_or(0), &test.function_name)
             });
-            
-            if let Err(e) = plugin_manager.call_hook("pytest_runtest_setup", HookArgs::new().arg("item", test_info.clone())) {
+
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_runtest_setup",
+                HookArgs::new().arg("item", test_info.clone()),
+            ) {
                 if self.verbose {
                     eprintln!("Warning: pytest_runtest_setup hook failed: {}", e);
                 }
             }
-            
+
             // Call pytest_runtest_call hook
-            if let Err(e) = plugin_manager.call_hook("pytest_runtest_call", HookArgs::new().arg("item", test_info.clone())) {
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_runtest_call",
+                HookArgs::new().arg("item", test_info.clone()),
+            ) {
                 if self.verbose {
                     eprintln!("Warning: pytest_runtest_call hook failed: {}", e);
                 }
             }
-            
+
             // Execute the test
-            let test_results = engine.execute_tests(py, &[test.clone()])
+            let test_results = engine
+                .execute_tests(py, &[test.clone()])
                 .map_err(|e| Error::Execution(format!("Test execution failed: {}", e)))?;
-            
-            let result = test_results.into_iter().next()
+
+            let result = test_results
+                .into_iter()
+                .next()
                 .ok_or_else(|| Error::Execution("No test result returned".to_string()))?;
-            
+
             // Call pytest_runtest_teardown hook
-            if let Err(e) = plugin_manager.call_hook("pytest_runtest_teardown", HookArgs::new().arg("item", test_info.clone())) {
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_runtest_teardown",
+                HookArgs::new().arg("item", test_info.clone()),
+            ) {
                 if self.verbose {
                     eprintln!("Warning: pytest_runtest_teardown hook failed: {}", e);
                 }
             }
-            
+
             // Call pytest_runtest_logreport hook
             let report = serde_json::json!({
                 "nodeid": &test.id,
@@ -2066,16 +2283,19 @@ impl UltraFastExecutor {
                 "duration": result.duration.as_secs_f64(),
                 "when": "call"
             });
-            
-            if let Err(e) = plugin_manager.call_hook("pytest_runtest_logreport", HookArgs::new().arg("report", report)) {
+
+            if let Err(e) = plugin_manager.call_hook(
+                "pytest_runtest_logreport",
+                HookArgs::new().arg("report", report),
+            ) {
                 if self.verbose {
                     eprintln!("Warning: pytest_runtest_logreport hook failed: {}", e);
                 }
             }
-            
+
             results.push(result);
         }
-        
+
         Ok(results)
     }
 }
@@ -2084,7 +2304,7 @@ impl UltraFastExecutor {
 /*                 🚀 REVOLUTIONARY ARCHITECTURE COMPLETE 🚀                  */
 /* -------------------------------------------------------------------------- */
 
-// All worker overhead eliminated! 
+// All worker overhead eliminated!
 // Single ultra-optimized strategy delivers 2.37x speedup consistently.
 // Codebase simplified by ~80% while dramatically improving performance.
 
@@ -2093,7 +2313,10 @@ impl UltraFastExecutor {
 fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String> {
     let file_path = &test_item.path;
     if !file_path.exists() {
-        return Err(Error::Discovery(format!("File not found for test '{}': {:?}", test_item.id, file_path)));
+        return Err(Error::Discovery(format!(
+            "File not found for test '{}': {:?}",
+            test_item.id, file_path
+        )));
     }
 
     let file = File::open(file_path)?;
@@ -2106,14 +2329,18 @@ fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String>
     let mut def_line_indent = 0;
     let mut function_body_min_indent: Option<usize> = None;
 
-    let start_line = test_item.line_number.map(|l| l.saturating_sub(1)).unwrap_or(0); // 0-indexed
+    let start_line = test_item
+        .line_number
+        .map(|l| l.saturating_sub(1))
+        .unwrap_or(0); // 0-indexed
 
-    for _ in 0..start_line { // Skip lines before the estimated start if line_number is available
+    for _ in 0..start_line {
+        // Skip lines before the estimated start if line_number is available
         if lines.next().is_none() {
             break;
         }
     }
-    
+
     let func_def_pattern = format!("def {}(", test_item.function_name);
     let async_func_def_pattern = format!("async def {}(", test_item.function_name);
 
@@ -2123,32 +2350,43 @@ fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String>
 
         if !in_function {
             let trimmed_line = line.trim_start();
-            if trimmed_line.starts_with(&func_def_pattern) || trimmed_line.starts_with(&async_func_def_pattern) {
+            if trimmed_line.starts_with(&func_def_pattern)
+                || trimmed_line.starts_with(&async_func_def_pattern)
+            {
                 in_function = true;
                 def_line_indent = line.len() - trimmed_line.len();
                 func_lines.push(line.clone());
                 if verbose {
-                    eprintln!("   [Fetcher] Found def: '{}' at line {} (relative), indent: {}", line.trim(), current_line_idx_from_start, def_line_indent);
+                    eprintln!(
+                        "   [Fetcher] Found def: '{}' at line {} (relative), indent: {}",
+                        line.trim(),
+                        current_line_idx_from_start,
+                        def_line_indent
+                    );
                 }
             }
         } else {
             let current_line_indent = line.len() - line.trim_start().len();
-            if line.trim().is_empty() { // Keep empty lines if part of function body
+            if line.trim().is_empty() {
+                // Keep empty lines if part of function body
                 func_lines.push(line.clone());
                 continue;
             }
 
             if current_line_indent > def_line_indent {
                 func_lines.push(line.clone());
-                if line.trim_start().len() > 0 { // Only consider non-empty lines for min_indent
+                if line.trim_start().len() > 0 {
+                    // Only consider non-empty lines for min_indent
                     function_body_min_indent = Some(
-                        function_body_min_indent
-                            .map_or(current_line_indent, |min_val| std::cmp::min(min_val, current_line_indent))
+                        function_body_min_indent.map_or(current_line_indent, |min_val| {
+                            std::cmp::min(min_val, current_line_indent)
+                        }),
                     );
                 }
-            } else { // Dedented or same level, function ended
+            } else {
+                // Dedented or same level, function ended
                 if verbose {
-                     eprintln!("   [Fetcher] Dedent detected at line '{}', indent: {}, def_indent: {}. Function ended.", line.trim(), current_line_indent, def_line_indent);
+                    eprintln!("   [Fetcher] Dedent detected at line '{}', indent: {}, def_indent: {}. Function ended.", line.trim(), current_line_indent, def_line_indent);
                 }
                 break;
             }
@@ -2157,13 +2395,19 @@ fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String>
 
     if !in_function {
         if verbose {
-             eprintln!("   [Fetcher] Warning: Function definition '{}' not found in {:?} starting near line {:?}.", test_item.function_name, file_path, test_item.line_number);
+            eprintln!("   [Fetcher] Warning: Function definition '{}' not found in {:?} starting near line {:?}.", test_item.function_name, file_path, test_item.line_number);
         }
-        return Err(Error::Discovery(format!("Function definition '{}' not found in {:?} for test '{}'", test_item.function_name, file_path, test_item.id)));
+        return Err(Error::Discovery(format!(
+            "Function definition '{}' not found in {:?} for test '{}'",
+            test_item.function_name, file_path, test_item.id
+        )));
     }
 
     if func_lines.is_empty() {
-         return Err(Error::Discovery(format!("Function '{}' found but no lines captured for test '{}'", test_item.function_name, test_item.id)));
+        return Err(Error::Discovery(format!(
+            "Function '{}' found but no lines captured for test '{}'",
+            test_item.function_name, test_item.id
+        )));
     }
 
     // De-indent:
@@ -2185,12 +2429,16 @@ fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String>
         }
         de_indented_code.push('\n');
     }
-    
+
     if verbose {
-        eprintln!("   [Fetcher] Extracted for '{}':
+        eprintln!(
+            "   [Fetcher] Extracted for '{}':
 --BEGIN CODE--
 {}
---END CODE--", test_item.id, de_indented_code.trim_end());
+--END CODE--",
+            test_item.id,
+            de_indented_code.trim_end()
+        );
     }
 
     Ok(de_indented_code)

@@ -1,13 +1,14 @@
 //! Fixture Integration Module
-//! 
+//!
 //! This module provides the Python code for complete fixture execution integration
 //! with support for all scopes, dependencies, and teardown.
 
 /// Generate the enhanced Python worker code with full fixture support
 pub fn generate_fixture_aware_worker_code(verbose: bool) -> String {
     let verbose_str = if verbose { "True" } else { "False" };
-    
-    format!(r#"
+
+    format!(
+        r#"
 import sys
 import os
 import inspect
@@ -1619,5 +1620,7 @@ def perform_global_teardown():
 def get_teardown_order():
     """Get the current teardown order for debugging"""
     return list(reversed(_setup_state['setup_order']))
-"#, verbose_str=verbose_str)
+"#,
+        verbose_str = verbose_str
+    )
 }

@@ -1,5 +1,5 @@
-use crate::test::discovery::TestItem;
 use crate::error::Result;
+use crate::test::discovery::TestItem;
 use crate::utils::simd_json; // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -46,16 +46,24 @@ impl DiscoveryCache {
 
         // Check version compatibility and validate cache integrity
         if cache.version != Self::CURRENT_VERSION {
-            eprintln!("Warning: Cache version mismatch (found: {}, expected: {}). Clearing cache.", 
-                     cache.version, Self::CURRENT_VERSION);
+            eprintln!(
+                "Warning: Cache version mismatch (found: {}, expected: {}). Clearing cache.",
+                cache.version,
+                Self::CURRENT_VERSION
+            );
             cache = Self::new();
         } else {
             // Validate cache integrity
             let initial_entries = cache.entries.len();
-            cache.entries.retain(|path, _| path.exists() && path.is_file());
+            cache
+                .entries
+                .retain(|path, _| path.exists() && path.is_file());
             let removed_entries = initial_entries - cache.entries.len();
             if removed_entries > 0 {
-                eprintln!("Warning: Removed {} stale cache entries for missing files", removed_entries);
+                eprintln!(
+                    "Warning: Removed {} stale cache entries for missing files",
+                    removed_entries
+                );
             }
         }
 
@@ -97,25 +105,22 @@ impl DiscoveryCache {
             }
 
             // Validate file metadata
-            match fs::metadata(path) {
-                Ok(metadata) => {
-                    let size = metadata.len();
-                    let modified = metadata.modified().ok()?;
+            if let Ok(metadata) = fs::metadata(path) {
+                let size = metadata.len();
+                let modified = metadata.modified().ok()?;
 
-                    // Check both modification time and file size
-                    if self.is_same_time(&modified, &entry.modified) && size == entry.file_size {
-                        // Verify content hash for extra safety
-                        if let Ok(current_hash) = self.calculate_content_hash_fast(path) {
-                            if current_hash == entry.content_hash {
-                                // Validate cached tests are not empty/corrupted
-                                if !entry.tests.is_empty() {
-                                    return Some(entry.tests.clone());
-                                }
+                // Check both modification time and file size
+                if self.is_same_time(&modified, &entry.modified) && size == entry.file_size {
+                    // Verify content hash for extra safety
+                    if let Ok(current_hash) = self.calculate_content_hash_fast(path) {
+                        if current_hash == entry.content_hash {
+                            // Validate cached tests are not empty/corrupted
+                            if !entry.tests.is_empty() {
+                                return Some(entry.tests.clone());
                             }
                         }
                     }
                 }
-                Err(_) => {}
             }
             None
         })
@@ -178,8 +183,8 @@ impl DiscoveryCache {
 
     /// Streaming hash calculation optimized for all files using xxHash
     fn calculate_content_hash_streaming_xxhash(&self, path: &Path) -> Result<String> {
-        use xxhash_rust::xxh3::Xxh3; // Using xxh3 for good performance
         use std::io::Read;
+        use xxhash_rust::xxh3::Xxh3; // Using xxh3 for good performance
 
         let mut file = File::open(path)?;
         let mut hasher = Xxh3::new();
@@ -257,7 +262,7 @@ pub struct CacheStats {
 /// Get default cache path with better error handling
 pub fn default_cache_path() -> PathBuf {
     dirs::cache_dir()
-        .or_else(|| dirs::data_local_dir())
+        .or_else(dirs::data_local_dir)
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| {
             eprintln!("Warning: Unable to determine cache directory, using temp dir");

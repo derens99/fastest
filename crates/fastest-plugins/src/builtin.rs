@@ -1,7 +1,7 @@
 //! Built-in plugins that provide core functionality
 
-use std::any::Any;
 use crate::api::{Plugin, PluginMetadata};
+use std::any::Any;
 
 /// Fixture management plugin
 #[derive(Debug)]
@@ -27,11 +27,11 @@ impl Plugin for FixturePlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -61,11 +61,11 @@ impl Plugin for MarkerPlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -95,11 +95,11 @@ impl Plugin for ReportingPlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }
@@ -129,11 +129,11 @@ impl Plugin for CapturePlugin {
     fn metadata(&self) -> &PluginMetadata {
         &self.metadata
     }
-    
+
     fn as_any(&self) -> &dyn Any {
         self
     }
-    
+
     fn as_any_mut(&mut self) -> &mut dyn Any {
         self
     }

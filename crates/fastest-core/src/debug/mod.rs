@@ -83,11 +83,7 @@ impl DebugManager {
     }
 
     /// Create enhanced error from basic information
-    pub fn create_enhanced_error(
-        &self,
-        test: &TestItem,
-        error_message: &str,
-    ) -> EnhancedError {
+    pub fn create_enhanced_error(&self, test: &TestItem, error_message: &str) -> EnhancedError {
         EnhancedError {
             test_id: test.id.clone(),
             error_type: self.classify_error(error_message),

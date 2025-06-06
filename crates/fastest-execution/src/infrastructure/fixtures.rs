@@ -1,5 +1,5 @@
 //! Fixture execution integration
-//! 
+//!
 //! This module integrates the advanced fixture system from fastest-core
 //! with the Python execution layer.
 
@@ -13,8 +13,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use fastest_core::test::fixtures::{
-    AdvancedFixtureManager, FixtureRequest, FixtureScope,
-    ConftestDiscovery, generate_builtin_fixture_code, is_builtin_fixture,
+    generate_builtin_fixture_code, is_builtin_fixture, AdvancedFixtureManager, ConftestDiscovery,
+    FixtureRequest, FixtureScope,
 };
 use fastest_core::TestItem;
 
@@ -34,7 +34,7 @@ impl FixtureExecutor {
     pub fn new(project_root: PathBuf) -> Result<Self> {
         let manager = Arc::new(AdvancedFixtureManager::new());
         let mut conftest_discovery = ConftestDiscovery::new()?;
-        
+
         // Discover and register all conftest fixtures
         let conftest_files = conftest_discovery.discover_conftest_files(&project_root)?;
         for conftest_path in conftest_files {
@@ -43,7 +43,7 @@ impl FixtureExecutor {
                 manager.register_fixture(fixture)?;
             }
         }
-        
+
         Ok(Self {
             manager,
             _conftest_discovery: Arc::new(Mutex::new(conftest_discovery)),
@@ -51,7 +51,7 @@ impl FixtureExecutor {
             active_instances: Arc::new(Mutex::new(HashMap::new())),
         })
     }
-    
+
     /// Initialize Python fixture environment
     pub fn initialize_python_fixtures(&self, py: Python) -> PyResult<PyObject> {
         let fixture_module = PyModule::from_code(
@@ -60,13 +60,13 @@ impl FixtureExecutor {
             "fastest_fixtures",
             "fastest_fixtures",
         )?;
-        
+
         // Register built-in fixtures
         self.register_builtin_fixtures(py, &fixture_module)?;
-        
+
         Ok(fixture_module.into())
     }
-    
+
     /// Setup fixtures for a test
     pub fn setup_test_fixtures(
         &self,
@@ -75,26 +75,30 @@ impl FixtureExecutor {
         fixture_module: &PyModule,
     ) -> PyResult<PyObject> {
         let request = FixtureRequest::from_test_item(test);
-        
+
         // Get all required fixtures (including autouse)
-        let _required_fixtures = self.manager.get_required_fixtures(&request)
+        let _required_fixtures = self
+            .manager
+            .get_required_fixtures(&request)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        
+
         // Create fixture values dict
         let fixture_values = PyDict::new(py);
-        
+
         // Setup fixtures in dependency order
-        let sorted_fixtures = self.manager.setup_fixtures(&request)
+        let sorted_fixtures = self
+            .manager
+            .setup_fixtures(&request)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        
+
         for (name, _value) in sorted_fixtures {
             let py_value = self.execute_fixture(py, &name, &request, fixture_module)?;
             fixture_values.set_item(name, py_value)?;
         }
-        
+
         Ok(fixture_values.into())
     }
-    
+
     /// Execute a single fixture
     fn execute_fixture(
         &self,
@@ -107,38 +111,40 @@ impl FixtureExecutor {
         if is_builtin_fixture(name) {
             return self.execute_builtin_fixture(py, name, request);
         }
-        
+
         // Get fixture definition
-        let fixture_def = self.manager.get_fixture_info(name)
-            .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err(
-                format!("Fixture '{}' not found", name)
-            ))?;
-        
+        let fixture_def = self.manager.get_fixture_info(name).ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("Fixture '{}' not found", name))
+        })?;
+
         // Check cache based on scope
         let cache_key = format!("{}::{}", name, request.get_scope_id(fixture_def.scope));
-        
+
         let instances = self.active_instances.lock().unwrap();
         if let Some(cached) = instances.get(&cache_key) {
             return Ok(cached.clone());
         }
         drop(instances);
-        
+
         // Execute fixture function
         let fixture_fn = fixture_module.getattr(&*name)?;
-        
+
         // Prepare fixture arguments (dependencies)
         let kwargs = PyDict::new(py);
         for dep in &fixture_def.dependencies {
             let dep_value = self.execute_fixture(py, dep, request, fixture_module)?;
             kwargs.set_item(dep, dep_value)?;
         }
-        
+
         // Handle parametrized fixtures
         let result = if !fixture_def.params.is_empty() && request.param_index.is_some() {
             let param_index = request.param_index.unwrap();
             if param_index < fixture_def.params.len() {
                 let param_value = &fixture_def.params[param_index];
-                let py_request = Py::new(py, PyFixtureRequest::from_request(request, Some(param_value)))?;
+                let py_request = Py::new(
+                    py,
+                    PyFixtureRequest::from_request(request, Some(param_value)),
+                )?;
                 kwargs.set_item("request", py_request)?;
             }
             fixture_fn.call((), Some(kwargs))?
@@ -149,15 +155,15 @@ impl FixtureExecutor {
         } else {
             fixture_fn.call((), Some(kwargs))?
         };
-        
+
         // Cache based on scope
         let mut instances = self.active_instances.lock().unwrap();
         let py_object: PyObject = result.into();
         instances.insert(cache_key, py_object.clone());
-        
+
         Ok(py_object)
     }
-    
+
     /// Execute built-in fixture
     fn execute_builtin_fixture(
         &self,
@@ -221,19 +227,22 @@ capsys
                 Ok(py.eval(capsys_code, None, None)?.into())
             }
             "monkeypatch" => {
-                let monkeypatch_code = generate_builtin_fixture_code("monkeypatch")
-                    .ok_or_else(|| pyo3::exceptions::PyRuntimeError::new_err("Missing monkeypatch code"))?;
+                let monkeypatch_code =
+                    generate_builtin_fixture_code("monkeypatch").ok_or_else(|| {
+                        pyo3::exceptions::PyRuntimeError::new_err("Missing monkeypatch code")
+                    })?;
                 let locals = PyDict::new(py);
                 py.run(&monkeypatch_code, None, Some(locals))?;
                 let mp_class = locals.get_item("MonkeyPatch").unwrap();
                 Ok(mp_class.call0()?.into())
             }
-            _ => Err(pyo3::exceptions::PyRuntimeError::new_err(
-                format!("Unknown built-in fixture: {}", name)
-            ))
+            _ => Err(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Unknown built-in fixture: {}",
+                name
+            ))),
         }
     }
-    
+
     /// Teardown fixtures after test
     pub fn teardown_test_fixtures(
         &self,
@@ -242,44 +251,46 @@ capsys
         scope: FixtureScope,
     ) -> PyResult<()> {
         let request = FixtureRequest::from_test_item(test);
-        
+
         // Clear Python instances for the scope
         let scope_id = request.get_scope_id(scope);
         let mut instances = self.active_instances.lock().unwrap();
-        
-        let keys_to_remove: Vec<_> = instances.keys()
+
+        let keys_to_remove: Vec<_> = instances
+            .keys()
             .filter(|k| k.ends_with(&scope_id))
             .cloned()
             .collect();
-        
+
         for key in keys_to_remove {
             instances.remove(&key);
         }
-        
+
         // Teardown in the fixture manager
-        self.manager.teardown_fixtures(&request, scope)
+        self.manager
+            .teardown_fixtures(&request, scope)
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
-        
+
         Ok(())
     }
-    
+
     /// Register built-in fixtures
     fn register_builtin_fixtures(&self, py: Python, module: &PyModule) -> PyResult<()> {
         // Register tmp_path
         let tmp_path_code = generate_builtin_fixture_code("tmp_path").unwrap();
         py.run(&tmp_path_code, None, Some(module.dict()))?;
-        
+
         // Register capsys
         let capsys_code = generate_builtin_fixture_code("capsys").unwrap();
         py.run(&capsys_code, None, Some(module.dict()))?;
-        
+
         // Register monkeypatch
         let monkeypatch_code = generate_builtin_fixture_code("monkeypatch").unwrap();
         py.run(&monkeypatch_code, None, Some(module.dict()))?;
-        
+
         Ok(())
     }
-    
+
     /// Get Python runtime code for fixtures
     fn get_fixture_runtime_code(&self) -> String {
         r#"
@@ -324,7 +335,8 @@ class pytest:
     fixture = fixture
 
 sys.modules['pytest'] = pytest
-"#.to_string()
+"#
+        .to_string()
     }
 }
 
@@ -350,11 +362,7 @@ impl PyFixtureRequest {
 #[allow(non_local_definitions)]
 impl PyFixtureRequest {
     #[new]
-    fn new(
-        node_id: String,
-        test_name: String,
-        _param: Option<PyObject>,
-    ) -> Self {
+    fn new(node_id: String, test_name: String, _param: Option<PyObject>) -> Self {
         // For the new method, we don't store the PyObject, just None
         // The actual param is set via from_request
         Self {
@@ -363,24 +371,30 @@ impl PyFixtureRequest {
             param: None,
         }
     }
-    
+
     #[getter]
     fn node_id(&self) -> &str {
         &self.node_id
     }
-    
+
     #[getter]
     fn test_name(&self) -> &str {
         &self.test_name
     }
-    
+
     #[getter]
     fn param(&self, py: Python) -> PyResult<PyObject> {
         match &self.param {
             Some(value) => {
                 // Convert JSON value to Python object
                 let json_str = value.to_string();
-                Ok(py.eval(&format!("__import__('json').loads('{}')", json_str), None, None)?.into())
+                Ok(py
+                    .eval(
+                        &format!("__import__('json').loads('{}')", json_str),
+                        None,
+                        None,
+                    )?
+                    .into())
             }
             None => Ok(py.None()),
         }
@@ -391,15 +405,15 @@ impl PyFixtureRequest {
 mod tests {
     use super::*;
     use tempfile::TempDir;
-    
+
     #[test]
     fn test_fixture_executor_creation() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let executor = FixtureExecutor::new(temp_dir.path().to_path_buf())?;
-        
+
         // Should create successfully
         assert!(Arc::strong_count(&executor.manager) == 1);
-        
+
         Ok(())
     }
 }
