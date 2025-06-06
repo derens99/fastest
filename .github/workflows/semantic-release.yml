@@ -25,12 +25,34 @@ jobs:
       
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: 20
       
       - uses: dtolnay/rust-toolchain@stable
       
       - name: Install cargo-edit
-        run: cargo install cargo-edit
+        run: cargo install cargo-edit --locked
+      
+      - name: Create package.json for semantic-release
+        run: |
+          cat > package.json << 'EOF'
+          {
+            "name": "fastest-release",
+            "version": "0.0.0-development",
+            "private": true,
+            "devDependencies": {
+              "semantic-release": "^19.0.0",
+              "@semantic-release/changelog": "^6.0.0",
+              "@semantic-release/commit-analyzer": "^9.0.0",
+              "@semantic-release/release-notes-generator": "^10.0.0",
+              "@semantic-release/exec": "^6.0.0",
+              "@semantic-release/git": "^10.0.0",
+              "@semantic-release/github": "^8.0.0"
+            }
+          }
+          EOF
+      
+      - name: Install dependencies
+        run: npm install --no-audit
       
       - name: Semantic Release
         uses: cycjimmy/semantic-release-action@v4
@@ -39,10 +61,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           semantic_version: 19
-          extra_plugins: |
-            @semantic-release/changelog
-            @semantic-release/exec
-            @semantic-release/git
 
 # ── Build and upload binaries when a new release is created ──
   upload-binaries:
