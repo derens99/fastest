@@ -1,3 +1,12 @@
+## [1.0.1](https://github.com/derens99/fastest/compare/v1.0.0...v1.0.1) (2025-06-06)
+
+
+### Bug Fixes
+
+* cross-compilation setup for PyO3 in CI/CD ([248cee7](https://github.com/derens99/fastest/commit/248cee7a7d862d9c23aef749bf23173a7b5b4348))
+* make GitHub App token optional in CI workflow ([e1cdfe1](https://github.com/derens99/fastest/commit/e1cdfe164475a98c9ef9eb035718af3f7e6fdb88))
+* semver ([fb178e2](https://github.com/derens99/fastest/commit/fb178e25d9bd8e6d9afa48d7bda4f4f6b6224fdd))
+
 # [1.0.0](https://github.com/derens99/fastest/compare/v0.3.25...v1.0.0) (2025-06-06)
 
 
