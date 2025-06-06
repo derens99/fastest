@@ -131,7 +131,7 @@ jobs:
           python-version: '3.10'
 
       - name: Install cross
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && contains(matrix.targets, 'aarch64')
         uses: taiki-e/install-action@v2
         with:
           tool: cross
@@ -139,13 +139,13 @@ jobs:
       - name: Build binary (Linux/macOS)
         if: runner.os != 'Windows'
         run: |
-          if [[ "${{ runner.os }}" == "Linux" ]]; then
-            if [[ "${{ matrix.targets }}" == *"aarch64"* ]]; then
-              export PYO3_CROSS_PYTHON_VERSION=3.10
-              export PYO3_CROSS=1
-            fi
+          if [[ "${{ runner.os }}" == "Linux" ]] && [[ "${{ matrix.targets }}" == *"aarch64"* ]]; then
+            # Only use cross for Linux ARM64 cross-compilation
+            export PYO3_CROSS_PYTHON_VERSION=3.10
+            export PYO3_CROSS=1
             cross build --release --target ${{ matrix.targets }} --bin fastest
           else
+            # Use regular cargo for native builds (Linux x86_64 and all macOS)
             cargo build --release --target ${{ matrix.targets }} --bin fastest
           fi
 
