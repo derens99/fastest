@@ -21,7 +21,7 @@ serde_json.workspace = true
 colored.workspace = true
 
 # Python integration
-pyo3 = { version = "0.19", features = ["auto-initialize", "abi3-py38"] }
+pyo3 = { workspace = true, features = ["auto-initialize"] }
 rustpython-parser = "0.3.0" # For parsing Python code to AST
 rustpython-ast = "0.3.0"    # Python AST structures
 

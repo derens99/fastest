@@ -181,6 +181,20 @@ This document outlines the development roadmap for Fastest, with features priori
   - Improved code style consistency (collapsible ifs, redundant closures)
   - Enhanced type safety with proper destructuring patterns
 
+### v0.4.7 (January 2025) - Cross-Platform Build System Fixes
+- **Build System Improvements** ⭐⭐⭐
+  - Fixed Windows PowerShell syntax in CI/CD workflow
+  - Separated packaging steps for Windows (PowerShell) and Unix (bash)
+  - Fixed artifact directory creation with platform-specific commands
+  - Updated PyO3 dependencies to use workspace version (0.25)
+  - Removed Python ABI version lock (abi3-py38) for better flexibility
+  - Supports Python 3.8+ without specific version requirement
+  
+- **Dependency Updates** ⭐⭐
+  - Aligned PyO3 versions across all crates using workspace inheritance
+  - Removed version conflicts between workspace and crate dependencies
+  - Simplified Python integration with auto-initialize feature only
+
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 
 ### ✅ Comprehensive Test Suite Validation & Critical Fixes

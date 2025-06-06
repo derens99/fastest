@@ -140,23 +140,33 @@ jobs:
         run: |
           cargo build --release --target ${{ matrix.targets }} --bin fastest
           
-      - name: Create artifacts directory
+      - name: Create artifacts directory (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: New-Item -ItemType Directory -Force -Path artifacts
+
+      - name: Create artifacts directory (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
         run: mkdir -p artifacts
 
-      - name: Package artifacts
+      - name: Package artifacts (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          # Determine binary name and archive format based on OS
-          if [[ "${{ matrix.targets }}" == *"windows"* ]]; then
-            BINARY_NAME="fastest.exe"
-            ARCHIVE_NAME="fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.zip"
-            cp target/${{ matrix.targets }}/release/fastest.exe artifacts/
-            cd artifacts && zip $ARCHIVE_NAME fastest.exe && cd ..
-          else
-            BINARY_NAME="fastest"
-            ARCHIVE_NAME="fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.tar.gz"
-            cp target/${{ matrix.targets }}/release/fastest artifacts/
-            cd artifacts && tar czf $ARCHIVE_NAME fastest && cd ..
-          fi
+          $ARCHIVE_NAME = "fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.zip"
+          Copy-Item "target/${{ matrix.targets }}/release/fastest.exe" -Destination "artifacts/"
+          Set-Location artifacts
+          Compress-Archive -Path "fastest.exe" -DestinationPath $ARCHIVE_NAME
+          Set-Location ..
+
+      - name: Package artifacts (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ARCHIVE_NAME="fastest-${{ needs.semantic-release.outputs.new_release_version }}-${{ matrix.targets }}.tar.gz"
+          cp target/${{ matrix.targets }}/release/fastest artifacts/
+          cd artifacts && tar czf $ARCHIVE_NAME fastest && cd ..
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
