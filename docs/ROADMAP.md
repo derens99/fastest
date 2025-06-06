@@ -144,7 +144,9 @@ This document outlines the development roadmap for Fastest, with features priori
   - GitHub release creation with binaries
   - Updates all Cargo.toml files automatically
   - CI/CD pipeline for releases on push to main
-  - Fixed cargo-dist initialization issue in CI (removed redundant init step)
+  - Fixed cargo-dist CI issues by replacing with direct cargo build
+  - Removed cargo-dist dependency entirely for simpler release process
+  - Binary artifacts now built directly with cargo and packaged as tar.gz/zip
 
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 
