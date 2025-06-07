@@ -810,7 +810,7 @@ checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "fastest-advanced"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "blake3",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-cli"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-core"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -899,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-execution"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -948,7 +948,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-plugins"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -970,7 +970,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-plugins-macros"
-version = "0.3.24"
+version = "1.0.4"
 dependencies = [
  "proc-macro2",
  "quote",

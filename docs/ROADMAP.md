@@ -135,7 +135,7 @@ This document outlines the development roadmap for Fastest, with features priori
 
 **Achievement**: ~91% pytest compatibility! 🚀
 
-### v0.4.4 (January 2025) - Semantic Versioning
+### v0.4.4 (January 2025) - Infrastructure & Tooling
 - **Automatic Semantic Versioning** ⭐⭐⭐
   - Integrated semantic-release for automated version management
   - Conventional commit analysis (feat:, fix:, chore:, etc.)
@@ -147,6 +147,20 @@ This document outlines the development roadmap for Fastest, with features priori
   - Fixed cargo-dist CI issues by replacing with direct cargo build
   - Removed cargo-dist dependency entirely for simpler release process
   - Binary artifacts now built directly with cargo and packaged as tar.gz/zip
+
+- **Dynamic Version Detection** ⭐⭐⭐
+  - Install script now fetches latest release from GitHub API
+  - Update mechanism uses GitHub API as primary source
+  - Fallback to version manifest for reliability
+  - Fixed version mismatch between code and releases
+  - Removed hardcoded version references
+
+- **Self-Update Feature** ⭐⭐⭐
+  - `fastest update` command for easy upgrades
+  - `fastest update --check` to check without installing
+  - Downloads appropriate binary for platform
+  - Verifies checksums for security
+  - Atomic replacement of binary
 
 ### v0.4.5 (January 2025) - CI/CD & Compilation Fixes
 - **Build System Improvements** ⭐⭐
@@ -228,6 +242,24 @@ This document outlines the development roadmap for Fastest, with features priori
   - Ensures stable builds across all environments
   - Prevents unexpected API migrations in the future
   - All 1089 tests passing at 7,361 tests/second after migration
+
+### v0.4.10 (January 2025) - Automated Release System
+- **Semantic Versioning Implementation** ⭐⭐⭐
+  - Added semantic-release for automated version bumping
+  - Integrated with GitHub Actions for CI/CD
+  - Automatic changelog generation
+  - Rust crate version updates via cargo-edit
+  
+- **Install Script Updates** ⭐⭐
+  - Updated install.sh and install.ps1 to use correct artifact names
+  - Fixed URL patterns to match upload-rust-binary-action format
+  - Added version manifest update script
+  
+- **Self-Update Improvements** ⭐⭐
+  - Fixed UpdateChecker to use correct platform names
+  - Updated URL construction for GitHub releases
+  - Version manifest auto-updates after releases
+  - Seamless update experience with `fastest update`
 
 
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)

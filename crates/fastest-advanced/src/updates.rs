@@ -18,8 +18,17 @@ pub struct ReleaseInfo {
     pub checksums: std::collections::HashMap<String, String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct GitHubRelease {
+    tag_name: String,
+    name: Option<String>,
+    published_at: Option<String>,
+}
+
 const VERSION_MANIFEST_URL: &str =
     "https://raw.githubusercontent.com/derens99/fastest/main/.github/version.json";
+const GITHUB_API_LATEST_RELEASE: &str = 
+    "https://api.github.com/repos/derens99/fastest/releases/latest";
 
 pub struct UpdateChecker {
     current_version: String,
@@ -34,20 +43,41 @@ impl UpdateChecker {
 
     /// Check if an update is available
     pub fn check_update(&self) -> Result<Option<String>> {
-        let manifest = self.fetch_version_manifest()?;
-
-        if self.is_newer_version(&manifest.latest, &self.current_version) {
-            Ok(Some(manifest.latest))
-        } else {
-            Ok(None)
+        // First try GitHub API for the latest release
+        match self.fetch_latest_from_github() {
+            Ok(latest_version) => {
+                let version_without_v = latest_version.trim_start_matches('v');
+                if self.is_newer_version(version_without_v, &self.current_version) {
+                    Ok(Some(version_without_v.to_string()))
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(_) => {
+                // Fallback to version manifest if GitHub API fails
+                let manifest = self.fetch_version_manifest()?;
+                if self.is_newer_version(&manifest.latest, &self.current_version) {
+                    Ok(Some(manifest.latest))
+                } else {
+                    Ok(None)
+                }
+            }
         }
     }
 
     /// Perform the update
     pub fn update(&self, verbose: bool) -> Result<()> {
-        let manifest = self.fetch_version_manifest()?;
+        // Try to get latest version from GitHub API first
+        let latest_version = match self.fetch_latest_from_github() {
+            Ok(tag) => tag.trim_start_matches('v').to_string(),
+            Err(_) => {
+                // Fallback to version manifest
+                let manifest = self.fetch_version_manifest()?;
+                manifest.latest
+            }
+        };
 
-        if !self.is_newer_version(&manifest.latest, &self.current_version) {
+        if !self.is_newer_version(&latest_version, &self.current_version) {
             println!(
                 "You are already running the latest version (v{})!",
                 self.current_version
@@ -56,8 +86,8 @@ impl UpdateChecker {
         }
 
         println!("Current version: v{}", self.current_version);
-        println!("Latest version: v{}", manifest.latest);
-        println!("Updating to v{}...\n", manifest.latest);
+        println!("Latest version: v{}", latest_version);
+        println!("Updating to v{}...\n", latest_version);
 
         // Determine platform
         let platform = self.get_platform()?;
@@ -65,21 +95,19 @@ impl UpdateChecker {
             eprintln!("Detected platform: {}", platform);
         }
 
-        // Get download URL
-        let release_info = manifest
-            .versions
-            .get(&manifest.latest)
-            .ok_or_else(|| anyhow!("Release info not found for version {}", manifest.latest))?;
-
-        let download_url = release_info
-            .downloads
-            .get(&platform)
-            .ok_or_else(|| anyhow!("No download available for platform {}", platform))?;
-
-        let checksum_url = release_info
-            .checksums
-            .get(&platform)
-            .ok_or_else(|| anyhow!("No checksum available for platform {}", platform))?;
+        // Construct download URLs based on platform
+        let ext = if platform.contains("windows") { "zip" } else { "tar.gz" };
+        let version_tag = format!("v{}", latest_version);
+        
+        let download_url = format!(
+            "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.{}",
+            version_tag, version_tag, platform, ext
+        );
+        
+        let checksum_url = format!(
+            "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.{}.sha256sum",
+            version_tag, version_tag, platform, ext
+        );
 
         if verbose {
             eprintln!("Download URL: {}", download_url);
@@ -91,12 +119,12 @@ impl UpdateChecker {
         fs::create_dir_all(&temp_dir)?;
 
         // Download the binary
-        println!("Downloading fastest v{}...", manifest.latest);
-        let archive_path = self.download_file(download_url, &temp_dir, verbose)?;
+        println!("Downloading fastest v{}...", latest_version);
+        let archive_path = self.download_file(&download_url, &temp_dir, verbose)?;
 
         // Download and verify checksum
         println!("Verifying checksum...");
-        let checksum_path = self.download_file(checksum_url, &temp_dir, verbose)?;
+        let checksum_path = self.download_file(&checksum_url, &temp_dir, verbose)?;
         self.verify_checksum(&archive_path, &checksum_path)?;
 
         // Extract the binary
@@ -110,10 +138,24 @@ impl UpdateChecker {
         // Clean up
         fs::remove_dir_all(&temp_dir).ok();
 
-        println!("\n✅ Successfully updated to fastest v{}!", manifest.latest);
+        println!("\n✅ Successfully updated to fastest v{}!", latest_version);
         println!("Run 'fastest --version' to verify the update.");
 
         Ok(())
+    }
+
+    fn fetch_latest_from_github(&self) -> Result<String> {
+        let response = ureq::get(GITHUB_API_LATEST_RELEASE)
+            .set("User-Agent", "fastest-updater")
+            .timeout(std::time::Duration::from_secs(10))
+            .call()
+            .context("Failed to fetch latest release from GitHub")?;
+
+        let release: GitHubRelease = response
+            .into_json()
+            .context("Failed to parse GitHub release")?;
+
+        Ok(release.tag_name)
     }
 
     fn fetch_version_manifest(&self) -> Result<VersionInfo> {
@@ -143,11 +185,11 @@ impl UpdateChecker {
         let arch = env::consts::ARCH;
 
         let platform = match (os, arch) {
-            ("linux", "x86_64") => "linux-amd64",
-            ("linux", "aarch64") => "linux-arm64",
-            ("macos", "x86_64") => "darwin-amd64",
-            ("macos", "aarch64") => "darwin-arm64",
-            ("windows", "x86_64") => "windows-amd64",
+            ("linux", "x86_64") => "x86_64-unknown-linux-gnu",
+            ("linux", "aarch64") => "aarch64-unknown-linux-gnu",
+            ("macos", "x86_64") => "x86_64-apple-darwin",
+            ("macos", "aarch64") => "aarch64-apple-darwin",
+            ("windows", "x86_64") => "x86_64-pc-windows-msvc",
             _ => return Err(anyhow!("Unsupported platform: {}-{}", os, arch)),
         };
 

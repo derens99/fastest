@@ -89,13 +89,13 @@ function Install-Fastest {
         Write-Info "Latest version: $Version"
     }
     
-    # Construct download URL with new asset naming
+    # Construct download URL with upload-rust-binary-action naming format
     $assetPlatform = switch ($Architecture) {
-        "x86_64" { "windows-amd64" }
-        "aarch64" { "windows-arm64" }
+        "x86_64" { "x86_64-pc-windows-msvc" }
+        "aarch64" { "aarch64-pc-windows-msvc" }
         default { Write-Error "Unsupported architecture: $Architecture"; exit 1 }
     }
-    $url = "https://github.com/$Repo/releases/download/$Version/fastest-$assetPlatform.zip"
+    $url = "https://github.com/$Repo/releases/download/$Version/fastest-$Version-$assetPlatform.zip"
     
     Write-Info "Downloading fastest $Version for Windows $Architecture..."
     

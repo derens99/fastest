@@ -97,3 +97,28 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           # Specify the ref to ensure we're uploading to the right release
           ref: refs/tags/${{ needs.semantic-release.outputs.new_release_git_tag }}
+
+# ── Update version manifest after all binaries are uploaded ──
+  update-version-manifest:
+    needs: [semantic-release, upload-binaries]
+    if: needs.semantic-release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Update version manifest
+        run: |
+          ./scripts/update-version-manifest.sh \
+            "${{ needs.semantic-release.outputs.new_release_version }}" \
+            "${{ needs.semantic-release.outputs.new_release_git_tag }}"
+      
+      - name: Commit and push version manifest
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .github/version.json
+          git commit -m "chore: update version manifest for ${{ needs.semantic-release.outputs.new_release_git_tag }} [skip ci]" || exit 0
+          git push

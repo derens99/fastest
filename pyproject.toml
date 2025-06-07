@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fastest-runner"
-version = "0.2.0"
+version = "1.0.4"
 description = "⚡ The blazing fast Python test runner with intelligent performance optimization"
 readme = "README.md"
 authors = [

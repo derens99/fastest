@@ -72,20 +72,27 @@ detect_platform() {
     echo "${arch}-${os}"
 }
 
-# Get the latest release version from version manifest
+# Get the latest release version from GitHub
 get_latest_version() {
-    # Try version manifest first (faster and more reliable)
-    local manifest_version=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/.github/version.json" 2>/dev/null | \
-        grep '"latest"' | head -1 | \
-        sed -E 's/.*"latest"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+    # Use GitHub API to get the actual latest release
+    local latest_version=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | \
+        grep '"tag_name"' | \
+        sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
     
-    if [[ -n "$manifest_version" ]]; then
-        echo "v${manifest_version}"
+    if [[ -n "$latest_version" ]]; then
+        echo "$latest_version"
     else
-        # Fallback to GitHub API
-        curl -s "https://api.github.com/repos/${REPO}/releases/latest" | \
-            grep '"tag_name"' | \
-            sed -E 's/.*"([^"]+)".*/\1/'
+        # Fallback to version manifest if API fails
+        local manifest_version=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/.github/version.json" 2>/dev/null | \
+            grep '"latest"' | head -1 | \
+            sed -E 's/.*"latest"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+        
+        if [[ -n "$manifest_version" ]]; then
+            echo "v${manifest_version}"
+        else
+            error "Failed to determine latest version"
+            exit 1
+        fi
     fi
 }
 
@@ -99,11 +106,11 @@ install_fastest() {
     # Convert platform to asset naming convention
     local asset_platform=""
     case "$platform" in
-        x86_64-unknown-linux-gnu) asset_platform="linux-amd64";;
-        aarch64-unknown-linux-gnu) asset_platform="linux-arm64";;
-        x86_64-apple-darwin) asset_platform="darwin-amd64";;
-        aarch64-apple-darwin) asset_platform="darwin-arm64";;
-        x86_64-pc-windows-msvc) asset_platform="windows-amd64";;
+        x86_64-unknown-linux-gnu) asset_platform="x86_64-unknown-linux-gnu";;
+        aarch64-unknown-linux-gnu) asset_platform="aarch64-unknown-linux-gnu";;
+        x86_64-apple-darwin) asset_platform="x86_64-apple-darwin";;
+        aarch64-apple-darwin) asset_platform="aarch64-apple-darwin";;
+        x86_64-pc-windows-msvc) asset_platform="x86_64-pc-windows-msvc";;
         *) error "Unsupported platform: $platform"; exit 1;;
     esac
     
@@ -115,7 +122,8 @@ install_fastest() {
         archive_ext="zip"
     fi
     
-    local url="https://github.com/${REPO}/releases/download/${version}/fastest-${asset_platform}.${archive_ext}"
+    # Note: upload-rust-binary-action uses the format: fastest-$tag-$target
+    local url="https://github.com/${REPO}/releases/download/${version}/fastest-${version}-${asset_platform}.${archive_ext}"
     local archive_path="${TEMP_DIR}/fastest.${archive_ext}"
     
     # Download
