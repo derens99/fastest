@@ -1,3 +1,10 @@
+## [1.0.6](https://github.com/derens99/fastest/compare/v1.0.5...v1.0.6) (2025-06-07)
+
+
+### Bug Fixes
+
+* url fix ([907f0c3](https://github.com/derens99/fastest/commit/907f0c3b0df5c625dacef99096076f716c8734c6))
+
 ## [1.0.5](https://github.com/derens99/fastest/compare/v1.0.4...v1.0.5) (2025-06-07)
 
 
