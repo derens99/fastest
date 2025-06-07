@@ -261,6 +261,13 @@ This document outlines the development roadmap for Fastest, with features priori
   - Version manifest auto-updates after releases
   - Seamless update experience with `fastest update`
 
+### v1.0.5 (January 2025) - Update Mechanism Fix
+- **Self-Update Bug Fix** ⭐⭐⭐
+  - Fixed checksum URL format in update mechanism
+  - Changed from `.sha256sum` to `.sha256` to match actual GitHub release assets
+  - Update functionality now working correctly for all platforms
+  - Users can now successfully run `fastest update` to get latest version
+
 
 ## Version 0.5.0 - Performance Validation & Enhanced Error Reporting (Q1 2025)
 

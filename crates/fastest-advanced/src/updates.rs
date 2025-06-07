@@ -105,8 +105,8 @@ impl UpdateChecker {
         );
         
         let checksum_url = format!(
-            "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.{}.sha256sum",
-            version_tag, version_tag, platform, ext
+            "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.sha256",
+            version_tag, version_tag, platform
         );
 
         if verbose {
