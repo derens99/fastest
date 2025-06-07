@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/derens99/fastest/compare/v1.0.4...v1.0.5) (2025-06-07)
+
+
+### Bug Fixes
+
+* installs ([c8f3c2e](https://github.com/derens99/fastest/commit/c8f3c2e1c4ea10fc725ebab07cd4ab3268530de3))
+
 ## [1.0.4](https://github.com/derens99/fastest/compare/v1.0.3...v1.0.4) (2025-06-06)
 
 
