@@ -1,3 +1,10 @@
+## [1.0.7](https://github.com/derens99/fastest/compare/v1.0.6...v1.0.7) (2025-06-08)
+
+
+### Bug Fixes
+
+* fixture update ([#14](https://github.com/derens99/fastest/issues/14)) ([1d77a31](https://github.com/derens99/fastest/commit/1d77a31d0c7a04f1a2c578c3017137b54c2493e5))
+
 ## [1.0.6](https://github.com/derens99/fastest/compare/v1.0.5...v1.0.6) (2025-06-07)
 
 
