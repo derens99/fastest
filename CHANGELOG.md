@@ -1,3 +1,10 @@
+## [1.0.8](https://github.com/derens99/fastest/compare/v1.0.7...v1.0.8) (2025-06-08)
+
+
+### Bug Fixes
+
+* cleanup ([f516960](https://github.com/derens99/fastest/commit/f5169601734a68ccef219f1582d4e336ebf63f6b))
+
 ## [1.0.7](https://github.com/derens99/fastest/compare/v1.0.6...v1.0.7) (2025-06-08)
 
 
