@@ -20,34 +20,22 @@ use std::time::{Duration, Instant};
 use fastest_core::utils::simd_json;
 
 /// Memory usage statistics
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryUsage {
-    #[allow(dead_code)]
     pub peak_mb: f64,
-    #[allow(dead_code)]
     pub current_mb: f64,
 }
 
 /// Configuration for test capture and isolation
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureConfig {
-    #[allow(dead_code)]
     pub capture_stdout: bool,
-    #[allow(dead_code)]
     pub capture_stderr: bool,
-    #[allow(dead_code)]
     pub capture_warnings: bool,
-    #[allow(dead_code)]
     pub capture_logs: bool,
-    #[allow(dead_code)]
     pub isolate_filesystem: bool,
-    #[allow(dead_code)]
     pub isolate_environment: bool,
-    #[allow(dead_code)]
     pub timeout_seconds: Option<u64>,
-    #[allow(dead_code)]
     pub max_output_size: usize, // bytes
 }
 
@@ -67,44 +55,27 @@ impl Default for CaptureConfig {
 }
 
 /// Captured output from a test execution
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CaptureResult {
-    #[allow(dead_code)]
     pub stdout: String,
-    #[allow(dead_code)]
     pub stderr: String,
-    #[allow(dead_code)]
     pub warnings: Vec<String>,
-    #[allow(dead_code)]
     pub logs: Vec<LogEntry>,
-    #[allow(dead_code)]
     pub exception: Option<ExceptionInfo>,
-    #[allow(dead_code)]
     pub duration: Duration,
-    #[allow(dead_code)]
     pub memory_usage: Option<usize>, // bytes
-    #[allow(dead_code)]
     pub files_created: Vec<String>,
-    #[allow(dead_code)]
     pub env_vars_changed: HashMap<String, String>,
 }
 
 /// Log entry captured during test execution
-#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    #[allow(dead_code)]
     pub level: String,
-    #[allow(dead_code)]
     pub message: String,
-    #[allow(dead_code)]
     pub timestamp: String,
-    #[allow(dead_code)]
     pub logger_name: String,
-    #[allow(dead_code)]
     pub filename: Option<String>,
-    #[allow(dead_code)]
     pub line_number: Option<u32>,
 }
 
@@ -130,11 +101,8 @@ pub struct TracebackFrame {
 }
 
 /// Test capture and isolation manager
-#[allow(dead_code)]
 pub struct CaptureManager {
-    #[allow(dead_code)]
     config: CaptureConfig,
-    #[allow(dead_code)]
     active_captures: Arc<Mutex<HashMap<String, ActiveCapture>>>,
 }
 

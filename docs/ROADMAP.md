@@ -59,6 +59,7 @@ This document outlines the development roadmap for Fastest, with features priori
 - **Cross-Platform Builds** - Windows, macOS, Linux (x64 & ARM)
 - **Dynamic Version Detection** - GitHub API integration
 - **CI/CD Pipeline** - Automated testing and releases
+- **Codebase Cleanup** - Removed duplicate modules, standardized error handling, cleaned dead code
 
 ## 🚧 Next Priorities (Q1 2025)
 
@@ -84,6 +85,12 @@ This document outlines the development roadmap for Fastest, with features priori
 - **Collection Hooks** - pytest_collect_* support
 - **Test Generation** - Dynamic test creation
 - **Custom Collection** - User-defined logic
+
+### 5. Ongoing Code Quality ⭐⭐
+- **Module Organization** - Optimize imports and dependencies
+- **TODO Resolution** - Create issues for ~50 TODO comments
+- **Documentation** - Improve inline documentation
+- **Regular Cleanup** - Prevent technical debt accumulation
 
 ## 📊 Version 0.5.0 - Polish & Compatibility (Q2 2025)
 

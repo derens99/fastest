@@ -12,4 +12,4 @@ pub mod strategies;
 // Re-export main types from this module
 pub use fixture_integration::generate_fixture_aware_worker_code;
 pub use runtime::{PythonRuntime, RuntimeConfig};
-pub use strategies::{DevExperienceConfig, PluginCompatibilityConfig, UltraFastExecutor};
+pub use strategies::UltraFastExecutor;

@@ -12,6 +12,7 @@
 //! - **`experimental`**: Cutting-edge optimizations including zero-copy, work-stealing, and JIT compilation
 
 pub mod core; // Core execution functionality
+pub mod error; // Error types for execution
 pub mod experimental; // Experimental optimizations
 pub mod infrastructure; // Supporting systems
 pub mod utils; // Utility modules including SIMD optimizations
@@ -55,8 +56,9 @@ impl TestResult {
 
 // Re-export main types from organized modules
 pub use core::{
-    DevExperienceConfig, PluginCompatibilityConfig, PythonRuntime, RuntimeConfig, UltraFastExecutor,
+    PythonRuntime, RuntimeConfig, UltraFastExecutor,
 };
+pub use error::{ExecutionError, Result};
 pub use experimental::{
     convert_zero_copy_results, create_zero_copy_executor_with_arena, NativeDetailedStats,
     NativeExecutionType, NativeTestExecutor, NativeTestResult, TestPattern, TranspilationStats,

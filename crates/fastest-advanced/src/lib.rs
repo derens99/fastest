@@ -66,6 +66,8 @@ impl Default for AdvancedConfig {
 
 /// Smart advanced features manager
 pub struct AdvancedManager {
+    // Config is stored for future advanced feature implementations
+    // Currently only used to create cache directory in constructor
     #[allow(dead_code)]
     config: AdvancedConfig,
 }
