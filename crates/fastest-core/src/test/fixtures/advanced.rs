@@ -95,6 +95,8 @@ pub struct FixtureRequest {
     pub package_path: PathBuf,
     pub param_index: Option<usize>,
     pub requested_fixtures: Vec<String>,
+    /// Map of indirect parameter names to their values
+    pub indirect_params: HashMap<String, serde_json::Value>,
 }
 
 impl FixtureRequest {
@@ -114,6 +116,7 @@ impl FixtureRequest {
             package_path,
             param_index: None,
             requested_fixtures: test.fixture_deps.clone(),
+            indirect_params: HashMap::new(),
         }
     }
 

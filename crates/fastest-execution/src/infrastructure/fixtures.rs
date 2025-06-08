@@ -76,7 +76,35 @@ impl FixtureExecutor {
         test: &TestItem,
         fixture_module: &Bound<PyModule>,
     ) -> PyResult<PyObject> {
-        let request = FixtureRequest::from_test_item(test);
+        let mut request = FixtureRequest::from_test_item(test);
+
+        // Check if any fixtures need indirect parameters
+        if let Some(params_str) = test.decorators.iter()
+            .find(|d| d.starts_with("__params__="))
+        {
+            let params: HashMap<String, serde_json::Value> = serde_json::from_str(
+                &params_str.trim_start_matches("__params__=")
+            ).unwrap_or_default();
+            
+            // Check indirect params
+            if let Some(indirect_str) = test.decorators.iter()
+                .find(|d| d.starts_with("__indirect__="))
+            {
+                let indirect: Vec<String> = serde_json::from_str(
+                    &indirect_str.trim_start_matches("__indirect__=")
+                ).unwrap_or_default();
+                
+                // Set indirect params on request
+                for param_name in &indirect {
+                    if let Some(value) = params.get(param_name) {
+                        request.indirect_params.insert(
+                            param_name.clone(),
+                            value.clone()
+                        );
+                    }
+                }
+            }
+        }
 
         // Get all required fixtures (including autouse)
         let _required_fixtures = self
@@ -112,6 +140,21 @@ impl FixtureExecutor {
         // Check if it's a built-in fixture
         if is_builtin_fixture(name) {
             return self.execute_builtin_fixture(py, name, request);
+        }
+
+        // Check if this fixture has an indirect parameter
+        if let Some(param_value) = request.indirect_params.get(name) {
+            // Create request object with param
+            let py_request = Py::new(
+                py,
+                PyFixtureRequest::from_request(request, Some(param_value)),
+            )?;
+            
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("request", py_request)?;
+            
+            let fixture_fn = fixture_module.getattr(&*name)?;
+            return Ok(fixture_fn.call((), Some(&kwargs))?.unbind());
         }
 
         // Get fixture definition

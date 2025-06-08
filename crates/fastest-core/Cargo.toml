@@ -38,6 +38,9 @@ topological-sort = "0.2"            # Dependency ordering
 uuid = { version = "1.0", features = ["v4", "serde"] } # Unique IDs
 parking_lot = "0.12"                # Better synchronization primitives
 
+# Unicode support
+unicode-normalization = "0.1"       # Unicode normalization for test names
+
 
 [dev-dependencies]
 tempfile = "3.8"

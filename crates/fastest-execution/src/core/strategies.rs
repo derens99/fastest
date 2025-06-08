@@ -1869,6 +1869,10 @@ pub struct UltraFastExecutor {
     adaptive_execution: bool,
     /// Performance learning enabled
     learning_enabled: bool,
+    /// Session fixtures active tracking
+    session_fixtures_active: Arc<std::sync::atomic::AtomicBool>,
+    /// Fixture executor for session cleanup
+    fixture_executor: Option<Arc<crate::infrastructure::FixtureExecutor>>,
 }
 
 impl UltraFastExecutor {
@@ -1885,6 +1889,8 @@ impl UltraFastExecutor {
             performance_stats: Arc::new(Mutex::new(UltraPerformanceStats::default())),
             adaptive_execution: true,
             learning_enabled: true,
+            session_fixtures_active: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            fixture_executor: None,
         })
     }
 
@@ -2025,7 +2031,10 @@ impl UltraFastExecutor {
                 .execute_tests_revolutionary(py, &tests, self.verbose)
                 .map_err(|e| Error::Execution(format!("Revolutionary execution failed: {}", e)))?;
 
-            // Perform global teardown after all tests
+            // Mark session fixtures as active
+            self.session_fixtures_active.store(true, std::sync::atomic::Ordering::Release);
+
+            // Perform global teardown after all tests (but not session fixtures)
             if self.verbose {
                 eprintln!("🧹 Performing global teardown...");
             }
@@ -2307,6 +2316,52 @@ impl UltraFastExecutor {
         }
 
         Ok(results)
+    }
+
+    /// Set fixture executor for session cleanup
+    pub fn with_fixture_executor(mut self, executor: Arc<crate::infrastructure::FixtureExecutor>) -> Self {
+        self.fixture_executor = Some(executor);
+        self
+    }
+
+    /// Teardown session fixtures
+    fn teardown_session_fixtures(&self) -> Result<()> {
+        Python::with_gil(|py| {
+            if let Some(fixture_executor) = &self.fixture_executor {
+                // Create a dummy test item for session teardown
+                let session_test = TestItem {
+                    id: "__session__".to_string(),
+                    path: std::path::PathBuf::from("__session__"),
+                    function_name: "__session__".to_string(),
+                    line_number: None,
+                    decorators: vec![],
+                    is_async: false,
+                    fixture_deps: vec![],
+                    class_name: None,
+                    is_xfail: false,
+                    name: "__session__".to_string(),
+                    indirect_params: HashMap::new(),
+                };
+                
+                fixture_executor.teardown_test_fixtures(
+                    py,
+                    &session_test,
+                    fastest_core::test::fixtures::FixtureScope::Session
+                ).map_err(|e| Error::Execution(format!("Session fixture teardown failed: {}", e)))?;
+            }
+            Ok(())
+        })
+    }
+}
+
+impl Drop for UltraFastExecutor {
+    fn drop(&mut self) {
+        // Teardown session fixtures when executor is dropped
+        if self.session_fixtures_active.load(std::sync::atomic::Ordering::Acquire) {
+            if let Err(e) = self.teardown_session_fixtures() {
+                eprintln!("Warning: Failed to teardown session fixtures: {}", e);
+            }
+        }
     }
 }
 

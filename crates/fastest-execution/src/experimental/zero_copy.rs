@@ -634,6 +634,7 @@ pub fn benchmark_zero_copy_performance(test_count: usize) -> Result<(Duration, D
             } else {
                 vec![]
             },
+            indirect_params: std::collections::HashMap::new(),
         })
         .collect();
 

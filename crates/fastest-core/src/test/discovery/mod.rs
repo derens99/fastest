@@ -18,6 +18,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
+use unicode_normalization::UnicodeNormalization;
 #[cfg(debug_assertions)]
 use std::time::Instant;
 
@@ -34,6 +35,9 @@ pub struct TestItem {
     pub class_name: Option<String>,
     pub is_xfail: bool,
     pub name: String,
+    /// Map of parameter names to whether they are indirect (passed to fixture)
+    #[serde(default)]
+    pub indirect_params: HashMap<String, bool>,
 }
 
 /// Fast test discovery using a reliable single strategy
@@ -142,6 +146,7 @@ fn discover_tests_in_file_tree_sitter_cached(
             fixture_deps,
             class_name: test.class_name.clone(),
             is_xfail: false,
+            indirect_params: HashMap::new(),
         };
 
         // Use expand_parametrized_tests to properly handle parametrization
@@ -435,6 +440,7 @@ impl OptimizedTestDiscoveryVisitor {
                 fixture_deps: fixture_deps.clone(), // Clone for each TestItem if parametrized
                 class_name: class_name.map(|s| s.to_string()),
                 is_xfail,
+                indirect_params: HashMap::new(), // Initialize empty, will be populated by parametrize expansion
             });
         }
     }
@@ -505,18 +511,27 @@ impl OptimizedTestDiscoveryVisitor {
         fixtures
     }
 
-    /// Create a unique test ID
+    /// Create a unique test ID with unicode normalization
     fn create_test_id(&self, function_name: &str, class_name: Option<&str>) -> String {
+        let normalized_function = normalize_unicode(function_name);
         if let Some(class) = class_name {
-            format!("{}::{}::{}", self.file_path.display(), class, function_name)
+            let normalized_class = normalize_unicode(class);
+            format!("{}::{}::{}", self.file_path.display(), normalized_class, normalized_function)
         } else {
-            format!("{}::{}", self.file_path.display(), function_name)
+            format!("{}::{}", self.file_path.display(), normalized_function)
         }
     }
 }
 
 static PYTEST_FILE_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"(?i)^(test_.*|.*_test)\.py$").unwrap());
+
+/// Normalize unicode strings for consistent test IDs
+fn normalize_unicode(s: &str) -> String {
+    // Use NFC (Canonical Decomposition, followed by Canonical Composition)
+    // This ensures consistent representation of unicode characters
+    s.nfc().collect::<String>()
+}
 
 #[allow(dead_code)]
 static POTENTIAL_TEST_MATCHER: Lazy<AhoCorasick> = Lazy::new(|| {
@@ -1472,6 +1487,7 @@ impl UnifiedTestProcessor {
                     fixture_deps: Vec::new(), // TODO: Extract fixtures in single pass
                     class_name: test_func.class_name.clone(),
                     is_xfail: test_func.decorators.iter().any(|d| d.contains("xfail")),
+                    indirect_params: HashMap::new(),
                 });
             }
         }
@@ -1744,6 +1760,7 @@ fn convert_simd_locations_to_test_items(locations: Vec<SIMDTestLocation>) -> Res
                 fixture_deps: Vec::new(), // Fixture extraction not yet SIMD-optimised
                 class_name: location.class_name.clone(),
                 is_xfail: decorators.iter().any(|d| d.contains("xfail")),
+                indirect_params: HashMap::new(),
             });
         }
     }
