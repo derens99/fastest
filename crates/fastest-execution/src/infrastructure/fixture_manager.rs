@@ -40,14 +40,12 @@ struct FixtureValue {
 
 impl Clone for FixtureValue {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            FixtureValue {
-                value: self.value.clone_ref(py),
-                is_generator: self.is_generator,
-                generator: self.generator.as_ref().map(|g| g.clone_ref(py)),
-                _scope: self._scope.clone(),
-                _created_at: self._created_at,
-            }
+        Python::with_gil(|py| FixtureValue {
+            value: self.value.clone_ref(py),
+            is_generator: self.is_generator,
+            generator: self.generator.as_ref().map(|g| g.clone_ref(py)),
+            _scope: self._scope.clone(),
+            _created_at: self._created_at,
         })
     }
 }
@@ -292,7 +290,12 @@ sys.modules['pytest'] = pytest
 "#;
 
         let code_cstring = CString::new(fixture_code).unwrap();
-        let module = PyModule::from_code(py, code_cstring.as_c_str(), c"fastest_fixtures", c"fastest_fixtures")?;
+        let module = PyModule::from_code(
+            py,
+            code_cstring.as_c_str(),
+            c"fastest_fixtures",
+            c"fastest_fixtures",
+        )?;
 
         *self.fixture_module.lock().unwrap() = Some(module.into());
 
@@ -450,11 +453,7 @@ sys.modules['pytest'] = pytest
         );
         let eval_cstring = CString::new(eval_code).unwrap();
         let is_generator = py
-            .eval(
-                eval_cstring.as_c_str(),
-                Some(&module.dict()),
-                None,
-            )?
+            .eval(eval_cstring.as_c_str(), Some(&module.dict()), None)?
             .extract::<bool>()?;
 
         let fixture_value = FixtureValue {
@@ -507,11 +506,7 @@ sys.modules['pytest'] = pytest
         // Prepare arguments
         let sig_code = format!("inspect.signature(_fixture_registry['{}'])", name);
         let sig_cstring = CString::new(sig_code).unwrap();
-        let sig = py.eval(
-            sig_cstring.as_c_str(),
-            Some(&module.dict()),
-            None,
-        )?;
+        let sig = py.eval(sig_cstring.as_c_str(), Some(&module.dict()), None)?;
         let params = sig.getattr("parameters")?;
         let keys_list = params.call_method("keys", (), None)?;
         let list_type = py.get_type::<PyList>();
@@ -554,7 +549,8 @@ sys.modules['pytest'] = pytest
                 request.test_name.as_str(),
                 "function", // Default scope for now
             ],
-        ).unwrap();
+        )
+        .unwrap();
 
         let kwargs = PyDict::new(py);
         if let Some(param_index) = request.param_index {

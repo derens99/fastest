@@ -439,10 +439,12 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
             expanded_test
                 .decorators
                 .push(format!("__indirect__={}", indirect_json));
-            
+
             // Also populate the indirect_params field in TestItem
             for param_name in &case.indirect_params {
-                expanded_test.indirect_params.insert(param_name.clone(), true);
+                expanded_test
+                    .indirect_params
+                    .insert(param_name.clone(), true);
             }
         }
 
@@ -551,13 +553,15 @@ fn format_value(value: &Value) -> String {
             // Handle unicode strings by keeping alphanumeric chars (including unicode)
             // and replacing other chars with underscore
             s.chars()
-                .map(|c| if c.is_alphanumeric() || c == '_' {
-                    c
-                } else {
-                    '_'
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
                 })
                 .collect()
-        },
+        }
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         Value::Null => "None".to_string(),

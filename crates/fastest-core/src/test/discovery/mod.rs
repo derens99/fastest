@@ -18,9 +18,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use unicode_normalization::UnicodeNormalization;
 #[cfg(debug_assertions)]
 use std::time::Instant;
+use unicode_normalization::UnicodeNormalization;
 
 /// Test item representing a discovered test
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -516,7 +516,12 @@ impl OptimizedTestDiscoveryVisitor {
         let normalized_function = normalize_unicode(function_name);
         if let Some(class) = class_name {
             let normalized_class = normalize_unicode(class);
-            format!("{}::{}::{}", self.file_path.display(), normalized_class, normalized_function)
+            format!(
+                "{}::{}::{}",
+                self.file_path.display(),
+                normalized_class,
+                normalized_function
+            )
         } else {
             format!("{}::{}", self.file_path.display(), normalized_function)
         }

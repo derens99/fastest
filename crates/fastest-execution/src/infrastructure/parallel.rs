@@ -11,8 +11,8 @@
 //! - Test organization by file groups
 
 use crossbeam::channel::bounded;
-use pyo3::{PyObject, Python};
 use pyo3::types::{PyAnyMethods, PyDictMethods};
+use pyo3::{PyObject, Python};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -880,8 +880,13 @@ def execute_test(test_id, test_name, test_code, file_path):
 "#;
 
     let code_cstring = CString::new(code).unwrap();
-    let module = PyModule::from_code(py, code_cstring.as_c_str(), c"test_executor", c"test_executor")
-        .map_err(|e| Error::Execution(format!("Failed to create Python executor: {}", e)))?;
+    let module = PyModule::from_code(
+        py,
+        code_cstring.as_c_str(),
+        c"test_executor",
+        c"test_executor",
+    )
+    .map_err(|e| Error::Execution(format!("Failed to create Python executor: {}", e)))?;
 
     Ok(module.into())
 }

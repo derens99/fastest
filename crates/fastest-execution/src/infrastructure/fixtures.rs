@@ -79,28 +79,31 @@ impl FixtureExecutor {
         let mut request = FixtureRequest::from_test_item(test);
 
         // Check if any fixtures need indirect parameters
-        if let Some(params_str) = test.decorators.iter()
+        if let Some(params_str) = test
+            .decorators
+            .iter()
             .find(|d| d.starts_with("__params__="))
         {
-            let params: HashMap<String, serde_json::Value> = serde_json::from_str(
-                &params_str.trim_start_matches("__params__=")
-            ).unwrap_or_default();
-            
+            let params: HashMap<String, serde_json::Value> =
+                serde_json::from_str(&params_str.trim_start_matches("__params__="))
+                    .unwrap_or_default();
+
             // Check indirect params
-            if let Some(indirect_str) = test.decorators.iter()
+            if let Some(indirect_str) = test
+                .decorators
+                .iter()
                 .find(|d| d.starts_with("__indirect__="))
             {
-                let indirect: Vec<String> = serde_json::from_str(
-                    &indirect_str.trim_start_matches("__indirect__=")
-                ).unwrap_or_default();
-                
+                let indirect: Vec<String> =
+                    serde_json::from_str(&indirect_str.trim_start_matches("__indirect__="))
+                        .unwrap_or_default();
+
                 // Set indirect params on request
                 for param_name in &indirect {
                     if let Some(value) = params.get(param_name) {
-                        request.indirect_params.insert(
-                            param_name.clone(),
-                            value.clone()
-                        );
+                        request
+                            .indirect_params
+                            .insert(param_name.clone(), value.clone());
                     }
                 }
             }
@@ -149,10 +152,10 @@ impl FixtureExecutor {
                 py,
                 PyFixtureRequest::from_request(request, Some(param_value)),
             )?;
-            
+
             let kwargs = PyDict::new(py);
             kwargs.set_item("request", py_request)?;
-            
+
             let fixture_fn = fixture_module.getattr(&*name)?;
             return Ok(fixture_fn.call((), Some(&kwargs))?.unbind());
         }
@@ -440,13 +443,7 @@ impl PyFixtureRequest {
                 let json_str = value.to_string();
                 let json_code = format!("__import__('json').loads('{}')", json_str);
                 let json_cstring = CString::new(json_code).unwrap();
-                Ok(py
-                    .eval(
-                        json_cstring.as_c_str(),
-                        None,
-                        None,
-                    )?
-                    .into())
+                Ok(py.eval(json_cstring.as_c_str(), None, None)?.into())
             }
             None => Ok(py.None()),
         }

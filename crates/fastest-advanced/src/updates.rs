@@ -27,7 +27,7 @@ struct GitHubRelease {
 
 const VERSION_MANIFEST_URL: &str =
     "https://raw.githubusercontent.com/derens99/fastest/main/.github/version.json";
-const GITHUB_API_LATEST_RELEASE: &str = 
+const GITHUB_API_LATEST_RELEASE: &str =
     "https://api.github.com/repos/derens99/fastest/releases/latest";
 
 pub struct UpdateChecker {
@@ -96,14 +96,18 @@ impl UpdateChecker {
         }
 
         // Construct download URLs based on platform
-        let ext = if platform.contains("windows") { "zip" } else { "tar.gz" };
+        let ext = if platform.contains("windows") {
+            "zip"
+        } else {
+            "tar.gz"
+        };
         let version_tag = format!("v{}", latest_version);
-        
+
         let download_url = format!(
             "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.{}",
             version_tag, version_tag, platform, ext
         );
-        
+
         let checksum_url = format!(
             "https://github.com/derens99/fastest/releases/download/{}/fastest-{}-{}.sha256",
             version_tag, version_tag, platform

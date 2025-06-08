@@ -1081,12 +1081,8 @@ impl NativeTestExecutor {
                     .join("\n")
             );
             let code_cstring = CString::new(test_code_str).unwrap();
-            let _module = PyModule::from_code(
-                py,
-                code_cstring.as_c_str(),
-                c"test_module",
-                c"test_module",
-            )?;
+            let _module =
+                PyModule::from_code(py, code_cstring.as_c_str(), c"test_module", c"test_module")?;
 
             Ok(true)
         });

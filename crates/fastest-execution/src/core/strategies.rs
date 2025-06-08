@@ -14,9 +14,9 @@ use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyList, PyModule};
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
-use std::ffi::CString;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use sysinfo::System;
@@ -2032,7 +2032,8 @@ impl UltraFastExecutor {
                 .map_err(|e| Error::Execution(format!("Revolutionary execution failed: {}", e)))?;
 
             // Mark session fixtures as active
-            self.session_fixtures_active.store(true, std::sync::atomic::Ordering::Release);
+            self.session_fixtures_active
+                .store(true, std::sync::atomic::Ordering::Release);
 
             // Perform global teardown after all tests (but not session fixtures)
             if self.verbose {
@@ -2319,7 +2320,10 @@ impl UltraFastExecutor {
     }
 
     /// Set fixture executor for session cleanup
-    pub fn with_fixture_executor(mut self, executor: Arc<crate::infrastructure::FixtureExecutor>) -> Self {
+    pub fn with_fixture_executor(
+        mut self,
+        executor: Arc<crate::infrastructure::FixtureExecutor>,
+    ) -> Self {
         self.fixture_executor = Some(executor);
         self
     }
@@ -2342,12 +2346,16 @@ impl UltraFastExecutor {
                     name: "__session__".to_string(),
                     indirect_params: HashMap::new(),
                 };
-                
-                fixture_executor.teardown_test_fixtures(
-                    py,
-                    &session_test,
-                    fastest_core::test::fixtures::FixtureScope::Session
-                ).map_err(|e| Error::Execution(format!("Session fixture teardown failed: {}", e)))?;
+
+                fixture_executor
+                    .teardown_test_fixtures(
+                        py,
+                        &session_test,
+                        fastest_core::test::fixtures::FixtureScope::Session,
+                    )
+                    .map_err(|e| {
+                        Error::Execution(format!("Session fixture teardown failed: {}", e))
+                    })?;
             }
             Ok(())
         })
@@ -2357,7 +2365,10 @@ impl UltraFastExecutor {
 impl Drop for UltraFastExecutor {
     fn drop(&mut self) {
         // Teardown session fixtures when executor is dropped
-        if self.session_fixtures_active.load(std::sync::atomic::Ordering::Acquire) {
+        if self
+            .session_fixtures_active
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
             if let Err(e) = self.teardown_session_fixtures() {
                 eprintln!("Warning: Failed to teardown session fixtures: {}", e);
             }

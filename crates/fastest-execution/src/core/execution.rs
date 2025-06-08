@@ -81,16 +81,14 @@ struct ClassInstance {
 
 impl Clone for ClassInstance {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            ClassInstance {
-                instance: self.instance.clone_ref(py),
-                class_name: self.class_name.clone(),
-                ref_count: self.ref_count,
-                lifecycle_state: self.lifecycle_state.clone(),
-                created_at: self.created_at,
-                setup_time: self.setup_time,
-                teardown_time: self.teardown_time,
-            }
+        Python::with_gil(|py| ClassInstance {
+            instance: self.instance.clone_ref(py),
+            class_name: self.class_name.clone(),
+            ref_count: self.ref_count,
+            lifecycle_state: self.lifecycle_state.clone(),
+            created_at: self.created_at,
+            setup_time: self.setup_time,
+            teardown_time: self.teardown_time,
         })
     }
 }
@@ -728,9 +726,10 @@ impl Clone for FixtureValue {
             last_accessed: self.last_accessed,
             access_count: self.access_count,
             msgpack_value: self.msgpack_value.clone(),
-            generator_state: self.generator_state.as_ref().map(|g| {
-                Python::with_gil(|py| g.clone_ref(py))
-            }),
+            generator_state: self
+                .generator_state
+                .as_ref()
+                .map(|g| Python::with_gil(|py| g.clone_ref(py))),
             py_object_cache: self.py_object_cache.clone(),
             interpreter_id: self.interpreter_id.clone(),
             execution_time: self.execution_time,
@@ -1195,7 +1194,8 @@ impl PythonRuntimeManager {
         let module_obj: PyObject = module.into();
 
         // Cache it
-        self.module_cache.insert(module_name, module_obj.clone_ref(py));
+        self.module_cache
+            .insert(module_name, module_obj.clone_ref(py));
         self.stats.module_imports += 1;
 
         Ok(module_obj)
@@ -1208,11 +1208,15 @@ impl PythonRuntimeManager {
             serde_json::Value::Bool(b) => {
                 // Convert bool to Python using the standard Python boolean constants
                 Ok(if *b {
-                    py.get_type::<pyo3::types::PyBool>().call1((true,))?.unbind()
+                    py.get_type::<pyo3::types::PyBool>()
+                        .call1((true,))?
+                        .unbind()
                 } else {
-                    py.get_type::<pyo3::types::PyBool>().call1((false,))?.unbind()
+                    py.get_type::<pyo3::types::PyBool>()
+                        .call1((false,))?
+                        .unbind()
                 })
-            },
+            }
             serde_json::Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     Ok(i.into_pyobject(py).unwrap().into_any().unbind())
@@ -1222,7 +1226,9 @@ impl PythonRuntimeManager {
                     Ok(n.to_string().into_pyobject(py).unwrap().into_any().unbind())
                 }
             }
-            serde_json::Value::String(s) => Ok(s.as_str().into_pyobject(py).unwrap().into_any().unbind()),
+            serde_json::Value::String(s) => {
+                Ok(s.as_str().into_pyobject(py).unwrap().into_any().unbind())
+            }
             serde_json::Value::Array(arr) => {
                 let py_list = pyo3::types::PyList::empty(py);
                 for item in arr {
@@ -3030,9 +3036,7 @@ except Exception as e:
             let teardown_items: Vec<_> = generator_teardowns
                 .value()
                 .iter()
-                .map(|(key, gen)| {
-                    (key.clone(), Python::with_gil(|py| gen.clone_ref(py)))
-                })
+                .map(|(key, gen)| (key.clone(), Python::with_gil(|py| gen.clone_ref(py))))
                 .collect();
 
             debug!(
