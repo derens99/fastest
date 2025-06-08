@@ -1,3 +1,10 @@
+## [1.0.10](https://github.com/derens99/fastest/compare/v1.0.9...v1.0.10) (2025-06-08)
+
+
+### Bug Fixes
+
+* format and new release ([d90790c](https://github.com/derens99/fastest/commit/d90790c8a0736e0694e4781bcd3b8cb662d8d4ad))
+
 ## [1.0.6](https://github.com/derens99/fastest/compare/v1.0.5...v1.0.6) (2025-06-07)
 
 
