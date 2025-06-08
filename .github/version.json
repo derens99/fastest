@@ -1,5 +1,5 @@
 {
-  "latest": "1.0.6",
+  "latest": "1.0.7",
   "minimum": "0.1.0",
   "versions": {
     "0.2.0": {
@@ -51,6 +51,23 @@
         "x86_64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.6/fastest-v1.0.6-x86_64-apple-darwin.tar.gz.sha256sum",
         "aarch64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.6/fastest-v1.0.6-aarch64-apple-darwin.tar.gz.sha256sum",
         "x86_64-pc-windows-msvc": "https://github.com/derens99/fastest/releases/download/v1.0.6/fastest-v1.0.6-x86_64-pc-windows-msvc.zip.sha256sum"
+      }
+    },
+    "1.0.7": {
+      "date": "2025-06-08",
+      "downloads": {
+        "x86_64-unknown-linux-gnu": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-unknown-linux-gnu.tar.gz",
+        "aarch64-unknown-linux-gnu": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-aarch64-unknown-linux-gnu.tar.gz",
+        "x86_64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-apple-darwin.tar.gz",
+        "aarch64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-aarch64-apple-darwin.tar.gz",
+        "x86_64-pc-windows-msvc": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-pc-windows-msvc.zip"
+      },
+      "checksums": {
+        "x86_64-unknown-linux-gnu": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-unknown-linux-gnu.tar.gz.sha256sum",
+        "aarch64-unknown-linux-gnu": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-aarch64-unknown-linux-gnu.tar.gz.sha256sum",
+        "x86_64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-apple-darwin.tar.gz.sha256sum",
+        "aarch64-apple-darwin": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-aarch64-apple-darwin.tar.gz.sha256sum",
+        "x86_64-pc-windows-msvc": "https://github.com/derens99/fastest/releases/download/v1.0.7/fastest-v1.0.7-x86_64-pc-windows-msvc.zip.sha256sum"
       }
     }
   }
