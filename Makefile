@@ -14,7 +14,7 @@ YELLOW = \033[1;33m
 RED = \033[0;31m
 NC = \033[0m # No Color
 
-.PHONY: all build test clean install dev-setup lint format coverage bench release compare dashboard perf-track
+.PHONY: all build test clean install dev-setup lint format coverage bench release compare
 
 # Default target
 all: build test
@@ -43,36 +43,6 @@ compare:
 		exit 1; \
 	fi
 
-# Show development dashboard
-dashboard:
-	@echo "$(GREEN)Showing development dashboard...$(NC)"
-	@if [ -f "scripts/development_dashboard.py" ]; then \
-		$(PYTHON) scripts/development_dashboard.py --fastest-binary $(FASTEST_BINARY); \
-	else \
-		echo "$(RED)❌ Dashboard script not found$(NC)"; \
-		exit 1; \
-	fi
-
-# Track performance metrics
-perf-track:
-	@echo "$(GREEN)Tracking performance metrics...$(NC)"
-	@if [ -f "scripts/track_performance_regression.py" ]; then \
-		$(PYTHON) scripts/track_performance_regression.py --binary $(FASTEST_BINARY) --test-dir $(TEST_DIR) --runs $(COMPARISON_RUNS); \
-	else \
-		echo "$(RED)❌ Performance tracking script not found$(NC)"; \
-		exit 1; \
-	fi
-
-# Generate performance report
-perf-report:
-	@echo "$(GREEN)Generating performance report...$(NC)"
-	@if [ -f "scripts/track_performance_regression.py" ]; then \
-		$(PYTHON) scripts/track_performance_regression.py --report; \
-	else \
-		echo "$(RED)❌ Performance tracking script not found$(NC)"; \
-		exit 1; \
-	fi
-
 # Quick development status check
 quick-check: build
 	@echo "$(GREEN)Quick development status check...$(NC)"
@@ -87,15 +57,6 @@ quick-check: build
 		echo "$(RED)❌ fastest-cli binary not found$(NC)"; \
 	fi
 
-# Watch mode dashboard
-watch-dashboard:
-	@echo "$(GREEN)Starting watch mode dashboard...$(NC)"
-	@if [ -f "scripts/development_dashboard.py" ]; then \
-		$(PYTHON) scripts/development_dashboard.py --fastest-binary $(FASTEST_BINARY) --watch; \
-	else \
-		echo "$(RED)❌ Dashboard script not found$(NC)"; \
-		exit 1; \
-	fi
 
 # Run all compatibility tests
 test-compatibility:
@@ -108,12 +69,12 @@ test-compatibility:
 	fi
 
 # Full validation suite
-validate: build compare perf-track test-compatibility
+validate: build compare test-compatibility
 	@echo "$(GREEN)Running full validation suite...$(NC)"
 	@echo "$(GREEN)✅ Full validation complete$(NC)"
 
 # Development cycle: build, test, compare
-dev-cycle: build test compare dashboard
+dev-cycle: build test compare
 	@echo "$(GREEN)✅ Development cycle complete$(NC)"
 
 # Clean build artifacts
@@ -234,17 +195,11 @@ help:
 	@echo "  make build            - Build the fastest binary"
 	@echo "  make test             - Run all tests"
 	@echo "  make compare          - Compare fastest vs pytest performance"
-	@echo "  make dashboard        - Show development dashboard"
-	@echo ""
-	@echo "$(YELLOW)Performance Tracking:$(NC)"
-	@echo "  make perf-track       - Track performance metrics"
-	@echo "  make perf-report      - Generate performance report"
 	@echo ""
 	@echo "$(YELLOW)Development Workflow:$(NC)"
 	@echo "  make dev-setup        - Set up development environment"
 	@echo "  make quick-check      - Quick development status check"
-	@echo "  make watch-dashboard  - Watch mode dashboard"
-	@echo "  make dev-cycle        - Build, test, compare, dashboard"
+	@echo "  make dev-cycle        - Build, test, and compare"
 	@echo ""
 	@echo "$(YELLOW)Testing & Validation:$(NC)"
 	@echo "  make test-compatibility - Run all compatibility tests"

@@ -141,7 +141,7 @@ impl PluginCompatibilityManager {
 /// Real-time system analysis for optimal strategy selection
 
 /// Performance thresholds (dynamically adjusted based on system capabilities)
-const ULTRA_INPROCESS_THRESHOLD: usize = 1000;
+const ULTRA_INPROCESS_THRESHOLD: usize = 2000;
 const BURST_EXECUTION_THRESHOLD: usize = 100; // Revolutionary burst execution for 21-100 tests
 const NATIVE_JIT_THRESHOLD: usize = 20; // Reduced to focus on small suites
 const WORK_STEALING_THRESHOLD: usize = 500;
@@ -536,56 +536,20 @@ impl UltraFastPythonEngine {
         simple_test_ratio: f32,
         system_profile: &SystemProfile,
     ) -> RevolutionaryExecutionStrategy {
-        // Native JIT for small simple tests
+        // ALWAYS use InProcess for maximum compatibility
+        // This ensures fixtures, parameters, and all pytest features work correctly
+        
+        // For very small test counts, still try JIT (but it falls back to InProcess anyway)
         if test_count <= NATIVE_JIT_THRESHOLD && simple_test_ratio > 0.8 && avg_complexity < 1.5 {
             return RevolutionaryExecutionStrategy::NativeJIT {
                 complexity_score: avg_complexity,
             };
         }
 
-        // 🚀 HYBRID BURST EXECUTION: Optimized threading strategy for 21-100 tests
-        if test_count > NATIVE_JIT_THRESHOLD && test_count <= BURST_EXECUTION_THRESHOLD {
-            // Intelligent batch sizing based on test count and CPU cores
-            let optimal_batch_size = if test_count <= 30 {
-                test_count // Single batch for small sets to minimize overhead
-            } else if test_count <= 50 {
-                (test_count + 1) / 2 // Two batches for medium sets
-            } else {
-                (test_count + 2) / 3 // Three batches for larger sets
-            };
-
-            // Optimal thread count based on test count and CPU cores
-            let micro_threads = if test_count <= 30 {
-                2 // Minimal threading for small sets
-            } else if test_count <= 60 {
-                (system_profile.cpu_cores / 2).min(4).max(2) // 2-4 threads
-            } else {
-                (system_profile.cpu_cores * 3 / 4).min(6).max(3) // 3-6 threads
-            };
-
-            return RevolutionaryExecutionStrategy::BurstExecution {
-                batch_size: optimal_batch_size,
-                micro_threads,
-            };
-        }
-
-        // Work-stealing for large suites with good parallelism
-        if test_count > WORK_STEALING_THRESHOLD && system_profile.is_high_performance {
-            return RevolutionaryExecutionStrategy::WorkStealingParallel {
-                worker_count: system_profile.optimal_parallelism,
-            };
-        }
-
-        // Massive parallel for very large suites
-        if test_count > ULTRA_INPROCESS_THRESHOLD {
-            return RevolutionaryExecutionStrategy::MassiveParallel {
-                process_count: (system_profile.cpu_cores / 2).max(2).min(8),
-            };
-        }
-
-        // Default to ultra in-process for 101-500 range
+        // For ALL other cases, use InProcess to ensure compatibility
+        // The performance difference is minimal but functionality is critical
         RevolutionaryExecutionStrategy::UltraInProcess {
-            thread_count: 1, // Single-threaded for this range to avoid overhead
+            thread_count: 1, // Single-threaded for maximum compatibility
         }
     }
 
@@ -932,6 +896,11 @@ impl UltraFastPythonEngine {
 
         // Execute with maximum performance
         let py_results = execute_tests_fn.call1((py_tests,))?;
+        
+        if verbose {
+            eprintln!("Python execution returned: {:?}", py_results);
+        }
+        
         let results_list = py_results.downcast::<PyList>()?;
 
         // Convert results back (minimal overhead)
@@ -2029,7 +1998,11 @@ impl UltraFastExecutor {
             // Execute with revolutionary adaptive strategy selection
             let results = engine
                 .execute_tests_revolutionary(py, &tests, self.verbose)
-                .map_err(|e| Error::Execution(format!("Revolutionary execution failed: {}", e)))?;
+                .map_err(|e| {
+                    // Check if this is a skip exception that should be handled differently
+                    // For now, we just propagate all errors but we could check the PyErr type here
+                    Error::Execution(format!("Revolutionary execution failed: {}", e))
+                })?;
 
             // Mark session fixtures as active
             self.session_fixtures_active
@@ -2331,31 +2304,29 @@ impl UltraFastExecutor {
     /// Teardown session fixtures
     fn teardown_session_fixtures(&self) -> Result<()> {
         Python::with_gil(|py| {
-            if let Some(fixture_executor) = &self.fixture_executor {
-                // Create a dummy test item for session teardown
-                let session_test = TestItem {
-                    id: "__session__".to_string(),
-                    path: std::path::PathBuf::from("__session__"),
-                    function_name: "__session__".to_string(),
-                    line_number: None,
-                    decorators: vec![],
-                    is_async: false,
-                    fixture_deps: vec![],
-                    class_name: None,
-                    is_xfail: false,
-                    name: "__session__".to_string(),
-                    indirect_params: HashMap::new(),
-                };
-
-                fixture_executor
-                    .teardown_test_fixtures(
-                        py,
-                        &session_test,
-                        fastest_core::test::fixtures::FixtureScope::Session,
-                    )
-                    .map_err(|e| {
-                        Error::Execution(format!("Session fixture teardown failed: {}", e))
-                    })?;
+            // Get the worker module which contains our teardown_session_fixtures function
+            let sys = py.import("sys").map_err(|e| {
+                Error::Execution(format!("Failed to import sys: {}", e))
+            })?;
+            let modules = sys.getattr("modules").map_err(|e| {
+                Error::Execution(format!("Failed to get sys.modules: {}", e))
+            })?;
+            
+            // Try to get the worker module
+            if let Ok(worker_module) = modules.get_item("__main__") {
+                // Call the teardown_session_fixtures function
+                if let Ok(has_func) = worker_module.hasattr("teardown_session_fixtures") {
+                    if has_func {
+                        worker_module.call_method0("teardown_session_fixtures").map_err(|e| {
+                            Error::Execution(format!("Failed to call teardown_session_fixtures: {}", e))
+                        })?;
+                        if self.verbose {
+                            eprintln!("🧹 Session fixtures torn down successfully");
+                        }
+                    } else if self.verbose {
+                        eprintln!("⚠️ No session fixture teardown function found");
+                    }
+                }
             }
             Ok(())
         })

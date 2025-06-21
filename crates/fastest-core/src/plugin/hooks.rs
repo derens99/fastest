@@ -32,7 +32,7 @@ pub trait HookCaller<T> {
 #[derive(Debug)]
 pub struct ConfigureArgs {
     pub config: crate::config::Config,
-    pub plugin_config: super::PluginConfig,
+    pub plugin_config: crate::plugin::PluginConfig,
 }
 
 /// Collection modification hook arguments
@@ -120,7 +120,7 @@ pub mod hooks {
     pub struct ConfigureHook;
     
     impl Hook for ConfigureHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
@@ -134,9 +134,9 @@ pub mod hooks {
     pub struct CollectionModifyItemsHook;
     
     impl Hook for CollectionModifyItemsHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
-            if let Some(args) = args.downcast_ref::<CollectionModifyItemsArgs>() {
+            if let Some(args) = _args.downcast_ref::<CollectionModifyItemsArgs>() {
                 Ok(Box::new(args.items.clone()))
             } else {
                 Ok(Box::new(()))
@@ -152,7 +152,7 @@ pub mod hooks {
     pub struct TestSetupHook;
     
     impl Hook for TestSetupHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
@@ -166,7 +166,7 @@ pub mod hooks {
     pub struct TestCallHook;
     
     impl Hook for TestCallHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
@@ -180,7 +180,7 @@ pub mod hooks {
     pub struct TestTeardownHook;
     
     impl Hook for TestTeardownHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
@@ -194,7 +194,7 @@ pub mod hooks {
     pub struct TestMakeReportHook;
     
     impl Hook for TestMakeReportHook {
-        fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
+        fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
@@ -208,15 +208,15 @@ pub mod hooks {
 /// Hook specification for plugins to implement
 pub trait HookSpec {
     /// Called when Fastest is being configured
-    fn pytest_configure(&self, config: &mut crate::config::Config) -> HookResult<()> {
+    fn pytest_configure(&self, _config: &mut crate::config::Config) -> HookResult<()> {
         Ok(())
     }
     
     /// Called after collection has been performed
     fn pytest_collection_modifyitems(
         &self, 
-        items: &mut Vec<TestItem>,
-        config: &crate::config::Config
+        _items: &mut Vec<TestItem>,
+        _config: &crate::config::Config
     ) -> HookResult<()> {
         Ok(())
     }
@@ -224,8 +224,8 @@ pub trait HookSpec {
     /// Called to perform setup for a test
     fn pytest_runtest_setup(
         &self,
-        item: &TestItem,
-        fixtures: &HashMap<String, Box<dyn Any>>
+        _item: &TestItem,
+        _fixtures: &HashMap<String, Box<dyn Any>>
     ) -> HookResult<()> {
         Ok(())
     }
@@ -233,8 +233,8 @@ pub trait HookSpec {
     /// Called to run a test
     fn pytest_runtest_call(
         &self,
-        item: &TestItem,
-        fixtures: &HashMap<String, Box<dyn Any>>
+        _item: &TestItem,
+        _fixtures: &HashMap<String, Box<dyn Any>>
     ) -> HookResult<()> {
         Ok(())
     }
@@ -242,9 +242,9 @@ pub trait HookSpec {
     /// Called to perform teardown for a test
     fn pytest_runtest_teardown(
         &self,
-        item: &TestItem,
-        fixtures: &HashMap<String, Box<dyn Any>>,
-        exception: Option<&str>
+        _item: &TestItem,
+        _fixtures: &HashMap<String, Box<dyn Any>>,
+        _exception: Option<&str>
     ) -> HookResult<()> {
         Ok(())
     }
@@ -268,29 +268,29 @@ pub trait HookSpec {
     }
     
     /// Called when collection starts
-    fn pytest_collection_start(&self, test_paths: &[PathBuf]) -> HookResult<()> {
+    fn pytest_collection_start(&self, _test_paths: &[PathBuf]) -> HookResult<()> {
         Ok(())
     }
     
     /// Called when collection finishes
     fn pytest_collection_finish(
         &self, 
-        items: &[TestItem],
-        duration: std::time::Duration
+        _items: &[TestItem],
+        _duration: std::time::Duration
     ) -> HookResult<()> {
         Ok(())
     }
     
     /// Called when test session starts
-    fn pytest_sessionstart(&self, config: &crate::config::Config) -> HookResult<()> {
+    fn pytest_sessionstart(&self, _config: &crate::config::Config) -> HookResult<()> {
         Ok(())
     }
     
     /// Called when test session finishes
     fn pytest_sessionfinish(
         &self,
-        exit_code: i32,
-        duration: std::time::Duration
+        _exit_code: i32,
+        _duration: std::time::Duration
     ) -> HookResult<()> {
         Ok(())
     }

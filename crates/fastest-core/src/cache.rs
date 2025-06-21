@@ -1,123 +1,234 @@
+//! High-Performance Discovery Cache
+//!
+//! Features:
+//! - RwLock for read-heavy workloads
+//! - Arc<Vec<TestItem>> to avoid cloning
+//! - Memory-mapped file hashing for large files
+//! - Compression for cache storage
+//! - Batch operations to reduce lock contention
+
 use crate::error::Result;
 use crate::test::discovery::TestItem;
-use crate::utils::simd_json; // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION
+use crate::utils::simd_json;
+use memmap2::Mmap;
+use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// Shared test list to avoid cloning
+type SharedTests = Arc<Vec<TestItem>>;
+
+#[derive(Debug, Clone)]
 pub struct CacheEntry {
-    pub tests: Vec<TestItem>,
+    pub tests: Option<SharedTests>,
     pub modified: SystemTime,
     pub content_hash: String,
     pub file_size: u64,
     pub cached_at: SystemTime,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+// Separate struct for serialization
+#[derive(Serialize, Deserialize)]
+struct SerializedCacheEntry {
+    tests: Vec<TestItem>,
+    modified: SystemTime,
+    content_hash: String,
+    file_size: u64,
+    cached_at: SystemTime,
+}
+
+impl CacheEntry {
+    fn new(tests: Vec<TestItem>, modified: SystemTime, content_hash: String, file_size: u64) -> Self {
+        Self {
+            tests: Some(Arc::new(tests)),
+            modified,
+            content_hash,
+            file_size,
+            cached_at: SystemTime::now(),
+        }
+    }
+    
+    fn to_serialized(&self) -> SerializedCacheEntry {
+        SerializedCacheEntry {
+            tests: self.tests.as_ref().map(|arc| arc.as_ref().clone()).unwrap_or_default(),
+            modified: self.modified,
+            content_hash: self.content_hash.clone(),
+            file_size: self.file_size,
+            cached_at: self.cached_at,
+        }
+    }
+    
+    fn from_serialized(entry: SerializedCacheEntry) -> Self {
+        Self {
+            tests: Some(Arc::new(entry.tests)),
+            modified: entry.modified,
+            content_hash: entry.content_hash,
+            file_size: entry.file_size,
+            cached_at: entry.cached_at,
+        }
+    }
+    
+    fn get_tests(&self) -> Option<SharedTests> {
+        self.tests.clone()
+    }
+}
+
+/// Thread-safe discovery cache with RwLock
 pub struct DiscoveryCache {
+    inner: Arc<RwLock<CacheInner>>,
+}
+
+#[derive(Debug)]
+struct CacheInner {
     entries: HashMap<PathBuf, CacheEntry>,
+    version: u32,
+    max_age: Duration,
+    pending_updates: Vec<(PathBuf, Vec<TestItem>)>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SerializedCacheInner {
+    entries: HashMap<PathBuf, SerializedCacheEntry>,
     version: u32,
     max_age: Duration,
 }
 
 impl DiscoveryCache {
-    const CURRENT_VERSION: u32 = 2;
+    const CURRENT_VERSION: u32 = 3; // Bumped for new format
     const DEFAULT_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 60 * 60); // 7 days
-
+    const COMPRESSION_THRESHOLD: usize = 10_240; // Compress cache files > 10KB
+    
     pub fn new() -> Self {
         Self {
-            entries: HashMap::new(),
-            version: Self::CURRENT_VERSION,
-            max_age: Self::DEFAULT_MAX_AGE,
+            inner: Arc::new(RwLock::new(CacheInner {
+                entries: HashMap::new(),
+                version: Self::CURRENT_VERSION,
+                max_age: Self::DEFAULT_MAX_AGE,
+                pending_updates: Vec::new(),
+            })),
         }
     }
-
-    /// Load cache from disk with version checking
+    
+    /// Load cache from disk with compression support
     pub fn load(path: &Path) -> Result<Self> {
-        // Use file locking to prevent concurrent access
         let file = File::open(path)?;
-        let reader = BufReader::new(file);
-
-        let mut cache: Self = simd_json::from_reader(reader)?;
-
-        // Check version compatibility and validate cache integrity
-        if cache.version != Self::CURRENT_VERSION {
-            eprintln!(
-                "Warning: Cache version mismatch (found: {}, expected: {}). Clearing cache.",
-                cache.version,
-                Self::CURRENT_VERSION
-            );
-            cache = Self::new();
+        let file_size = file.metadata()?.len();
+        
+        // Read and potentially decompress
+        let data = if file_size > Self::COMPRESSION_THRESHOLD as u64 {
+            // Try to decompress with zstd
+            let mut decoder = zstd::Decoder::new(BufReader::new(file))?;
+            let mut buffer = Vec::new();
+            decoder.read_to_end(&mut buffer)?;
+            buffer
         } else {
-            // Validate cache integrity
-            let initial_entries = cache.entries.len();
-            cache
-                .entries
-                .retain(|path, _| path.exists() && path.is_file());
-            let removed_entries = initial_entries - cache.entries.len();
-            if removed_entries > 0 {
-                eprintln!(
-                    "Warning: Removed {} stale cache entries for missing files",
-                    removed_entries
-                );
+            // Read directly
+            let mut reader = BufReader::new(file);
+            let mut buffer = Vec::new();
+            reader.read_to_end(&mut buffer)?;
+            buffer
+        };
+        
+        // Parse with SIMD JSON
+        let serialized: SerializedCacheInner = simd_json::from_slice(&mut data.clone())
+            .map_err(|e| crate::error::Error::Serialization(e.to_string()))?;
+        
+        // Version check
+        if serialized.version != Self::CURRENT_VERSION {
+            eprintln!("Cache version mismatch, creating new cache");
+            return Ok(Self::new());
+        }
+        
+        // Convert from serialized format
+        let mut entries = HashMap::new();
+        for (path, serialized_entry) in serialized.entries {
+            if path.exists() {
+                entries.insert(path, CacheEntry::from_serialized(serialized_entry));
             }
         }
-
-        // Clean up old entries
-        cache.cleanup_expired();
-
-        Ok(cache)
+        
+        // Clean expired entries
+        let now = SystemTime::now();
+        entries.retain(|_, entry| {
+            if let Ok(elapsed) = now.duration_since(entry.cached_at) {
+                elapsed <= serialized.max_age
+            } else {
+                true
+            }
+        });
+        
+        let inner = CacheInner {
+            entries,
+            version: serialized.version,
+            max_age: serialized.max_age,
+            pending_updates: Vec::new(),
+        };
+        
+        Ok(Self {
+            inner: Arc::new(RwLock::new(inner)),
+        })
     }
-
-    /// Save cache to disk with atomic write
+    
+    /// Save cache with compression for large files
     pub fn save(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-
-        // Write to temporary file first
+        
+        // Apply pending updates first
+        self.flush_pending_updates()?;
+        
         let temp_path = path.with_extension("tmp");
-
+        
         {
-            let file = File::create(&temp_path)?;
-            let writer = BufWriter::new(file);
-
-            simd_json::to_writer(writer, self)?;
+            let inner = self.inner.read();
+            
+            // Convert to serialized format
+            let mut serialized_entries = HashMap::new();
+            for (path, entry) in &inner.entries {
+                serialized_entries.insert(path.clone(), entry.to_serialized());
+            }
+            
+            let serializable = SerializedCacheInner {
+                entries: serialized_entries,
+                version: inner.version,
+                max_age: inner.max_age,
+            };
+            
+            // Serialize to JSON
+            let json_data = simd_json::to_vec(&serializable)?;
+            
+            // Compress if large
+            if json_data.len() > Self::COMPRESSION_THRESHOLD {
+                let file = File::create(&temp_path)?;
+                let mut encoder = zstd::Encoder::new(BufWriter::new(file), 3)?;
+                encoder.write_all(&json_data)?;
+                encoder.finish()?;
+            } else {
+                fs::write(&temp_path, json_data)?;
+            }
         }
-
+        
         // Atomic rename
         fs::rename(temp_path, path)?;
         Ok(())
     }
-
-    /// Get cached tests for a file if still valid
-    pub fn get(&self, path: &Path) -> Option<Vec<TestItem>> {
-        self.entries.get(path).and_then(|entry| {
-            // Check cache age
-            if let Ok(elapsed) = SystemTime::now().duration_since(entry.cached_at) {
-                if elapsed > self.max_age {
-                    return None;
-                }
-            }
-
-            // Validate file metadata
+    
+    /// Get cached tests without cloning
+    pub fn get(&self, path: &Path) -> Option<SharedTests> {
+        let inner = self.inner.read();
+        inner.entries.get(path).and_then(|entry| {
+            // Quick metadata check
             if let Ok(metadata) = fs::metadata(path) {
-                let size = metadata.len();
-                let modified = metadata.modified().ok()?;
-
-                // Check both modification time and file size
-                if self.is_same_time(&modified, &entry.modified) && size == entry.file_size {
-                    // Verify content hash for extra safety
-                    if let Ok(current_hash) = self.calculate_content_hash_fast(path) {
-                        if current_hash == entry.content_hash {
-                            // Validate cached tests are not empty/corrupted
-                            if !entry.tests.is_empty() {
-                                return Some(entry.tests.clone());
-                            }
+                if metadata.len() == entry.file_size {
+                    if let Ok(modified) = metadata.modified() {
+                        if Self::is_same_time(&modified, &entry.modified) {
+                            return entry.get_tests();
                         }
                     }
                 }
@@ -125,123 +236,112 @@ impl DiscoveryCache {
             None
         })
     }
-
-    /// Update cache entry for a file
-    pub fn update(&mut self, path: PathBuf, tests: Vec<TestItem>) -> Result<()> {
-        let metadata = fs::metadata(&path)?;
-        let modified = metadata.modified()?;
-        let file_size = metadata.len();
-
-        // Calculate content hash
-        let content_hash = self.calculate_content_hash_fast(&path)?;
-
-        self.entries.insert(
-            path,
-            CacheEntry {
-                tests,
-                modified,
-                content_hash,
-                file_size,
-                cached_at: SystemTime::now(),
-            },
-        );
+    
+    /// Batch update for better performance
+    pub fn update_batch(&self, updates: Vec<(PathBuf, Vec<TestItem>)>) -> Result<()> {
+        let mut inner = self.inner.write();
+        inner.pending_updates.extend(updates);
+        
+        // Flush if too many pending
+        if inner.pending_updates.len() > 100 {
+            drop(inner);
+            self.flush_pending_updates()?;
+        }
         Ok(())
     }
-
-    /// Clear all cache entries
-    pub fn clear(&mut self) {
-        self.entries.clear();
+    
+    /// Update single entry
+    pub fn update(&self, path: PathBuf, tests: Vec<TestItem>) -> Result<()> {
+        self.update_batch(vec![(path, tests)])
     }
-
-    /// Remove stale entries (files that no longer exist)
-    pub fn cleanup_stale(&mut self) {
-        self.entries.retain(|path, _| path.exists());
-    }
-
-    /// Remove expired entries
-    pub fn cleanup_expired(&mut self) {
-        let now = SystemTime::now();
-        self.entries.retain(|_, entry| {
-            if let Ok(elapsed) = now.duration_since(entry.cached_at) {
-                elapsed <= self.max_age
-            } else {
-                true
+    
+    /// Flush pending updates
+    fn flush_pending_updates(&self) -> Result<()> {
+        let mut inner = self.inner.write();
+        let updates = std::mem::take(&mut inner.pending_updates);
+        
+        for (path, tests) in updates {
+            if let Ok(metadata) = fs::metadata(&path) {
+                let modified = metadata.modified()?;
+                let file_size = metadata.len();
+                let content_hash = Self::calculate_file_hash(&path)?;
+                
+                inner.entries.insert(
+                    path,
+                    CacheEntry::new(tests, modified, content_hash, file_size),
+                );
             }
-        });
-    }
-
-    /// Remove specific cache entry
-    pub fn remove(&mut self, path: &Path) -> bool {
-        self.entries.remove(path).is_some()
-    }
-
-    /// Ultra-fast content hash using xxHash (4x faster than SHA256) with file size checks
-    fn calculate_content_hash_fast(&self, path: &Path) -> Result<String> {
-        // For all files, use streaming xxHash for speed and memory efficiency
-        self.calculate_content_hash_streaming_xxhash(path)
-    }
-
-    /// Streaming hash calculation optimized for all files using xxHash
-    fn calculate_content_hash_streaming_xxhash(&self, path: &Path) -> Result<String> {
-        use std::io::Read;
-        use xxhash_rust::xxh3::Xxh3; // Using xxh3 for good performance
-
-        let mut file = File::open(path)?;
-        let mut hasher = Xxh3::new();
-        let mut buffer = [0; 32768]; // 32KB buffer
-
-        loop {
-            let n = file.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buffer[..n]);
         }
-
-        Ok(format!("{:x}", hasher.digest()))
+        Ok(())
     }
-
-    /// Compare SystemTime with tolerance for filesystem precision differences
-    fn is_same_time(&self, t1: &SystemTime, t2: &SystemTime) -> bool {
+    
+    /// Calculate file hash using memory mapping for large files
+    fn calculate_file_hash(path: &Path) -> Result<String> {
+        use xxhash_rust::xxh3::Xxh3;
+        
+        let file_size = fs::metadata(path)?.len();
+        
+        // Use mmap for files > 1MB
+        if file_size > 1_048_576 {
+            let file = File::open(path)?;
+            let mmap = unsafe { Mmap::map(&file)? };
+            let hash = xxhash_rust::xxh3::xxh3_64(&mmap);
+            Ok(format!("{:x}", hash))
+        } else {
+            // Read small files directly
+            let data = fs::read(path)?;
+            let hash = xxhash_rust::xxh3::xxh3_64(&data);
+            Ok(format!("{:x}", hash))
+        }
+    }
+    
+    /// Compare times with tolerance
+    fn is_same_time(t1: &SystemTime, t2: &SystemTime) -> bool {
         match (
             t1.duration_since(SystemTime::UNIX_EPOCH),
             t2.duration_since(SystemTime::UNIX_EPOCH),
         ) {
             (Ok(d1), Ok(d2)) => {
-                // Allow 2 second tolerance for filesystem precision differences
                 let diff = if d1 > d2 { d1 - d2 } else { d2 - d1 };
                 diff.as_secs() < 2
             }
             _ => false,
         }
     }
-
+    
+    /// Clear cache
+    pub fn clear(&self) {
+        let mut inner = self.inner.write();
+        inner.entries.clear();
+        inner.pending_updates.clear();
+    }
+    
     /// Get cache statistics
     pub fn stats(&self) -> CacheStats {
+        let inner = self.inner.read();
         let now = SystemTime::now();
         let mut expired_count = 0;
-        let mut total_size = 0;
-
-        for entry in self.entries.values() {
+        let mut total_tests = 0;
+        
+        for entry in inner.entries.values() {
             if let Ok(elapsed) = now.duration_since(entry.cached_at) {
-                if elapsed > self.max_age {
+                if elapsed > inner.max_age {
                     expired_count += 1;
                 }
             }
-            total_size += entry.tests.len() * std::mem::size_of::<TestItem>();
+            if let Some(tests) = &entry.tests {
+                total_tests += tests.len();
+            } else {
+                total_tests += entry.tests_vec.len();
+            }
         }
-
+        
         CacheStats {
-            total_entries: self.entries.len(),
-            total_tests: self.entries.values().map(|e| e.tests.len()).sum(),
+            total_entries: inner.entries.len(),
+            total_tests,
             expired_entries: expired_count,
-            approximate_memory_usage: total_size,
+            pending_updates: inner.pending_updates.len(),
         }
-    }
-
-    /// Set maximum cache age
-    pub fn set_max_age(&mut self, max_age: Duration) {
-        self.max_age = max_age;
     }
 }
 
@@ -256,18 +356,15 @@ pub struct CacheStats {
     pub total_entries: usize,
     pub total_tests: usize,
     pub expired_entries: usize,
-    pub approximate_memory_usage: usize,
+    pub pending_updates: usize,
 }
 
-/// Get default cache path with better error handling
+/// Get default cache path
 pub fn default_cache_path() -> PathBuf {
     dirs::cache_dir()
         .or_else(dirs::data_local_dir)
         .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| {
-            eprintln!("Warning: Unable to determine cache directory, using temp dir");
-            std::env::temp_dir()
-        })
+        .unwrap_or_else(|| std::env::temp_dir())
         .join("fastest")
         .join("discovery_cache.json")
 }
@@ -275,43 +372,56 @@ pub fn default_cache_path() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
     use tempfile::TempDir;
-
+    
     #[test]
-    fn test_cache_save_load() {
+    fn test_cache_operations() {
+        let cache = DiscoveryCache::new();
+        let test_path = PathBuf::from("test.py");
+        
+        // Create dummy test items
+        let tests = vec![
+            TestItem {
+                id: "test1".to_string(),
+                path: test_path.clone(),
+                function_name: "test_one".to_string(),
+                line_number: Some(1),
+                decorators: Default::default(),
+                is_async: false,
+                fixture_deps: Default::default(),
+                class_name: None,
+                is_xfail: false,
+                name: "test_one".to_string(),
+                indirect_params: Default::default(),
+            },
+        ];
+        
+        // Update should work
+        cache.update(test_path.clone(), tests).unwrap();
+        
+        // Stats should reflect the update
+        let stats = cache.stats();
+        assert_eq!(stats.pending_updates, 1);
+    }
+    
+    #[test]
+    fn test_cache_compression() {
         let temp_dir = TempDir::new().unwrap();
         let cache_path = temp_dir.path().join("cache.json");
-        let test_file = temp_dir.path().join("test.py");
-
-        // Create a test file
-        fs::write(&test_file, "def test_example(): pass").unwrap();
-
-        let mut cache = DiscoveryCache::new();
-        cache.update(test_file, vec![]).unwrap();
-
+        
+        let cache = DiscoveryCache::new();
+        
+        // Add many entries to trigger compression
+        for i in 0..100 {
+            let path = PathBuf::from(format!("test{}.py", i));
+            let tests = vec![]; // Empty for simplicity
+            cache.update(path, tests).unwrap();
+        }
+        
         cache.save(&cache_path).unwrap();
+        
+        // Should be able to load compressed cache
         let loaded = DiscoveryCache::load(&cache_path).unwrap();
-
-        assert_eq!(loaded.entries.len(), 1);
-    }
-
-    #[test]
-    fn test_cache_expiration() {
-        let mut cache = DiscoveryCache::new();
-        cache.set_max_age(Duration::from_secs(1));
-
-        let entry = CacheEntry {
-            tests: vec![],
-            modified: SystemTime::now(),
-            content_hash: "test".to_string(),
-            file_size: 100,
-            cached_at: SystemTime::now() - Duration::from_secs(2),
-        };
-
-        cache.entries.insert(PathBuf::from("old.py"), entry);
-        cache.cleanup_expired();
-
-        assert_eq!(cache.entries.len(), 0);
+        assert_eq!(loaded.stats().total_entries, 100);
     }
 }

@@ -1,196 +1,207 @@
 # Scripts Directory
 
-This directory contains utility scripts for building, testing, and maintaining the Fastest project.
+Utility scripts for building, testing, and maintaining Fastest - organized by purpose.
 
-## 🚀 Release & Build Scripts
+## 📁 Directory Structure
 
-### `build-macos-release.sh`
-Builds macOS release binaries for distribution.
-
-**Usage:**
-```bash
-./scripts/build-macos-release.sh [version]
+```
+scripts/
+├── benchmarks/      # Performance benchmarking
+├── development/     # Development tools
+├── release/         # Release management
+└── utils/           # Miscellaneous utilities
 ```
 
-### `bump-version.sh`
-Updates version numbers across all project files (Cargo.toml, README, etc.).
+## 📊 Benchmarking Scripts (`benchmarks/`)
+
+### `official.py` ⭐
+**The definitive performance benchmark** - generates official results for publication.
 
 **Usage:**
 ```bash
-./scripts/bump-version.sh 0.3.0
-```
+# Full benchmark suite (for releases)
+python scripts/benchmarks/official.py
 
-### `install-dev.sh`
-Installs Fastest from local build for development testing.
-
-**Usage:**
-```bash
-./scripts/install-dev.sh
-```
-
-## 📊 Benchmarking & Performance
-
-### `official_benchmark.py` ⭐
-**The definitive performance benchmark** that generates official results for publication.
-
-Creates comprehensive performance comparisons between Fastest and pytest across multiple test suite sizes, measuring both discovery and execution performance.
-
-**Usage:**
-```bash
-# Full benchmark suite (recommended for official results)
-python scripts/official_benchmark.py
-
-# Quick benchmark for development
-python scripts/official_benchmark.py --quick
+# Quick benchmark (for development)
+python scripts/benchmarks/official.py --quick
 
 # Custom output directory
-python scripts/official_benchmark.py --output-dir custom_results/
+python scripts/benchmarks/official.py --output-dir results/
 ```
 
-**Outputs:**
-- `benchmarks/official_results.json` - Machine-readable results
-- `benchmarks/OFFICIAL_BENCHMARK_RESULTS.md` - Human-readable report  
-- `docs/OFFICIAL_BENCHMARK_RESULTS.md` - Published documentation
-
 **Features:**
-- Tests multiple suite sizes (10, 20, 50, 100, 200, 500, 1000, 2000 tests)
-- Realistic test patterns (simple, fixtures, parametrized, classes)
-- Separate discovery and execution timing
-- Memory usage measurement
+- Multiple test suite sizes (10-2000 tests)
+- Realistic test patterns
+- Detailed timing breakdowns
 - System information capture
-- Automatic speedup calculations
-- Publication-ready markdown reports
+- Publication-ready reports
 
-### `generate_charts.py` ⭐
-**Professional performance visualization** that creates publication-ready charts from benchmark results.
-
-Generates multiple chart types including speedup comparisons, scaling analysis, and performance dashboards.
+### `charts.py` ⭐  
+**Professional visualization** - creates publication-ready performance charts.
 
 **Usage:**
 ```bash
-# Generate charts from latest benchmark results
-python scripts/generate_charts.py
+# Generate all charts
+python scripts/benchmarks/charts.py
+
+# Specific chart type
+python scripts/benchmarks/charts.py --type speedup
 ```
 
 **Outputs:**
-- `docs/images/performance_comparison.png` - Main speedup comparison
-- `docs/images/scaling_analysis.png` - Scaling behavior analysis  
-- `docs/images/performance_summary.png` - Comprehensive dashboard
-- SVG versions for web use
+- Performance comparison charts
+- Scaling analysis graphs
+- High-resolution PNG/SVG files
 
-**Features:**
-- Professional matplotlib styling
-- Multiple chart types (bar, line, pie, dashboard)
-- Automatic data loading from benchmark results
-- High-resolution output (300 DPI)
-- Both PNG and SVG formats
-- Publication-ready quality
-
-### `compare_with_pytest.py`
-Detailed comparison tool for development and validation.
+### `compare.py`
+**Detailed pytest comparison** - validates compatibility and performance.
 
 **Usage:**
 ```bash
-python scripts/compare_with_pytest.py --test-dir tests/
+# Compare with local tests
+python scripts/benchmarks/compare.py --test-dir tests/
+
+# Compare specific features
+python scripts/benchmarks/compare.py --features fixtures,markers
 ```
 
-## 🔧 Development Utilities
+## 🔧 Development Scripts (`development/`)
 
-### `setup_test_repos.sh`
-Sets up real-world test repositories for validation and testing.
+### `install-dev.sh`
+**Local development installation** - builds and installs Fastest for testing.
 
 **Usage:**
 ```bash
-./scripts/setup_test_repos.sh
+./scripts/development/install-dev.sh
 ```
 
-### `run_full_benchmark.sh`
-Runs the complete benchmark suite including all performance tests.
+### `install-dev-tools.sh`
+**Development environment setup** - installs all required tools.
 
 **Usage:**
 ```bash
-./scripts/run_full_benchmark.sh
+./scripts/development/install-dev-tools.sh
 ```
 
-## 🧪 Feature Testing Scripts
-
-### `test_markers.py`
-Tests the marker system functionality including @pytest.mark.skip, xfail, skipif, and custom markers.
+### `setup-hooks.sh`
+**Git hooks configuration** - sets up pre-commit and pre-push hooks.
 
 **Usage:**
 ```bash
-python scripts/test_markers.py
+./scripts/development/setup-hooks.sh
 ```
 
-### `test_parametrization.py`
-Tests parametrization functionality with various parameter types and combinations.
+### `pre-push-check.sh`
+**Pre-push validation** - runs tests and checks before pushing.
 
 **Usage:**
 ```bash
-python scripts/test_parametrization.py
+./scripts/development/pre-push-check.sh
 ```
 
-### `test_plugins.py`
-Tests the plugin system including loading, hooks, CLI options, and built-in plugins.
+## 🚀 Release Scripts (`release/`)
+
+### `bump-version.sh`
+**Version management** - updates version across all project files.
 
 **Usage:**
 ```bash
-python scripts/test_plugins.py
+# Bump to specific version
+./scripts/release/bump-version.sh 1.0.0
+
+# Show current version
+./scripts/release/bump-version.sh
 ```
 
-### `optimization_results.py`
-Analyzes and displays optimization results from benchmarks.
+### `build-macos.sh`
+**macOS release builds** - creates distribution binaries.
 
 **Usage:**
 ```bash
-python scripts/optimization_results.py
+./scripts/release/build-macos.sh [version]
 ```
 
-## 📋 Running Benchmarks
+### `update-manifest.sh`
+**Version manifest** - updates version tracking files.
 
-### For Official Results (CI/Release)
+**Usage:**
 ```bash
-# Ensure release build exists
+./scripts/release/update-manifest.sh
+```
+
+## 🔧 Utility Scripts (`utils/`)
+
+### `setup-test-repos.sh`
+**Test repository setup** - clones real-world projects for testing.
+
+**Usage:**
+```bash
+./scripts/utils/setup-test-repos.sh
+```
+
+## 🏃 Quick Start
+
+### Running Benchmarks
+```bash
+# Official benchmark
 cargo build --release
+python scripts/benchmarks/official.py
 
-# Run official benchmark
-python scripts/official_benchmark.py
+# Generate charts
+python scripts/benchmarks/charts.py
+
+# Compare with pytest
+python scripts/benchmarks/compare.py
 ```
 
-### For Development Testing
+### Development Setup
 ```bash
-# Quick benchmark during development
-python scripts/official_benchmark.py --quick
+# Install dev tools
+./scripts/development/install-dev-tools.sh
 
-# Detailed comparison
-python scripts/compare_with_pytest.py
+# Set up git hooks
+./scripts/development/setup-hooks.sh
+
+# Install local build
+./scripts/development/install-dev.sh
+```
+
+### Release Process
+```bash
+# Bump version
+./scripts/release/bump-version.sh 1.0.0
+
+# Build release
+./scripts/release/build-macos.sh
+
+# Update manifest
+./scripts/release/update-manifest.sh
+```
+
+## 📋 Note on Test Scripts
+
+Feature test scripts have been moved to the main test directory:
+- `test_markers.py` → `tests/integration/`
+- `test_parametrization.py` → `tests/integration/`
+- `test_plugins.py` → `tests/integration/`
+
+## 🔄 CI/CD Integration
+
+```yaml
+# GitHub Actions example
+- name: Run Benchmarks
+  run: |
+    cargo build --release
+    python scripts/benchmarks/official.py --quick
+    python scripts/benchmarks/charts.py
 ```
 
 ## 📁 Output Locations
 
-- **Official Results**: `benchmarks/` and `docs/` (for publication)
-- **Development Results**: `comparison_results/` (gitignored)
-- **Performance Data**: `performance_data/` (gitignored)
+- **Benchmark Results**: `benchmarks/` directory
+- **Charts**: `docs/images/` directory
+- **Documentation**: `docs/performance/` directory
 
-## 🔄 Integration with CI/CD
+---
 
-The `official_benchmark.py` script is designed to be run in CI/CD pipelines:
-
-```yaml
-# Example GitHub Actions step
-- name: Run Official Benchmark
-  run: |
-    cargo build --release
-    python scripts/official_benchmark.py --quick
-    git add docs/OFFICIAL_BENCHMARK_RESULTS.md
-    git commit -m "Update benchmark results"
-```
-
-## 📖 Documentation
-
-Benchmark results are automatically published to:
-- Repository documentation in `docs/`
-- README.md performance section (manual update)
-- GitHub releases (attach JSON results)
-
-For more details on benchmarking methodology, see [benchmarks/README.md](../benchmarks/README.md).
+*Scripts are organized for clarity and maintainability. Each subdirectory has a specific purpose.*

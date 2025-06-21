@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub use advanced::{
-    parse_fixture_decorator, AdvancedFixtureManager, FixtureCacheStats, FixtureDefinition,
-    FixtureInstance, FixtureInstanceKey, FixtureRequest,
+    AdvancedFixtureManager, FixtureDefinition, FixtureInstance, 
+    FixtureKey, FixtureRequest, FixtureScope, FixtureValue,
 };
 pub use builtin::{
     generate_builtin_fixture_code, get_builtin_fixture_metadata, is_builtin_fixture,
@@ -29,6 +29,11 @@ pub fn generate_test_code_with_fixtures(
     )
 }
 
+/// Extract fixture dependencies from a test item
+pub fn extract_fixture_deps(test: &crate::TestItem) -> Vec<String> {
+    test.fixture_deps.clone().into_vec()
+}
+
 /// Simple fixture executor for core functionality
 pub struct FixtureExecutor;
 
@@ -38,8 +43,7 @@ impl FixtureExecutor {
     }
 }
 
-/// Re-export FixtureScope from advanced module
-pub use advanced::FixtureScope;
+// FixtureScope is already exported in the advanced exports above
 
 /// Represents a test fixture instance (legacy - use FixtureDefinition from advanced)
 #[derive(Debug, Clone)]
@@ -52,9 +56,9 @@ pub struct Fixture {
     pub dependencies: Vec<String>, // Other fixtures this depends on
 }
 
-/// Key for fixture instance caching
+/// Key for fixture instance caching (internal use, different from advanced::FixtureKey)
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct FixtureKey {
+struct LegacyFixtureKey {
     name: String,
     scope: FixtureScope,
     scope_id: String, // test_id for function, class name for class, module path for module, etc.
@@ -63,7 +67,7 @@ struct FixtureKey {
 /// Manages fixture instances and dependencies
 pub struct FixtureManager {
     fixtures: HashMap<String, Fixture>,
-    instances: Arc<Mutex<HashMap<FixtureKey, serde_json::Value>>>,
+    instances: Arc<Mutex<HashMap<LegacyFixtureKey, serde_json::Value>>>,
     fixture_functions: HashMap<String, String>, // name -> Python code to execute
 }
 
@@ -101,7 +105,7 @@ impl FixtureManager {
             .get(name)
             .ok_or_else(|| anyhow!("Fixture '{}' not found", name))?;
 
-        let key = FixtureKey {
+        let key = LegacyFixtureKey {
             name: name.to_string(),
             scope: fixture.scope.clone(),
             scope_id: self.get_scope_id(test_id, &fixture.scope),
@@ -294,8 +298,8 @@ impl Default for FixtureManager {
     }
 }
 
-/// Extract fixture dependencies from test function parameters
-pub fn extract_fixture_deps(
+/// Extract fixture dependencies from test function parameters (for parser)
+pub fn extract_fixture_deps_from_function(
     test_function: &crate::test::parser::TestFunction,
     content: &str,
 ) -> Vec<String> {

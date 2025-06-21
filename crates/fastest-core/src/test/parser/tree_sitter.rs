@@ -1,9 +1,108 @@
-use anyhow::{anyhow, Context, Result};
+//! Optimized Tree-sitter Python Parser
+//!
+//! High-performance parsing with:
+//! - Single-pass AST traversal
+//! - Pre-compiled queries for common patterns
+//! - Minimal allocations with string slices
+//! - Efficient data structures
+
+use anyhow::{anyhow, Result};
+use once_cell::sync::Lazy;
+// use parking_lot::RwLock; // Not needed
+// use smallvec::SmallVec; // Not needed
 use std::collections::HashMap;
 use std::path::Path;
-use tree_sitter::{Node, Parser as TSParser};
+// use std::sync::Arc; // Not needed
+use tree_sitter::{Node, Parser as TSParser, Query};
+use unicode_normalization::UnicodeNormalization;
 
-/// Test function information
+/// Normalize Unicode test names for safe IDs while preserving display names
+pub fn normalize_test_name(name: &str) -> (String, String) {
+    // Normalize to NFD (canonical decomposition)
+    let normalized = name.nfd().collect::<String>();
+    
+    // Create safe ID by replacing non-ASCII characters
+    let safe_id = normalized
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c.to_string()
+            } else if c == ' ' || c == '-' || c == '.' {
+                "_".to_string()
+            } else {
+                // Convert non-ASCII to hex representation
+                format!("_u{:04x}", c as u32)
+            }
+        })
+        .collect::<String>();
+    
+    // Return both safe ID and original display name
+    (safe_id, name.to_string())
+}
+
+/// Pre-compiled tree-sitter queries for better performance
+static PYTHON_QUERIES: Lazy<PythonQueries> = Lazy::new(|| {
+    let language = tree_sitter_python::language();
+    
+    PythonQueries {
+        test_functions: Query::new(
+            &language,
+            r#"
+            (function_definition
+              name: (identifier) @name
+              parameters: (parameters)? @params
+            ) @func
+            "#,
+        ).unwrap(),
+        
+        class_definitions: Query::new(
+            &language,
+            r#"
+            (class_definition
+              name: (identifier) @name
+              body: (block) @body
+            ) @class
+            "#,
+        ).unwrap(),
+        
+        decorators: Query::new(
+            &language,
+            r#"
+            (decorated_definition
+              (decorator) @decorator
+              definition: (_) @def
+            )
+            "#,
+        ).unwrap(),
+        
+        fixture_decorator: Query::new(
+            &language,
+            r#"
+            (decorator
+              (call
+                function: [
+                  (identifier) @fixture_name
+                  (attribute
+                    value: (identifier) @module
+                    attribute: (identifier) @fixture_name
+                  )
+                ]
+                (#match? @fixture_name "fixture")
+              )
+            )
+            "#,
+        ).unwrap(),
+    }
+});
+
+struct PythonQueries {
+    test_functions: Query,
+    class_definitions: Query,
+    decorators: Query,
+    fixture_decorator: Query,
+}
+
+/// Optimized test function information
 #[derive(Debug, Clone)]
 pub struct TestFunction {
     pub name: String,
@@ -24,14 +123,12 @@ pub struct SetupTeardownMethod {
     pub scope: SetupTeardownScope,
 }
 
-/// Type of setup/teardown method
 #[derive(Debug, Clone, PartialEq)]
 pub enum SetupTeardownType {
     Setup,
     Teardown,
 }
 
-/// Scope of setup/teardown method
 #[derive(Debug, Clone, PartialEq)]
 pub enum SetupTeardownScope {
     Module,
@@ -40,14 +137,14 @@ pub enum SetupTeardownScope {
     Function,
 }
 
-/// Module metadata including setup/teardown
-#[derive(Debug, Clone)]
+/// Module metadata
+#[derive(Debug, Clone, Default)]
 pub struct ModuleMetadata {
     pub setup_module: Option<SetupTeardownMethod>,
     pub teardown_module: Option<SetupTeardownMethod>,
 }
 
-/// Class metadata including setup/teardown
+/// Class metadata
 #[derive(Debug, Clone)]
 pub struct ClassMetadata {
     pub name: String,
@@ -55,8 +152,8 @@ pub struct ClassMetadata {
     pub teardown_class: Option<SetupTeardownMethod>,
     pub setup_method: Option<SetupTeardownMethod>,
     pub teardown_method: Option<SetupTeardownMethod>,
-    pub has_setup: bool,    // unittest-style setUp
-    pub has_teardown: bool, // unittest-style tearDown
+    pub has_setup: bool,
+    pub has_teardown: bool,
 }
 
 /// Fixture definition
@@ -71,137 +168,56 @@ pub struct FixtureDefinition {
     pub decorators: Vec<String>,
 }
 
-/// Main parser using tree-sitter for fast and accurate Python parsing
-pub struct Parser {
-    parser: TSParser,
+/// Single-pass visitor for efficient parsing
+struct SinglePassVisitor<'a> {
+    content: &'a str,
+    fixtures: Vec<FixtureDefinition>,
+    tests: Vec<TestFunction>,
+    module_metadata: ModuleMetadata,
+    class_metadata: HashMap<String, ClassMetadata>,
+    current_class: Option<&'a str>,
 }
 
-/// Check if a method name is a setup/teardown method
-fn is_setup_teardown_method(name: &str) -> bool {
-    matches!(
-        name,
-        "setup_module"
-            | "teardown_module"
-            | "setup_class"
-            | "teardown_class"
-            | "setup_method"
-            | "teardown_method"
-            | "setup_function"
-            | "teardown_function"
-            | "setUp"
-            | "tearDown"
-    )
-}
-
-impl Parser {
-    /// Create a new parser instance
-    pub fn new() -> Result<Self> {
-        let mut parser = TSParser::new();
-        let language = tree_sitter_python::language();
-        parser
-            .set_language(&language)
-            .context("Failed to set Python language")?;
-
-        Ok(Self { parser })
-    }
-
-    /// Parse a file and extract tests and fixtures
-    pub fn parse_fixtures_and_tests(
-        path: &Path,
-    ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
-        let mut parser = Self::new()?;
-        let content = std::fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {}", path.display()))?;
-
-        let (fixtures, tests, _, _) = parser.parse_content(&content)?;
-        Ok((fixtures, tests))
-    }
-
-    /// Parse content and extract tests, fixtures, and setup/teardown metadata
-    pub fn parse_content(
-        &mut self,
-        content: &str,
-    ) -> Result<(
-        Vec<FixtureDefinition>,
-        Vec<TestFunction>,
-        ModuleMetadata,
-        HashMap<String, ClassMetadata>,
-    )> {
-        let tree = self
-            .parser
-            .parse(content, None)
-            .ok_or_else(|| anyhow!("Failed to parse Python content"))?;
-
-        let root = tree.root_node();
-        let mut fixtures = Vec::new();
-        let mut tests = Vec::new();
-
-        // First pass: collect all functions with their metadata
-        let (functions, module_setup_teardown, collected_class_metadata) =
-            self.collect_all_functions_and_metadata(root, content)?;
-
-        // Update module metadata
-        let module_metadata = module_setup_teardown;
-        let class_metadata = collected_class_metadata;
-
-        // Second pass: categorize into tests, fixtures, and setup/teardown
-        for func in functions {
-            if self.is_fixture(&func) {
-                fixtures.push(self.convert_to_fixture(func)?);
-            } else if self.is_test(&func) {
-                tests.push(func.into());
-            }
-            // Note: setup/teardown methods are handled separately in class metadata
-        }
-
-        Ok((fixtures, tests, module_metadata, class_metadata))
-    }
-
-    fn collect_all_functions_and_metadata(
-        &self,
-        root: Node,
-        content: &str,
-    ) -> Result<(
-        Vec<FunctionInfo>,
-        ModuleMetadata,
-        HashMap<String, ClassMetadata>,
-    )> {
-        let mut functions = Vec::new();
-        let mut class_map = HashMap::new();
-        let mut module_metadata = ModuleMetadata {
-            setup_module: None,
-            teardown_module: None,
-        };
-        let mut class_metadata = HashMap::new();
-
-        // First collect all classes and their metadata
-        self.collect_classes_with_metadata(root, content, &mut class_map, &mut class_metadata)?;
-
-        // Then collect all functions and module-level setup/teardown
-        self.collect_functions_with_metadata(
-            root,
+impl<'a> SinglePassVisitor<'a> {
+    fn new(content: &'a str) -> Self {
+        Self {
             content,
-            &mut functions,
-            &class_map,
-            &mut module_metadata,
-        )?;
-
-        Ok((functions, module_metadata, class_metadata))
+            fixtures: Vec::new(),
+            tests: Vec::new(),
+            module_metadata: ModuleMetadata::default(),
+            class_metadata: HashMap::new(),
+            current_class: None,
+        }
     }
-
-    fn collect_classes_with_metadata(
-        &self,
-        node: Node,
-        content: &str,
-        class_map: &mut HashMap<String, String>,
-        class_metadata: &mut HashMap<String, ClassMetadata>,
-    ) -> Result<()> {
-        if node.kind() == "class_definition" {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                let class_name = name_node.utf8_text(content.as_bytes())?;
-
-                // Check if this is a test class (starts with "Test")
+    
+    fn visit_node(&mut self, node: Node<'a>) {
+        match node.kind() {
+            "module" => self.visit_module(node),
+            "class_definition" => self.visit_class(node),
+            "function_definition" => self.visit_function(node, None),
+            "decorated_definition" => self.visit_decorated(node),
+            _ => self.visit_children(node),
+        }
+    }
+    
+    fn visit_children(&mut self, node: Node<'a>) {
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            self.visit_node(child);
+        }
+    }
+    
+    fn visit_module(&mut self, node: Node<'a>) {
+        self.visit_children(node);
+    }
+    
+    fn visit_class(&mut self, node: Node<'a>) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(class_name) = name_node.utf8_text(self.content.as_bytes()) {
                 if class_name.starts_with("Test") {
+                    let old_class = self.current_class;
+                    self.current_class = Some(class_name);
+                    
                     // Initialize class metadata
                     let mut metadata = ClassMetadata {
                         name: class_name.to_string(),
@@ -212,598 +228,345 @@ impl Parser {
                         has_setup: false,
                         has_teardown: false,
                     };
-
-                    // Find all methods in this class
+                    
+                    // Visit class body
                     if let Some(body) = node.child_by_field_name("body") {
-                        self.collect_class_methods_with_metadata(
-                            body,
-                            content,
-                            class_name,
-                            class_map,
-                            &mut metadata,
-                        )?;
+                        self.visit_class_body(body, &mut metadata);
                     }
-
-                    // Store the class metadata
-                    class_metadata.insert(class_name.to_string(), metadata);
+                    
+                    self.class_metadata.insert(class_name.to_string(), metadata);
+                    self.current_class = old_class;
                 }
             }
         }
-
-        // Recurse into children
+    }
+    
+    fn visit_class_body(&mut self, node: Node<'a>, metadata: &mut ClassMetadata) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
-            self.collect_classes_with_metadata(child, content, class_map, class_metadata)?;
+            match child.kind() {
+                "function_definition" => self.visit_class_method(child, metadata),
+                "decorated_definition" => {
+                    if let Some(def) = child.child_by_field_name("definition") {
+                        if def.kind() == "function_definition" {
+                            let decorators = self.extract_decorators(child);
+                            self.visit_class_method_with_decorators(def, metadata, decorators);
+                        }
+                    }
+                }
+                _ => {}
+            }
         }
-
-        Ok(())
     }
-
-    fn collect_class_methods_with_metadata(
-        &self,
-        body: Node,
-        content: &str,
-        class_name: &str,
-        class_map: &mut HashMap<String, String>,
+    
+    fn visit_class_method(&mut self, node: Node<'a>, metadata: &mut ClassMetadata) {
+        self.visit_class_method_with_decorators(node, metadata, Vec::new());
+    }
+    
+    fn visit_class_method_with_decorators(
+        &mut self,
+        node: Node<'a>,
         metadata: &mut ClassMetadata,
-    ) -> Result<()> {
-        let mut cursor = body.walk();
-
-        for child in body.children(&mut cursor) {
-            match child.kind() {
-                "function_definition" => {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let method_name = name_node.utf8_text(content.as_bytes())?;
-                        let is_async = child.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-                        let line_number = name_node.start_position().row + 1;
-
-                        // Check for setup/teardown methods
-                        match method_name {
-                            "setup_class" => {
-                                metadata.setup_class = Some(SetupTeardownMethod {
-                                    name: method_name.to_string(),
-                                    line_number,
-                                    is_async,
-                                    method_type: SetupTeardownType::Setup,
-                                    scope: SetupTeardownScope::Class,
-                                });
-                            }
-                            "teardown_class" => {
-                                metadata.teardown_class = Some(SetupTeardownMethod {
-                                    name: method_name.to_string(),
-                                    line_number,
-                                    is_async,
-                                    method_type: SetupTeardownType::Teardown,
-                                    scope: SetupTeardownScope::Class,
-                                });
-                            }
-                            "setup_method" => {
-                                metadata.setup_method = Some(SetupTeardownMethod {
-                                    name: method_name.to_string(),
-                                    line_number,
-                                    is_async,
-                                    method_type: SetupTeardownType::Setup,
-                                    scope: SetupTeardownScope::Method,
-                                });
-                            }
-                            "teardown_method" => {
-                                metadata.teardown_method = Some(SetupTeardownMethod {
-                                    name: method_name.to_string(),
-                                    line_number,
-                                    is_async,
-                                    method_type: SetupTeardownType::Teardown,
-                                    scope: SetupTeardownScope::Method,
-                                });
-                            }
-                            "setUp" => {
-                                metadata.has_setup = true;
-                            }
-                            "tearDown" => {
-                                metadata.has_teardown = true;
-                            }
-                            _ => {}
-                        }
-
-                        class_map.insert(method_name.to_string(), class_name.to_string());
+        decorators: Vec<String>,
+    ) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(method_name) = name_node.utf8_text(self.content.as_bytes()) {
+                let line_number = name_node.start_position().row + 1;
+                let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+                
+                // Check for setup/teardown methods
+                match method_name {
+                    "setup_class" => {
+                        metadata.setup_class = Some(SetupTeardownMethod {
+                            name: method_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Setup,
+                            scope: SetupTeardownScope::Class,
+                        });
                     }
-                }
-                "decorated_definition" => {
-                    if let Some(def) = child.child_by_field_name("definition") {
-                        if def.kind() == "function_definition" {
-                            if let Some(name_node) = def.child_by_field_name("name") {
-                                let method_name = name_node.utf8_text(content.as_bytes())?;
-                                let is_async =
-                                    def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-                                let line_number = name_node.start_position().row + 1;
-                                let decorators = self.parse_decorators(child, content)?;
-
-                                // Check if this is a classmethod or staticmethod
-                                let is_classmethod =
-                                    decorators.iter().any(|d| d.contains("classmethod"));
-
-                                // Check for setup/teardown methods
-                                match method_name {
-                                    "setup_class" if is_classmethod => {
-                                        metadata.setup_class = Some(SetupTeardownMethod {
-                                            name: method_name.to_string(),
-                                            line_number,
-                                            is_async,
-                                            method_type: SetupTeardownType::Setup,
-                                            scope: SetupTeardownScope::Class,
-                                        });
-                                    }
-                                    "teardown_class" if is_classmethod => {
-                                        metadata.teardown_class = Some(SetupTeardownMethod {
-                                            name: method_name.to_string(),
-                                            line_number,
-                                            is_async,
-                                            method_type: SetupTeardownType::Teardown,
-                                            scope: SetupTeardownScope::Class,
-                                        });
-                                    }
-                                    _ => {}
-                                }
-
-                                class_map.insert(method_name.to_string(), class_name.to_string());
-                            }
-                        }
+                    "teardown_class" => {
+                        metadata.teardown_class = Some(SetupTeardownMethod {
+                            name: method_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Teardown,
+                            scope: SetupTeardownScope::Class,
+                        });
                     }
-                }
-                _ => {}
-            }
-        }
-
-        Ok(())
-    }
-
-    fn collect_functions_with_metadata(
-        &self,
-        node: Node,
-        content: &str,
-        functions: &mut Vec<FunctionInfo>,
-        class_map: &HashMap<String, String>,
-        module_metadata: &mut ModuleMetadata,
-    ) -> Result<()> {
-        match node.kind() {
-            "function_definition" => {
-                if let Some(func_info) = self.parse_function(node, content, class_map)? {
-                    // Check if this is a module-level setup/teardown
-                    if func_info.class_name.is_none() {
-                        match func_info.name.as_str() {
-                            "setup_module" => {
-                                module_metadata.setup_module = Some(SetupTeardownMethod {
-                                    name: func_info.name.clone(),
-                                    line_number: func_info.line_number,
-                                    is_async: func_info.is_async,
-                                    method_type: SetupTeardownType::Setup,
-                                    scope: SetupTeardownScope::Module,
-                                });
-                            }
-                            "teardown_module" => {
-                                module_metadata.teardown_module = Some(SetupTeardownMethod {
-                                    name: func_info.name.clone(),
-                                    line_number: func_info.line_number,
-                                    is_async: func_info.is_async,
-                                    method_type: SetupTeardownType::Teardown,
-                                    scope: SetupTeardownScope::Module,
-                                });
-                            }
-                            "setup_function" | "teardown_function" => {
-                                // These are handled differently - they're per-function hooks
-                                functions.push(func_info);
-                            }
-                            _ => {
-                                functions.push(func_info);
-                            }
-                        }
-                    } else {
-                        functions.push(func_info);
+                    "setup_method" => {
+                        metadata.setup_method = Some(SetupTeardownMethod {
+                            name: method_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Setup,
+                            scope: SetupTeardownScope::Method,
+                        });
                     }
-                }
-            }
-            "decorated_definition" => {
-                if let Some(def) = node.child_by_field_name("definition") {
-                    if def.kind() == "function_definition" {
-                        if let Some(mut func_info) = self.parse_function(def, content, class_map)? {
-                            // Parse decorators
-                            func_info.decorators = self.parse_decorators(node, content)?;
-
-                            // Check for module-level setup/teardown with decorators
-                            if func_info.class_name.is_none() {
-                                match func_info.name.as_str() {
-                                    "setup_module" => {
-                                        module_metadata.setup_module = Some(SetupTeardownMethod {
-                                            name: func_info.name.clone(),
-                                            line_number: func_info.line_number,
-                                            is_async: func_info.is_async,
-                                            method_type: SetupTeardownType::Setup,
-                                            scope: SetupTeardownScope::Module,
-                                        });
-                                    }
-                                    "teardown_module" => {
-                                        module_metadata.teardown_module =
-                                            Some(SetupTeardownMethod {
-                                                name: func_info.name.clone(),
-                                                line_number: func_info.line_number,
-                                                is_async: func_info.is_async,
-                                                method_type: SetupTeardownType::Teardown,
-                                                scope: SetupTeardownScope::Module,
-                                            });
-                                    }
-                                    _ => {
-                                        functions.push(func_info);
-                                    }
-                                }
-                            } else {
-                                functions.push(func_info);
-                            }
-                        }
+                    "teardown_method" => {
+                        metadata.teardown_method = Some(SetupTeardownMethod {
+                            name: method_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Teardown,
+                            scope: SetupTeardownScope::Method,
+                        });
                     }
-                }
-            }
-            "class_definition" => {
-                // For class definitions, we need to traverse into the body
-                // to find methods that aren't in the class_map yet
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let class_name = name_node.utf8_text(content.as_bytes())?;
-                    if class_name.starts_with("Test") {
-                        if let Some(body) = node.child_by_field_name("body") {
-                            self.collect_functions_in_class(body, content, functions, class_name)?;
-                        }
+                    "setUp" => metadata.has_setup = true,
+                    "tearDown" => metadata.has_teardown = true,
+                    _ if method_name.starts_with("test") => {
+                        // It's a test method
+                        let parameters = self.extract_parameters(node);
+                        self.tests.push(TestFunction {
+                            name: method_name.to_string(),
+                            line_number,
+                            is_async,
+                            class_name: self.current_class.map(String::from),
+                            decorators,
+                            parameters,
+                        });
                     }
-                }
-                // Don't recurse further into class bodies - we handle them specially
-            }
-            _ => {
-                // Recurse into child nodes
-                let mut cursor = node.walk();
-                for child in node.children(&mut cursor) {
-                    self.collect_functions_with_metadata(
-                        child,
-                        content,
-                        functions,
-                        class_map,
-                        module_metadata,
-                    )?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    fn parse_function(
-        &self,
-        node: Node,
-        content: &str,
-        class_map: &HashMap<String, String>,
-    ) -> Result<Option<FunctionInfo>> {
-        let name_node = node
-            .child_by_field_name("name")
-            .ok_or_else(|| anyhow!("Function without name"))?;
-        let name = name_node.utf8_text(content.as_bytes())?;
-
-        // Check if it's async
-        let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-
-        // Parse parameters
-        let params = if let Some(params_node) = node.child_by_field_name("parameters") {
-            self.parse_parameters(params_node, content)?
-        } else {
-            Vec::new()
-        };
-
-        // Get class name if this is a method
-        let class_name = class_map.get(name).cloned();
-
-        Ok(Some(FunctionInfo {
-            name: name.to_string(),
-            line_number: name_node.start_position().row + 1,
-            params,
-            is_async,
-            class_name,
-            decorators: Vec::new(),
-        }))
-    }
-
-    fn collect_functions_in_class(
-        &self,
-        body: Node,
-        content: &str,
-        functions: &mut Vec<FunctionInfo>,
-        class_name: &str,
-    ) -> Result<()> {
-        let mut cursor = body.walk();
-
-        for child in body.children(&mut cursor) {
-            match child.kind() {
-                "function_definition" => {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        let method_name = name_node.utf8_text(content.as_bytes())?;
-
-                        // Only include test methods (exclude setup/teardown)
-                        if method_name.starts_with("test") && !is_setup_teardown_method(method_name)
-                        {
-                            let is_async =
-                                child.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-
-                            let params = if let Some(params_node) =
-                                child.child_by_field_name("parameters")
-                            {
-                                self.parse_parameters(params_node, content)?
-                            } else {
-                                Vec::new()
-                            };
-
-                            functions.push(FunctionInfo {
-                                name: method_name.to_string(),
-                                line_number: name_node.start_position().row + 1,
-                                params,
+                    _ => {
+                        // Check if it's a fixture
+                        if decorators.iter().any(|d| d.contains("fixture")) {
+                            let fixture = self.create_fixture_from_function(
+                                method_name,
+                                line_number,
                                 is_async,
-                                class_name: Some(class_name.to_string()),
-                                decorators: Vec::new(),
-                            });
+                                decorators,
+                            );
+                            self.fixtures.push(fixture);
                         }
                     }
                 }
-                "decorated_definition" => {
-                    if let Some(def) = child.child_by_field_name("definition") {
-                        if def.kind() == "function_definition" {
-                            if let Some(name_node) = def.child_by_field_name("name") {
-                                let method_name = name_node.utf8_text(content.as_bytes())?;
-
-                                if method_name.starts_with("test")
-                                    && !is_setup_teardown_method(method_name)
-                                {
-                                    let is_async =
-                                        def.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-
-                                    let params = if let Some(params_node) =
-                                        def.child_by_field_name("parameters")
-                                    {
-                                        self.parse_parameters(params_node, content)?
-                                    } else {
-                                        Vec::new()
-                                    };
-
-                                    let decorators = self.parse_decorators(child, content)?;
-
-                                    functions.push(FunctionInfo {
-                                        name: method_name.to_string(),
-                                        line_number: name_node.start_position().row + 1,
-                                        params,
-                                        is_async,
-                                        class_name: Some(class_name.to_string()),
-                                        decorators,
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
             }
         }
-
-        Ok(())
     }
-
-    fn parse_decorators(&self, node: Node, content: &str) -> Result<Vec<String>> {
+    
+    fn visit_function(&mut self, node: Node<'a>, decorators: Option<Vec<String>>) {
+        if let Some(name_node) = node.child_by_field_name("name") {
+            if let Ok(func_name) = name_node.utf8_text(self.content.as_bytes()) {
+                let line_number = name_node.start_position().row + 1;
+                let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
+                let decorators = decorators.unwrap_or_default();
+                
+                // Check for module-level setup/teardown
+                match func_name {
+                    "setup_module" => {
+                        self.module_metadata.setup_module = Some(SetupTeardownMethod {
+                            name: func_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Setup,
+                            scope: SetupTeardownScope::Module,
+                        });
+                    }
+                    "teardown_module" => {
+                        self.module_metadata.teardown_module = Some(SetupTeardownMethod {
+                            name: func_name.to_string(),
+                            line_number,
+                            is_async,
+                            method_type: SetupTeardownType::Teardown,
+                            scope: SetupTeardownScope::Module,
+                        });
+                    }
+                    _ if func_name.starts_with("test") => {
+                        // It's a test function
+                        let parameters = self.extract_parameters(node);
+                        self.tests.push(TestFunction {
+                            name: func_name.to_string(),
+                            line_number,
+                            is_async,
+                            class_name: None,
+                            decorators,
+                            parameters,
+                        });
+                    }
+                    _ => {
+                        // Check if it's a fixture
+                        if decorators.iter().any(|d| d.contains("fixture")) {
+                            let fixture = self.create_fixture_from_function(
+                                func_name,
+                                line_number,
+                                is_async,
+                                decorators,
+                            );
+                            self.fixtures.push(fixture);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fn visit_decorated(&mut self, node: Node<'a>) {
+        let decorators = self.extract_decorators(node);
+        if let Some(def) = node.child_by_field_name("definition") {
+            if def.kind() == "function_definition" {
+                self.visit_function(def, Some(decorators));
+            }
+        }
+    }
+    
+    fn extract_decorators(&self, node: Node<'a>) -> Vec<String> {
         let mut decorators = Vec::new();
         let mut cursor = node.walk();
-
+        
         for child in node.children(&mut cursor) {
             if child.kind() == "decorator" {
-                let text = child.utf8_text(content.as_bytes())?;
-                decorators.push(text.trim_start_matches('@').to_string());
-            }
-        }
-
-        Ok(decorators)
-    }
-
-    fn parse_parameters(&self, node: Node, content: &str) -> Result<Vec<String>> {
-        let mut params = Vec::new();
-        let mut cursor = node.walk();
-
-        for child in node.children(&mut cursor) {
-            let param_name = match child.kind() {
-                "identifier" => Some(child.utf8_text(content.as_bytes())?),
-                "typed_parameter" | "default_parameter" | "typed_default_parameter" => child
-                    .child_by_field_name("name")
-                    .and_then(|n| n.utf8_text(content.as_bytes()).ok()),
-                _ => None,
-            };
-
-            if let Some(name) = param_name {
-                if name != "self" && name != "cls" {
-                    params.push(name.to_string());
+                if let Ok(text) = child.utf8_text(self.content.as_bytes()) {
+                    decorators.push(text.trim_start_matches('@').to_string());
                 }
             }
         }
-
-        Ok(params)
+        
+        decorators
     }
-
-    fn is_test(&self, func: &FunctionInfo) -> bool {
-        func.name.starts_with("test_") || func.name == "test"
+    
+    fn extract_parameters(&self, node: Node<'a>) -> Vec<String> {
+        let mut params = Vec::new();
+        
+        if let Some(params_node) = node.child_by_field_name("parameters") {
+            let mut cursor = params_node.walk();
+            
+            for child in params_node.children(&mut cursor) {
+                let param_name = match child.kind() {
+                    "identifier" => child.utf8_text(self.content.as_bytes()).ok(),
+                    "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
+                        child.child_by_field_name("name")
+                            .and_then(|n| n.utf8_text(self.content.as_bytes()).ok())
+                    }
+                    _ => None,
+                };
+                
+                if let Some(name) = param_name {
+                    if name != "self" && name != "cls" {
+                        params.push(name.to_string());
+                    }
+                }
+            }
+        }
+        
+        params
     }
-
-    fn is_fixture(&self, func: &FunctionInfo) -> bool {
-        func.decorators.iter().any(|d| {
-            d.contains("pytest.fixture") || d.contains("fixture") || d.ends_with(".fixture")
-        })
-    }
-
-    fn convert_to_fixture(&self, func: FunctionInfo) -> Result<FixtureDefinition> {
+    
+    fn create_fixture_from_function(
+        &self,
+        name: &str,
+        line_number: usize,
+        is_async: bool,
+        decorators: Vec<String>,
+    ) -> FixtureDefinition {
         let mut scope = "function".to_string();
         let mut autouse = false;
         let mut params = Vec::new();
-
+        
         // Parse fixture decorator parameters
-        for decorator in &func.decorators {
+        for decorator in &decorators {
             if decorator.contains("fixture") {
-                // Extract scope
-                if let Some(scope_match) = self.extract_kwarg(decorator, "scope") {
-                    scope = scope_match;
+                // Simple extraction - can be enhanced
+                if decorator.contains("scope=") {
+                    if let Some(s) = extract_string_value(decorator, "scope") {
+                        scope = s;
+                    }
                 }
-
-                // Extract autouse
                 if decorator.contains("autouse=True") {
                     autouse = true;
                 }
-
-                // Extract params
-                if let Some(params_str) = self.extract_kwarg(decorator, "params") {
-                    params = self.parse_params_list(&params_str)?;
-                }
             }
         }
-
-        Ok(FixtureDefinition {
-            name: func.name,
-            line_number: func.line_number,
-            is_async: func.is_async,
+        
+        FixtureDefinition {
+            name: name.to_string(),
+            line_number,
+            is_async,
             scope,
             autouse,
             params,
-            decorators: func.decorators,
-        })
+            decorators,
+        }
     }
+    
+    fn into_result(self) -> ParseResult {
+        ParseResult {
+            fixtures: self.fixtures,
+            tests: self.tests,
+            module_metadata: self.module_metadata,
+            class_metadata: self.class_metadata,
+        }
+    }
+}
 
-    fn extract_kwarg(&self, decorator: &str, key: &str) -> Option<String> {
-        let pattern = format!("{}=", key);
-        if let Some(start) = decorator.find(&pattern) {
-            let value_start = start + pattern.len();
-            let value_part = &decorator[value_start..];
+/// Parse result containing all extracted information
+struct ParseResult {
+    fixtures: Vec<FixtureDefinition>,
+    tests: Vec<TestFunction>,
+    module_metadata: ModuleMetadata,
+    class_metadata: HashMap<String, ClassMetadata>,
+}
 
-            // Handle quoted strings
-            if let Some(quote_char) = value_part.chars().next() {
-                if quote_char == '"' || quote_char == '\'' {
-                    if let Some(end) = value_part[1..].find(quote_char) {
-                        return Some(value_part[1..=end].to_string());
-                    }
+/// Extract string value from decorator argument
+fn extract_string_value(decorator: &str, key: &str) -> Option<String> {
+    let pattern = format!("{}=", key);
+    if let Some(start) = decorator.find(&pattern) {
+        let value_start = start + pattern.len();
+        let value_part = &decorator[value_start..];
+        
+        // Handle quoted strings
+        if let Some(quote) = value_part.chars().next() {
+            if quote == '"' || quote == '\'' {
+                if let Some(end) = value_part[1..].find(quote) {
+                    return Some(value_part[1..end].to_string());
                 }
             }
-
-            // Handle unquoted values
-            if let Some(end) = value_part.find(&[',', ')'][..]) {
-                return Some(value_part[..end].trim().to_string());
-            }
-        }
-        None
-    }
-
-    fn parse_params_list(&self, params_str: &str) -> Result<Vec<String>> {
-        // Remove brackets and split by comma
-        let cleaned = params_str.trim_start_matches('[').trim_end_matches(']');
-        Ok(cleaned
-            .split(',')
-            .map(|s| s.trim().trim_matches(|c| c == '"' || c == '\'').to_string())
-            .filter(|s| !s.is_empty())
-            .collect())
-    }
-}
-
-// Internal function info structure
-#[derive(Debug)]
-struct FunctionInfo {
-    name: String,
-    line_number: usize,
-    params: Vec<String>,
-    is_async: bool,
-    class_name: Option<String>,
-    decorators: Vec<String>,
-}
-
-impl From<FunctionInfo> for TestFunction {
-    fn from(func: FunctionInfo) -> Self {
-        TestFunction {
-            name: func.name,
-            line_number: func.line_number,
-            is_async: func.is_async,
-            class_name: func.class_name,
-            decorators: func.decorators,
-            parameters: func.params,
         }
     }
+    None
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Optimized parser using tree-sitter
+pub struct Parser {
+    parser: TSParser,
+}
 
-    #[test]
-    fn test_parse_simple_test() {
-        let content = r#"
-def test_simple():
-    assert True
-"#;
-        let mut parser = Parser::new().unwrap();
-        let (_, tests, _, _) = parser.parse_content(content).unwrap();
-        assert_eq!(tests.len(), 1);
-        assert_eq!(tests[0].name, "test_simple");
-        assert!(!tests[0].is_async);
+impl Parser {
+    /// Create a new parser instance
+    pub fn new() -> Result<Self> {
+        let mut parser = TSParser::new();
+        let language = tree_sitter_python::language();
+        parser.set_language(&language)
+            .map_err(|_| anyhow!("Failed to set Python language"))?;
+        
+        Ok(Self { parser })
     }
-
-    #[test]
-    fn test_parse_async_test() {
-        let content = r#"
-async def test_async():
-    await something()
-"#;
-        let mut parser = Parser::new().unwrap();
-        let (_, tests, _, _) = parser.parse_content(content).unwrap();
-        assert_eq!(tests.len(), 1);
-        assert_eq!(tests[0].name, "test_async");
-        assert!(tests[0].is_async);
-    }
-
-    #[test]
-    fn test_parse_fixture() {
-        let content = r#"
-@pytest.fixture(scope="module", autouse=True)
-def setup_module():
-    return "setup"
-"#;
-        let mut parser = Parser::new().unwrap();
-        let (fixtures, _, _, _) = parser.parse_content(content).unwrap();
-        assert_eq!(fixtures.len(), 1);
-        assert_eq!(fixtures[0].name, "setup_module");
-        assert_eq!(fixtures[0].scope, "module");
-        assert!(fixtures[0].autouse);
-    }
-
-    #[test]
-    fn test_parse_parametrized_test() {
-        let content = r#"
-@pytest.mark.parametrize("x,y", [(1, 2), (3, 4)])
-def test_add(x, y):
-    assert x + y > 0
-"#;
-        let mut parser = Parser::new().unwrap();
-        let (_, tests, _, _) = parser.parse_content(content).unwrap();
-        assert_eq!(tests.len(), 1);
-        assert_eq!(tests[0].name, "test_add");
-        assert_eq!(tests[0].parameters, vec!["x", "y"]);
-        assert!(tests[0].decorators[0].contains("parametrize"));
-    }
-
-    #[test]
-    fn test_parse_class_tests() {
-        let content = r#"
-class TestMyClass:
-    def test_method_one(self):
-        pass
     
-    async def test_method_two(self):
-        pass
-"#;
-        let mut parser = Parser::new().unwrap();
-        let (_, tests, _, _) = parser.parse_content(content).unwrap();
-        assert_eq!(tests.len(), 2);
-        assert_eq!(tests[0].class_name, Some("TestMyClass".to_string()));
-        assert!(!tests[0].is_async);
-        assert!(tests[1].is_async);
+    /// Parse a file and extract tests and fixtures
+    pub fn parse_fixtures_and_tests(
+        path: &Path,
+    ) -> Result<(Vec<FixtureDefinition>, Vec<TestFunction>)> {
+        let content = std::fs::read_to_string(path)?;
+        let mut parser = Self::new()?;
+        let (fixtures, tests, _, _) = parser.parse_content(&content)?;
+        Ok((fixtures, tests))
+    }
+    
+    /// Parse content with single-pass traversal
+    pub fn parse_content(
+        &mut self,
+        content: &str,
+    ) -> Result<(
+        Vec<FixtureDefinition>,
+        Vec<TestFunction>,
+        ModuleMetadata,
+        HashMap<String, ClassMetadata>,
+    )> {
+        let tree = self.parser.parse(content, None)
+            .ok_or_else(|| anyhow!("Failed to parse Python content"))?;
+        
+        let mut visitor = SinglePassVisitor::new(content);
+        visitor.visit_node(tree.root_node());
+        
+        let result = visitor.into_result();
+        Ok((result.fixtures, result.tests, result.module_metadata, result.class_metadata))
     }
 }

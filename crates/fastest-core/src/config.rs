@@ -1,57 +1,79 @@
+//! Optimized Configuration Module
+//!
+//! High-performance configuration loading with:
+//! - Lazy static compilation of patterns
+//! - Efficient INI parsing with minimal allocations
+//! - Cache-friendly data structures
+//! - Fast pattern matching
+
 use crate::error::Result;
+use once_cell::sync::Lazy;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-/// Main configuration structure
+/// Compiled glob patterns for efficient matching
+static GLOB_CACHE: Lazy<parking_lot::RwLock<rustc_hash::FxHashMap<String, Regex>>> = 
+    Lazy::new(|| parking_lot::RwLock::new(rustc_hash::FxHashMap::default()));
+
+/// Main configuration structure - optimized for size and performance
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct Config {
     #[serde(default)]
-    pub testpaths: Vec<PathBuf>,
+    pub testpaths: SmallVec<[PathBuf; 2]>, // Most projects have 1-2 test paths
 
     #[serde(default)]
-    pub python_files: Vec<String>,
+    pub python_files: SmallVec<[String; 4]>, // Usually 2-4 patterns
 
     #[serde(default)]
-    pub python_classes: Vec<String>,
+    pub python_classes: SmallVec<[String; 2]>, // Usually 1-2 patterns
 
     #[serde(default)]
-    pub python_functions: Vec<String>,
+    pub python_functions: SmallVec<[String; 2]>, // Usually 1-2 patterns
 
     #[serde(default)]
-    pub markers: Vec<String>,
+    pub markers: Vec<String>, // Can be many markers
 
     #[serde(default)]
-    pub addopts: String,
+    pub addopts: String, // Keep as String for serde
 
     #[serde(default)]
     pub minversion: Option<String>,
 
     #[serde(default)]
-    pub required_plugins: Vec<String>,
+    pub required_plugins: SmallVec<[String; 4]>,
 
     #[serde(default)]
     pub cache_dir: Option<PathBuf>,
 
-    #[serde(default)]
+    #[serde(default = "default_junit_family")]
     pub junit_family: String,
 
-    #[serde(default)]
+    #[serde(default = "default_junit_logging")]
     pub junit_logging: String,
 
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub junit_log_passing_tests: bool,
 
-    #[serde(default)]
+    #[serde(default = "default_junit_duration")]
     pub junit_duration_report: String,
 
-    #[serde(default)]
+    #[serde(default = "default_junit_suite")]
     pub junit_suite_name: String,
 
     // Fastest-specific config
     #[serde(default)]
     pub fastest: FastestConfig,
 }
+
+fn default_junit_family() -> String { "xunit2".to_string() }
+fn default_junit_logging() -> String { "no".to_string() }
+fn default_true() -> bool { true }
+fn default_junit_duration() -> String { "total".to_string() }
+fn default_junit_suite() -> String { "pytest".to_string() }
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct FastestConfig {
@@ -74,20 +96,23 @@ pub struct FastestConfig {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            testpaths: vec![PathBuf::from("tests"), PathBuf::from(".")],
-            python_files: vec!["test_*.py".to_string(), "*_test.py".to_string()],
-            python_classes: vec!["Test*".to_string()],
-            python_functions: vec!["test_*".to_string()],
+            testpaths: smallvec::smallvec![PathBuf::from("tests"), PathBuf::from(".")],
+            python_files: smallvec::smallvec![
+                "test_*.py".to_string(), 
+                "*_test.py".to_string()
+            ],
+            python_classes: smallvec::smallvec!["Test*".to_string()],
+            python_functions: smallvec::smallvec!["test_*".to_string()],
             markers: Vec::new(),
             addopts: String::new(),
             minversion: None,
-            required_plugins: Vec::new(),
+            required_plugins: SmallVec::new(),
             cache_dir: None,
-            junit_family: "xunit2".to_string(),
-            junit_logging: "no".to_string(),
+            junit_family: default_junit_family(),
+            junit_logging: default_junit_logging(),
             junit_log_passing_tests: true,
-            junit_duration_report: "total".to_string(),
-            junit_suite_name: "pytest".to_string(),
+            junit_duration_report: default_junit_duration(),
+            junit_suite_name: default_junit_suite(),
             fastest: FastestConfig::default(),
         }
     }
@@ -260,18 +285,24 @@ impl Config {
 
                 match key {
                     "testpaths" => {
-                        config.testpaths = value.split_whitespace().map(PathBuf::from).collect();
+                        config.testpaths = value.split_whitespace()
+                            .map(PathBuf::from)
+                            .collect();
                     }
                     "python_files" => {
-                        config.python_files = value.split_whitespace().map(String::from).collect();
+                        config.python_files = value.split_whitespace()
+                            .map(String::from)
+                            .collect();
                     }
                     "python_classes" => {
-                        config.python_classes =
-                            value.split_whitespace().map(String::from).collect();
+                        config.python_classes = value.split_whitespace()
+                            .map(String::from)
+                            .collect();
                     }
                     "python_functions" => {
-                        config.python_functions =
-                            value.split_whitespace().map(String::from).collect();
+                        config.python_functions = value.split_whitespace()
+                            .map(String::from)
+                            .collect();
                     }
                     "markers" => {
                         // Handle multi-line markers
@@ -311,8 +342,9 @@ impl Config {
                         config.minversion = Some(value.to_string());
                     }
                     "required_plugins" => {
-                        config.required_plugins =
-                            value.split_whitespace().map(String::from).collect();
+                        config.required_plugins = value.split_whitespace()
+                            .map(String::from)
+                            .collect();
                     }
                     "cache_dir" => {
                         config.cache_dir = Some(PathBuf::from(value));
@@ -398,22 +430,39 @@ impl Config {
         false
     }
 
-    /// Simple glob pattern matching
+    /// Optimized pattern matching with regex caching
     fn matches_pattern(text: &str, pattern: &str) -> bool {
-        // Handle patterns with * in the middle (e.g., test_*.py)
-        if let Some(star_pos) = pattern.find('*') {
-            let prefix = &pattern[..star_pos];
-            let suffix = &pattern[star_pos + 1..];
-
-            // Check if text starts with prefix and ends with suffix
-            if text.len() >= prefix.len() + suffix.len() {
-                text.starts_with(prefix) && text.ends_with(suffix)
-            } else {
-                false
-            }
+        // Fast path for exact matches
+        if !pattern.contains('*') {
+            return text == pattern;
+        }
+        
+        // Check cache first
+        let cache = GLOB_CACHE.read();
+        if let Some(regex) = cache.get(pattern) {
+            return regex.is_match(text);
+        }
+        drop(cache);
+        
+        // Create regex from glob pattern
+        let regex_pattern = pattern
+            .split('*')
+            .map(|s| regex::escape(s))
+            .collect::<Vec<_>>()
+            .join(".*");
+        
+        let regex_pattern = format!("^{}$", regex_pattern);
+        
+        if let Ok(regex) = Regex::new(&regex_pattern) {
+            let is_match = regex.is_match(text);
+            
+            // Cache the compiled regex
+            let mut cache = GLOB_CACHE.write();
+            cache.insert(pattern.to_string(), regex);
+            
+            is_match
         } else {
-            // No wildcard, exact match
-            text == pattern
+            false
         }
     }
 }

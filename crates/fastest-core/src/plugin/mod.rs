@@ -4,9 +4,10 @@
 //! allowing external packages and conftest.py files to extend Fastest's functionality.
 
 pub mod hooks;
-pub mod manager;
-pub mod registry;
-pub mod conftest;
+// These modules are in fastest-plugins, not in core
+// pub mod manager;
+// pub mod registry;
+// pub mod conftest;
 
 use std::any::Any;
 use std::collections::HashMap;
@@ -14,9 +15,26 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub use hooks::{Hook, HookCaller, HookResult};
-pub use manager::PluginManager;
-pub use registry::HookRegistry;
-pub use conftest::ConftestLoader;
+// pub use manager::PluginManager;
+// pub use registry::HookRegistry;
+// pub use conftest::ConftestLoader;
+
+/// Simple hook registry for core (full implementation in fastest-plugins)
+pub struct HookRegistry {
+    hooks: HashMap<String, Vec<Box<dyn Hook>>>,
+}
+
+impl HookRegistry {
+    pub fn new() -> Self {
+        Self {
+            hooks: HashMap::new(),
+        }
+    }
+    
+    pub fn register(&mut self, name: &str, hook: Box<dyn Hook>) {
+        self.hooks.entry(name.to_string()).or_default().push(hook);
+    }
+}
 
 /// Represents a loaded plugin
 #[derive(Debug, Clone)]

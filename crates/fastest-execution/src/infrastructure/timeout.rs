@@ -158,9 +158,9 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            default_timeout_ns: 60_000_000_000, // 60 seconds in nanoseconds
-            async_timeout_ns: 120_000_000_000,  // 120 seconds in nanoseconds
-            fixture_timeout_ns: 30_000_000_000, // 30 seconds in nanoseconds
+            default_timeout_ns: 10_000_000_000,  // 10 seconds in nanoseconds
+            async_timeout_ns: 20_000_000_000,   // 20 seconds in nanoseconds
+            fixture_timeout_ns: 5_000_000_000,  // 5 seconds in nanoseconds
             adaptive_scaling: true,
             simd_acceleration: true,
             check_interval_us: 100, // 100 microseconds
