@@ -810,7 +810,7 @@ checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
 
 [[package]]
 name = "fastest-advanced"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "blake3",
@@ -846,7 +846,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-cli"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -869,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-core"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -900,7 +900,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-execution"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "ahash",
  "aho-corasick",
@@ -949,7 +949,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-plugins"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -971,7 +971,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-plugins-macros"
-version = "1.0.9"
+version = "1.0.10"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1032,9 +1032,9 @@ dependencies = [
 
 [[package]]
 name = "foldhash"
-version = "0.1.5"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
+checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
 name = "form_urlencoded"
@@ -1272,6 +1272,12 @@ name = "hashbrown"
 version = "0.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "84b26c544d002229e640969970a2e74021aadf6e2f96372b9c58eff97de08eb3"
+
+[[package]]
+name = "hashbrown"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -1785,11 +1791,11 @@ checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
 
 [[package]]
 name = "lru"
-version = "0.12.5"
+version = "0.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "234cf4f4a04dc1f57e24b96cc0cd600cf2af460d4161ac5ecdd0af8e1f3b2a38"
+checksum = "a1dc47f592c06f33f8e3aea9591776ec7c9f9e4124778ff8a3c3b87159f7e593"
 dependencies = [
- "hashbrown 0.15.3",
+ "hashbrown 0.16.1",
 ]
 
 [[package]]
