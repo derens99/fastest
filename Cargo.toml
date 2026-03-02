@@ -1,46 +1,24 @@
 [workspace]
 members = [
     "crates/fastest-core",
-    "crates/fastest-execution", 
-    "crates/fastest-advanced",
+    "crates/fastest-execution",
     "crates/fastest-cli",
-    "crates/fastest-plugins",
-    "crates/fastest-plugins-macros",
 ]
 resolver = "2"
 
 [workspace.package]
-version = "1.0.10"
+version = "2.0.0"
 authors = ["Fastest Team <hello@fastest.dev>"]
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/derens99/fastest"
-homepage = "https://github.com/derens99/fastest"
-documentation = "https://github.com/derens99/fastest/tree/main/docs"
-description = "⚡ The blazing fast Python test runner with intelligent performance optimization"
-readme = "README.md"
-keywords = ["testing", "fastest", "pytest", "test-runner", "python", "performance", "rust", "parallel"]
-categories = ["development-tools::testing", "command-line-utilities"]
-exclude = [
-    ".github/*",
-    "target/*",
-    "test_repos/*",
-    "benchmarks/results/*",
-    "*.log",
-    ".DS_Store",
-]
 
 [workspace.dependencies]
-pyo3 = "=0.25.0"
 anyhow = "1.0"
 thiserror = "1.0"
-walkdir = "2.5"
-num_cpus = "1.16"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-clap = { version = "4.5", features = ["derive"] }
-colored = "2.1"
-indicatif = "0.17"
-
-# cargo-dist configuration removed - using direct cargo build in CI instead
-
+rayon = "1.10"
+num_cpus = "1.16"
+parking_lot = "0.12"
+pyo3 = "=0.25.0"

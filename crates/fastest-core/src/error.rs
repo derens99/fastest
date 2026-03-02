@@ -11,7 +11,7 @@ pub enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
 
-    #[error("Test execution error: {0}")]
+    #[error("Execution error: {0}")]
     Execution(String),
 
     #[error("Discovery error: {0}")]

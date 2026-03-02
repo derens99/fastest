@@ -28,27 +28,9 @@ pub struct Config {
     pub minversion: Option<String>,
 
     #[serde(default)]
-    pub required_plugins: Vec<String>,
-
-    #[serde(default)]
     pub cache_dir: Option<PathBuf>,
 
-    #[serde(default)]
-    pub junit_family: String,
-
-    #[serde(default)]
-    pub junit_logging: String,
-
-    #[serde(default)]
-    pub junit_log_passing_tests: bool,
-
-    #[serde(default)]
-    pub junit_duration_report: String,
-
-    #[serde(default)]
-    pub junit_suite_name: String,
-
-    // Fastest-specific config
+    /// Fastest-specific config
     #[serde(default)]
     pub fastest: FastestConfig,
 }
@@ -59,13 +41,7 @@ pub struct FastestConfig {
     pub workers: Option<usize>,
 
     #[serde(default)]
-    pub batch_size: Option<usize>,
-
-    #[serde(default)]
     pub incremental: bool,
-
-    #[serde(default)]
-    pub persistent_workers: bool,
 
     #[serde(default)]
     pub verbose: bool,
@@ -81,98 +57,80 @@ impl Default for Config {
             markers: Vec::new(),
             addopts: String::new(),
             minversion: None,
-            required_plugins: Vec::new(),
             cache_dir: None,
-            junit_family: "xunit2".to_string(),
-            junit_logging: "no".to_string(),
-            junit_log_passing_tests: true,
-            junit_duration_report: "total".to_string(),
-            junit_suite_name: "pytest".to_string(),
             fastest: FastestConfig::default(),
         }
     }
 }
 
 impl Config {
-    /// Load config from the current directory, checking multiple sources
+    /// Load config from the current directory
     pub fn load() -> Result<Self> {
+        Self::load_from_dir(Path::new("."))
+    }
+
+    /// Load config from a specific directory, checking multiple sources
+    pub fn load_from_dir(dir: &Path) -> Result<Self> {
         // Try pyproject.toml first
-        if let Ok(config) = Self::load_from_pyproject() {
-            return Ok(config);
+        let pyproject = dir.join("pyproject.toml");
+        if pyproject.exists() {
+            if let Ok(config) = Self::load_from_pyproject(&pyproject) {
+                return Ok(config);
+            }
         }
 
         // Try pytest.ini
-        if let Ok(config) = Self::load_from_pytest_ini() {
-            return Ok(config);
+        let pytest_ini = dir.join("pytest.ini");
+        if pytest_ini.exists() {
+            if let Ok(config) = Self::load_from_ini_file(&pytest_ini, "[pytest]") {
+                return Ok(config);
+            }
         }
 
         // Try setup.cfg
-        if let Ok(config) = Self::load_from_setup_cfg() {
-            return Ok(config);
+        let setup_cfg = dir.join("setup.cfg");
+        if setup_cfg.exists() {
+            if let Ok(config) = Self::load_from_ini_file(&setup_cfg, "[tool:pytest]") {
+                return Ok(config);
+            }
         }
 
         // Try tox.ini
-        if let Ok(config) = Self::load_from_tox_ini() {
-            return Ok(config);
+        let tox_ini = dir.join("tox.ini");
+        if tox_ini.exists() {
+            if let Ok(config) = Self::load_from_ini_file(&tox_ini, "[pytest]") {
+                return Ok(config);
+            }
         }
 
-        // Return default config
         Ok(Self::default())
     }
 
     /// Load config from pyproject.toml
-    pub fn load_from_pyproject() -> Result<Self> {
-        let path = Path::new("pyproject.toml");
-        if !path.exists() {
-            return Err(crate::error::Error::Config(
-                "pyproject.toml not found".to_string(),
-            ));
-        }
-
+    fn load_from_pyproject(path: &Path) -> Result<Self> {
         let contents = fs::read_to_string(path).map_err(|e| {
-            crate::error::Error::Config(format!("Failed to read pyproject.toml: {}", e))
+            crate::error::Error::Config(format!("Failed to read {}: {}", path.display(), e))
         })?;
 
         let toml_value: toml::Value = toml::from_str(&contents).map_err(|e| {
-            crate::error::Error::Config(format!("Failed to parse pyproject.toml: {}", e))
+            crate::error::Error::Config(format!("Failed to parse {}: {}", path.display(), e))
         })?;
 
-        // Look for [tool.pytest.ini_options] or [tool.fastest]
         if let Some(tool) = toml_value.get("tool") {
             let mut config = Config::default();
 
-            // Load pytest config
+            // Load pytest config from [tool.pytest.ini_options]
             if let Some(pytest) = tool.get("pytest") {
                 if let Some(ini_options) = pytest.get("ini_options") {
-                    // Manually extract fields since TOML structure might not match exactly
-                    if let Some(testpaths) = ini_options.get("testpaths") {
-                        if let Some(arr) = testpaths.as_array() {
-                            config.testpaths = arr
-                                .iter()
-                                .filter_map(|v| v.as_str().map(PathBuf::from))
-                                .collect();
-                        }
-                    }
-                    if let Some(python_files) = ini_options.get("python_files") {
-                        if let Some(arr) = python_files.as_array() {
-                            config.python_files = arr
-                                .iter()
-                                .filter_map(|v| v.as_str().map(String::from))
-                                .collect();
-                        }
-                    }
-                    // ... extract other fields similarly
+                    Self::apply_toml_options(&mut config, ini_options);
                 }
             }
 
-            // Load fastest-specific config
+            // Load fastest-specific config from [tool.fastest]
             if let Some(fastest) = tool.get("fastest") {
-                config.fastest = fastest.clone().try_into().map_err(|e| {
-                    crate::error::Error::Config(format!(
-                        "Failed to deserialize fastest config: {}",
-                        e
-                    ))
-                })?;
+                if let Ok(fc) = fastest.clone().try_into::<FastestConfig>() {
+                    config.fastest = fc;
+                }
             }
 
             return Ok(config);
@@ -183,65 +141,66 @@ impl Config {
         ))
     }
 
-    /// Load config from pytest.ini
-    pub fn load_from_pytest_ini() -> Result<Self> {
-        let path = Path::new("pytest.ini");
-        if !path.exists() {
-            return Err(crate::error::Error::Config(
-                "pytest.ini not found".to_string(),
-            ));
+    /// Apply TOML options to config
+    fn apply_toml_options(config: &mut Config, options: &toml::Value) {
+        if let Some(arr) = options.get("testpaths").and_then(|v| v.as_array()) {
+            config.testpaths = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(PathBuf::from))
+                .collect();
         }
+        if let Some(arr) = options.get("python_files").and_then(|v| v.as_array()) {
+            config.python_files = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(arr) = options.get("python_classes").and_then(|v| v.as_array()) {
+            config.python_classes = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(arr) = options.get("python_functions").and_then(|v| v.as_array()) {
+            config.python_functions = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(arr) = options.get("markers").and_then(|v| v.as_array()) {
+            config.markers = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+        if let Some(s) = options.get("addopts").and_then(|v| v.as_str()) {
+            config.addopts = s.to_string();
+        }
+    }
 
+    /// Load config from an INI-style file with a specific section
+    fn load_from_ini_file(path: &Path, section: &str) -> Result<Self> {
         let contents = fs::read_to_string(path).map_err(|e| {
-            crate::error::Error::Config(format!("Failed to read pytest.ini: {}", e))
+            crate::error::Error::Config(format!("Failed to read {}: {}", path.display(), e))
         })?;
 
-        Self::parse_ini_config(&contents)
+        if let Some(section_content) = Self::extract_ini_section(&contents, section) {
+            return Self::parse_ini_config(&section_content);
+        }
+
+        // For pytest.ini, the whole file is the [pytest] section
+        if section == "[pytest]" && !contents.contains('[') {
+            return Self::parse_ini_config(&contents);
+        }
+
+        Err(crate::error::Error::Config(format!(
+            "No {} section found in {}",
+            section,
+            path.display()
+        )))
     }
 
-    /// Load config from setup.cfg
-    pub fn load_from_setup_cfg() -> Result<Self> {
-        let path = Path::new("setup.cfg");
-        if !path.exists() {
-            return Err(crate::error::Error::Config(
-                "setup.cfg not found".to_string(),
-            ));
-        }
-
-        let contents = fs::read_to_string(path)
-            .map_err(|e| crate::error::Error::Config(format!("Failed to read setup.cfg: {}", e)))?;
-
-        // Look for [tool:pytest] section
-        if let Some(pytest_section) = Self::extract_ini_section(&contents, "[tool:pytest]") {
-            return Self::parse_ini_config(&pytest_section);
-        }
-
-        Err(crate::error::Error::Config(
-            "No pytest config found in setup.cfg".to_string(),
-        ))
-    }
-
-    /// Load config from tox.ini
-    pub fn load_from_tox_ini() -> Result<Self> {
-        let path = Path::new("tox.ini");
-        if !path.exists() {
-            return Err(crate::error::Error::Config("tox.ini not found".to_string()));
-        }
-
-        let contents = fs::read_to_string(path)
-            .map_err(|e| crate::error::Error::Config(format!("Failed to read tox.ini: {}", e)))?;
-
-        // Look for [pytest] section
-        if let Some(pytest_section) = Self::extract_ini_section(&contents, "[pytest]") {
-            return Self::parse_ini_config(&pytest_section);
-        }
-
-        Err(crate::error::Error::Config(
-            "No pytest config found in tox.ini".to_string(),
-        ))
-    }
-
-    /// Parse INI-style config
+    /// Parse INI-style config content
     fn parse_ini_config(contents: &str) -> Result<Self> {
         let mut config = Config::default();
         let lines: Vec<&str> = contents.lines().collect();
@@ -260,10 +219,12 @@ impl Config {
 
                 match key {
                     "testpaths" => {
-                        config.testpaths = value.split_whitespace().map(PathBuf::from).collect();
+                        config.testpaths =
+                            value.split_whitespace().map(PathBuf::from).collect();
                     }
                     "python_files" => {
-                        config.python_files = value.split_whitespace().map(String::from).collect();
+                        config.python_files =
+                            value.split_whitespace().map(String::from).collect();
                     }
                     "python_classes" => {
                         config.python_classes =
@@ -274,19 +235,14 @@ impl Config {
                             value.split_whitespace().map(String::from).collect();
                     }
                     "markers" => {
-                        // Handle multi-line markers
                         let mut markers = Vec::new();
-
-                        // Check if there's a marker on the same line
                         if !value.is_empty() {
                             markers.push(value.to_string());
                         }
-
-                        // Look for continuation lines (indented lines after markers =)
+                        // Handle multi-line markers
                         let mut j = i + 1;
                         while j < lines.len() {
                             let next_line = lines[j];
-                            // If line starts with whitespace, it's a continuation
                             if next_line.starts_with(' ') || next_line.starts_with('\t') {
                                 let marker_line = next_line.trim();
                                 if !marker_line.is_empty() && !marker_line.starts_with('#') {
@@ -294,14 +250,12 @@ impl Config {
                                 }
                                 j += 1;
                             } else if next_line.trim().is_empty() {
-                                // Empty lines are allowed in multi-line values
                                 j += 1;
                             } else {
-                                // Non-indented non-empty line means end of multi-line value
                                 break;
                             }
                         }
-                        i = j - 1; // Skip the lines we've already processed
+                        i = j - 1;
                         config.markers = markers;
                     }
                     "addopts" => {
@@ -310,21 +264,8 @@ impl Config {
                     "minversion" => {
                         config.minversion = Some(value.to_string());
                     }
-                    "required_plugins" => {
-                        config.required_plugins =
-                            value.split_whitespace().map(String::from).collect();
-                    }
                     "cache_dir" => {
                         config.cache_dir = Some(PathBuf::from(value));
-                    }
-                    "junit_family" => {
-                        config.junit_family = value.to_string();
-                    }
-                    // Fastest-specific options
-                    "fastest_workers" => {
-                        if let Ok(n) = value.parse() {
-                            config.fastest.workers = Some(n);
-                        }
                     }
                     _ => {}
                 }
@@ -335,7 +276,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Extract a section from INI file
+    /// Extract a section from INI file content
     fn extract_ini_section(contents: &str, section_name: &str) -> Option<String> {
         let mut in_section = false;
         let mut section_contents = String::new();
@@ -343,18 +284,15 @@ impl Config {
         for line in contents.lines() {
             let trimmed = line.trim();
 
-            // Check for section start
             if trimmed == section_name {
                 in_section = true;
                 continue;
             }
 
-            // Check for next section
             if in_section && trimmed.starts_with('[') && trimmed.ends_with(']') {
                 break;
             }
 
-            // Collect lines in section
             if in_section {
                 section_contents.push_str(line);
                 section_contents.push('\n');
@@ -370,49 +308,34 @@ impl Config {
 
     /// Check if a file matches python_files patterns
     pub fn is_test_file(&self, filename: &str) -> bool {
-        for pattern in &self.python_files {
-            if Self::matches_pattern(filename, pattern) {
-                return true;
-            }
-        }
-        false
+        self.python_files
+            .iter()
+            .any(|pattern| Self::matches_pattern(filename, pattern))
     }
 
     /// Check if a class name matches python_classes patterns
     pub fn is_test_class(&self, class_name: &str) -> bool {
-        for pattern in &self.python_classes {
-            if Self::matches_pattern(class_name, pattern) {
-                return true;
-            }
-        }
-        false
+        self.python_classes
+            .iter()
+            .any(|pattern| Self::matches_pattern(class_name, pattern))
     }
 
     /// Check if a function name matches python_functions patterns
     pub fn is_test_function(&self, func_name: &str) -> bool {
-        for pattern in &self.python_functions {
-            if Self::matches_pattern(func_name, pattern) {
-                return true;
-            }
-        }
-        false
+        self.python_functions
+            .iter()
+            .any(|pattern| Self::matches_pattern(func_name, pattern))
     }
 
-    /// Simple glob pattern matching
+    /// Simple glob pattern matching (supports * wildcard)
     fn matches_pattern(text: &str, pattern: &str) -> bool {
-        // Handle patterns with * in the middle (e.g., test_*.py)
         if let Some(star_pos) = pattern.find('*') {
             let prefix = &pattern[..star_pos];
             let suffix = &pattern[star_pos + 1..];
-
-            // Check if text starts with prefix and ends with suffix
-            if text.len() >= prefix.len() + suffix.len() {
-                text.starts_with(prefix) && text.ends_with(suffix)
-            } else {
-                false
-            }
+            text.len() >= prefix.len() + suffix.len()
+                && text.starts_with(prefix)
+                && text.ends_with(suffix)
         } else {
-            // No wildcard, exact match
             text == pattern
         }
     }
@@ -421,6 +344,13 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_default_config() {
+        let config = Config::default();
+        assert_eq!(config.python_files, vec!["test_*.py", "*_test.py"]);
+        assert_eq!(config.python_functions, vec!["test_*"]);
+    }
 
     #[test]
     fn test_pattern_matching() {
@@ -446,5 +376,52 @@ markers =
         assert_eq!(config.python_files.len(), 2);
         assert_eq!(config.addopts, "-v --tb=short");
         assert_eq!(config.markers.len(), 2);
+    }
+
+    #[test]
+    fn test_load_pyproject_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        let pyproject = dir.path().join("pyproject.toml");
+        fs::write(
+            &pyproject,
+            r#"
+[tool.pytest.ini_options]
+testpaths = ["tests", "integration"]
+python_files = ["check_*.py"]
+markers = ["slow: marks tests as slow"]
+"#,
+        )
+        .unwrap();
+        let config = Config::load_from_dir(dir.path()).unwrap();
+        assert_eq!(config.testpaths.len(), 2);
+        assert_eq!(config.python_files, vec!["check_*.py"]);
+    }
+
+    #[test]
+    fn test_load_pytest_ini() {
+        let dir = tempfile::tempdir().unwrap();
+        let ini = dir.path().join("pytest.ini");
+        fs::write(
+            &ini,
+            "[pytest]\ntestpaths = tests\npython_functions = check_*\n",
+        )
+        .unwrap();
+        let config = Config::load_from_dir(dir.path()).unwrap();
+        assert_eq!(config.python_functions, vec!["check_*"]);
+    }
+
+    #[test]
+    fn test_is_test_file() {
+        let config = Config::default();
+        assert!(config.is_test_file("test_math.py"));
+        assert!(config.is_test_file("math_test.py"));
+        assert!(!config.is_test_file("helper.py"));
+    }
+
+    #[test]
+    fn test_fallback_to_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = Config::load_from_dir(dir.path()).unwrap();
+        assert_eq!(config.python_files, vec!["test_*.py", "*_test.py"]);
     }
 }
