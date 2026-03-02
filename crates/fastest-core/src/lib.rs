@@ -3,6 +3,7 @@
 pub mod config;
 pub mod discovery;
 pub mod error;
+pub mod fixtures;
 pub mod markers;
 pub mod model;
 pub mod parametrize;
@@ -10,6 +11,10 @@ pub mod parametrize;
 pub use config::Config;
 pub use discovery::discover_tests;
 pub use error::{Error, Result};
+pub use fixtures::{
+    discover_conftest_fixtures, generate_builtin_code, is_builtin, resolve_fixture_order,
+    Fixture, FixtureCache, FixtureScope,
+};
 pub use markers::{classify_marker, filter_by_keyword, filter_by_markers, BuiltinMarker};
 pub use model::{TestItem, TestOutcome, TestResult};
 pub use parametrize::expand_parametrized_tests;
