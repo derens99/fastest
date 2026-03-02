@@ -29,6 +29,12 @@ pub enum Error {
     #[error("Plugin error: {0}")]
     Plugin(String),
 
+    #[error("Git error: {0}")]
+    Git(#[from] git2::Error),
+
+    #[error("Watch error: {0}")]
+    Watch(#[from] notify::Error),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
