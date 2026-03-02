@@ -7,6 +7,7 @@ pub mod fixtures;
 pub mod markers;
 pub mod model;
 pub mod parametrize;
+pub mod plugins;
 
 pub use config::Config;
 pub use discovery::discover_tests;
@@ -18,5 +19,6 @@ pub use fixtures::{
 pub use markers::{classify_marker, filter_by_keyword, filter_by_markers, BuiltinMarker};
 pub use model::{TestItem, TestOutcome, TestResult};
 pub use parametrize::expand_parametrized_tests;
+pub use plugins::{HookArgs, HookResult, Plugin, PluginManager, PluginMetadata};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
