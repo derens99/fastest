@@ -26,6 +26,9 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    #[error("Plugin error: {0}")]
+    Plugin(String),
+
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
