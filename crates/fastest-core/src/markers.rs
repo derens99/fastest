@@ -8,9 +8,16 @@ use crate::model::{Marker, TestItem};
 /// Built-in marker classification for pytest markers.
 #[derive(Debug, Clone, PartialEq)]
 pub enum BuiltinMarker {
-    Skip { reason: Option<String> },
-    Skipif { condition: String, reason: Option<String> },
-    Xfail { reason: Option<String> },
+    Skip {
+        reason: Option<String>,
+    },
+    Skipif {
+        condition: String,
+        reason: Option<String>,
+    },
+    Xfail {
+        reason: Option<String>,
+    },
     Parametrize,
     Timeout(f64),
     Custom(String),
@@ -46,11 +53,7 @@ pub fn classify_marker(marker: &Marker) -> BuiltinMarker {
         }
         "parametrize" => BuiltinMarker::Parametrize,
         "timeout" => {
-            let seconds = marker
-                .args
-                .first()
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
+            let seconds = marker.args.first().and_then(|v| v.as_f64()).unwrap_or(0.0);
             BuiltinMarker::Timeout(seconds)
         }
         other => BuiltinMarker::Custom(other.to_string()),
@@ -95,9 +98,7 @@ pub fn filter_by_keyword(tests: &[TestItem], expr: &str) -> Vec<TestItem> {
     let ast = parse_expression(&tokens);
     tests
         .iter()
-        .filter(|test| {
-            evaluate(&ast, &|keyword| test_matches_keyword(test, keyword))
-        })
+        .filter(|test| evaluate(&ast, &|keyword| test_matches_keyword(test, keyword)))
         .cloned()
         .collect()
 }
@@ -404,12 +405,7 @@ mod tests {
     #[test]
     fn test_filter_by_marker_simple() {
         let tests = vec![
-            make_test(
-                "test_a",
-                "test_a",
-                None,
-                vec![make_marker("slow")],
-            ),
+            make_test("test_a", "test_a", None, vec![make_marker("slow")]),
             make_test("test_b", "test_b", None, vec![make_marker("fast")]),
             make_test(
                 "test_c",

@@ -51,15 +51,13 @@ impl DiscoveryCache {
     /// Look up cached test items for a file path, returning them only if
     /// the content hash matches (i.e., the file has not changed).
     pub fn get(&self, path: &Path, hash: u64) -> Option<&Vec<TestItem>> {
-        self.entries
-            .get(path)
-            .and_then(|(cached_hash, items)| {
-                if *cached_hash == hash {
-                    Some(items)
-                } else {
-                    None
-                }
-            })
+        self.entries.get(path).and_then(|(cached_hash, items)| {
+            if *cached_hash == hash {
+                Some(items)
+            } else {
+                None
+            }
+        })
     }
 
     /// Insert or update the cache entry for a file path.

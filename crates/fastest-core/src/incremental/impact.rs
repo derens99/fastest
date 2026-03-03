@@ -25,10 +25,7 @@ const CONFIG_FILES: &[&str] = &[
 /// - If any config file (pyproject.toml, pytest.ini, etc.) was changed, **all** tests
 ///   are considered affected.
 /// - Otherwise, only tests whose source file appears in `changed_files` are returned.
-pub fn find_affected_tests(
-    tests: &[TestItem],
-    changed_files: &HashSet<PathBuf>,
-) -> Vec<TestItem> {
+pub fn find_affected_tests(tests: &[TestItem], changed_files: &HashSet<PathBuf>) -> Vec<TestItem> {
     // Check whether any changed file is a known config file
     let config_changed = changed_files.iter().any(|p| {
         p.file_name()
@@ -77,8 +74,7 @@ mod tests {
             make_test("test_b", "tests/test_b.py"),
         ];
 
-        let changed: HashSet<PathBuf> =
-            [PathBuf::from("tests/test_a.py")].into_iter().collect();
+        let changed: HashSet<PathBuf> = [PathBuf::from("tests/test_a.py")].into_iter().collect();
 
         let affected = find_affected_tests(&tests, &changed);
         assert_eq!(affected.len(), 1);
@@ -92,8 +88,7 @@ mod tests {
             make_test("test_b", "tests/test_b.py"),
         ];
 
-        let changed: HashSet<PathBuf> =
-            [PathBuf::from("tests/test_a.py")].into_iter().collect();
+        let changed: HashSet<PathBuf> = [PathBuf::from("tests/test_a.py")].into_iter().collect();
 
         let affected = find_affected_tests(&tests, &changed);
         // test_b's file was NOT changed, so it must not appear
@@ -111,8 +106,7 @@ mod tests {
             make_test("test_c", "tests/test_c.py"),
         ];
 
-        let changed: HashSet<PathBuf> =
-            [PathBuf::from("pyproject.toml")].into_iter().collect();
+        let changed: HashSet<PathBuf> = [PathBuf::from("pyproject.toml")].into_iter().collect();
 
         let affected = find_affected_tests(&tests, &changed);
         assert_eq!(

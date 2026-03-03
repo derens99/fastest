@@ -23,13 +23,10 @@ pub const BUILTIN_FIXTURES: &[&str] = &[
 /// `None` if the name is not a recognised built-in fixture.
 pub fn generate_builtin_code(name: &str) -> Option<String> {
     let code = match name {
-        "tmp_path" => {
-            "import tempfile, pathlib\n\
+        "tmp_path" => "import tempfile, pathlib\n\
              tmp_path = pathlib.Path(tempfile.mkdtemp())"
-                .to_string()
-        }
-        "tmp_path_factory" => {
-            "import tempfile, pathlib\n\
+            .to_string(),
+        "tmp_path_factory" => "import tempfile, pathlib\n\
              class _TmpPathFactory:\n\
              \x20   def __init__(self):\n\
              \x20       self._base = pathlib.Path(tempfile.mkdtemp())\n\
@@ -40,10 +37,8 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       p.mkdir(parents=True, exist_ok=True)\n\
              \x20       return p\n\
              tmp_path_factory = _TmpPathFactory()"
-                .to_string()
-        }
-        "capsys" => {
-            "import io, sys\n\
+            .to_string(),
+        "capsys" => "import io, sys\n\
              class _CapturedOutput:\n\
              \x20   def __init__(self):\n\
              \x20       self.out = ''\n\
@@ -67,10 +62,8 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       sys.stdout = self._old_stdout\n\
              \x20       sys.stderr = self._old_stderr\n\
              capsys = _Capsys()"
-                .to_string()
-        }
-        "capfd" => {
-            "import io, sys\n\
+            .to_string(),
+        "capfd" => "import io, sys\n\
              class _CapturedFd:\n\
              \x20   def __init__(self):\n\
              \x20       self.out = ''\n\
@@ -80,10 +73,8 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       result = _CapturedFd()\n\
              \x20       return result\n\
              capfd = _Capfd()"
-                .to_string()
-        }
-        "monkeypatch" => {
-            "class _MonkeyPatch:\n\
+            .to_string(),
+        "monkeypatch" => "class _MonkeyPatch:\n\
              \x20   def __init__(self):\n\
              \x20       self._patches = []\n\
              \x20       self._env_patches = []\n\
@@ -124,20 +115,16 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20               os.environ[key] = old\n\
              \x20       self._env_patches.clear()\n\
              monkeypatch = _MonkeyPatch()"
-                .to_string()
-        }
-        "request" => {
-            "class _FixtureRequest:\n\
+            .to_string(),
+        "request" => "class _FixtureRequest:\n\
              \x20   def __init__(self):\n\
              \x20       self.param = None\n\
              \x20       self.node = None\n\
              \x20       self.config = None\n\
              \x20       self.fspath = None\n\
              request = _FixtureRequest()"
-                .to_string()
-        }
-        "pytestconfig" => {
-            "class _PytestConfig:\n\
+            .to_string(),
+        "pytestconfig" => "class _PytestConfig:\n\
              \x20   def __init__(self):\n\
              \x20       self.rootdir = '.'\n\
              \x20       self.inipath = None\n\
@@ -146,10 +133,8 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def getoption(self, name, default=None):\n\
              \x20       return default\n\
              pytestconfig = _PytestConfig()"
-                .to_string()
-        }
-        "cache" => {
-            "class _Cache:\n\
+            .to_string(),
+        "cache" => "class _Cache:\n\
              \x20   def __init__(self):\n\
              \x20       self._data = {}\n\
              \x20   def get(self, key, default):\n\
@@ -157,8 +142,7 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def set(self, key, value):\n\
              \x20       self._data[key] = value\n\
              cache = _Cache()"
-                .to_string()
-        }
+            .to_string(),
         _ => return None,
     };
     Some(code)

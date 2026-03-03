@@ -31,6 +31,12 @@ pub struct FixturePlugin {
     hooks_received: Vec<String>,
 }
 
+impl Default for FixturePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FixturePlugin {
     pub fn new() -> Self {
         Self {
@@ -86,6 +92,12 @@ pub struct MarkerPlugin {
     metadata: PluginMetadata,
     initialized: bool,
     hooks_received: Vec<String>,
+}
+
+impl Default for MarkerPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MarkerPlugin {
@@ -145,6 +157,12 @@ pub struct ReportingPlugin {
     hooks_received: Vec<String>,
 }
 
+impl Default for ReportingPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportingPlugin {
     pub fn new() -> Self {
         Self {
@@ -200,6 +218,12 @@ pub struct CapturePlugin {
     metadata: PluginMetadata,
     initialized: bool,
     hooks_received: Vec<String>,
+}
+
+impl Default for CapturePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapturePlugin {

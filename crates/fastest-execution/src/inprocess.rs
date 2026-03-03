@@ -210,11 +210,7 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
-    fn make_test_item(
-        function_name: &str,
-        class_name: Option<&str>,
-        path: &str,
-    ) -> TestItem {
+    fn make_test_item(function_name: &str, class_name: Option<&str>, path: &str) -> TestItem {
         TestItem {
             id: format!("{path}::{function_name}"),
             path: PathBuf::from(path),

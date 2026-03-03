@@ -15,8 +15,8 @@ pub use config::Config;
 pub use discovery::discover_tests;
 pub use error::{Error, Result};
 pub use fixtures::{
-    discover_conftest_fixtures, generate_builtin_code, is_builtin, resolve_fixture_order,
-    Fixture, FixtureCache, FixtureScope,
+    discover_conftest_fixtures, generate_builtin_code, is_builtin, resolve_fixture_order, Fixture,
+    FixtureCache, FixtureScope,
 };
 pub use incremental::IncrementalTester;
 pub use markers::{classify_marker, filter_by_keyword, filter_by_markers, BuiltinMarker};

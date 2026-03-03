@@ -221,7 +221,11 @@ mod tests {
 
         // Insert a value into every scope
         for scope in &scopes {
-            cache.insert("val".to_string(), scope, serde_json::json!(scope.to_string()));
+            cache.insert(
+                "val".to_string(),
+                scope,
+                serde_json::json!(scope.to_string()),
+            );
         }
 
         // Clear each scope one by one and verify the others remain

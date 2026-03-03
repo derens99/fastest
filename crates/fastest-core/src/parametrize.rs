@@ -29,7 +29,10 @@ pub fn expand_parametrized_tests(tests: Vec<TestItem>) -> Result<Vec<TestItem>> 
     let mut non_parametrized: Vec<TestItem> = Vec::new();
 
     for test in tests {
-        if test.decorators.contains(&"pytest.mark.parametrize".to_string()) {
+        if test
+            .decorators
+            .contains(&"pytest.mark.parametrize".to_string())
+        {
             by_file.entry(test.path.clone()).or_default().push(test);
         } else {
             non_parametrized.push(test);
@@ -116,7 +119,7 @@ fn expand_single_test(test: &TestItem, stmts: &[Stmt]) -> Option<Vec<TestItem>> 
                 }
             } else {
                 // Generate ID from values
-                let part: Vec<String> = vals.iter().map(|v| value_to_id_string(v)).collect();
+                let part: Vec<String> = vals.iter().map(value_to_id_string).collect();
                 id_parts.push(part.join("-"));
             }
         }
@@ -301,8 +304,7 @@ fn parse_param_values(expr: &Expr, num_names: usize) -> Option<Vec<Vec<serde_jso
                     result.push(vals);
                 }
                 Expr::List(list) => {
-                    let vals: Vec<serde_json::Value> =
-                        list.elts.iter().map(expr_to_json).collect();
+                    let vals: Vec<serde_json::Value> = list.elts.iter().map(expr_to_json).collect();
                     result.push(vals);
                 }
                 _ => {
@@ -384,14 +386,12 @@ fn expr_to_json(expr: &Expr) -> serde_json::Value {
             let items: Vec<serde_json::Value> = tuple.elts.iter().map(expr_to_json).collect();
             serde_json::Value::Array(items)
         }
-        Expr::Name(name) => {
-            match name.id.as_str() {
-                "True" => serde_json::Value::Bool(true),
-                "False" => serde_json::Value::Bool(false),
-                "None" => serde_json::Value::Null,
-                _ => serde_json::Value::String(name.id.to_string()),
-            }
-        }
+        Expr::Name(name) => match name.id.as_str() {
+            "True" => serde_json::Value::Bool(true),
+            "False" => serde_json::Value::Bool(false),
+            "None" => serde_json::Value::Null,
+            _ => serde_json::Value::String(name.id.to_string()),
+        },
         _ => serde_json::Value::Null,
     }
 }
@@ -414,8 +414,7 @@ fn constant_to_json(c: &Constant) -> serde_json::Value {
         Constant::Bool(b) => serde_json::Value::Bool(*b),
         Constant::None => serde_json::Value::Null,
         Constant::Tuple(items) => {
-            let json_items: Vec<serde_json::Value> =
-                items.iter().map(constant_to_json).collect();
+            let json_items: Vec<serde_json::Value> = items.iter().map(constant_to_json).collect();
             serde_json::Value::Array(json_items)
         }
         _ => serde_json::Value::Null,
@@ -495,7 +494,10 @@ pub fn expand_parametrized_tests_from_source(
     let mut result = Vec::with_capacity(tests.len());
 
     for test in tests {
-        if test.decorators.contains(&"pytest.mark.parametrize".to_string()) {
+        if test
+            .decorators
+            .contains(&"pytest.mark.parametrize".to_string())
+        {
             match expand_single_test(&test, &stmts) {
                 Some(expanded) => result.extend(expanded),
                 None => result.push(test),
@@ -515,11 +517,7 @@ mod tests {
     use std::path::PathBuf;
 
     /// Helper to create a minimal TestItem for testing
-    fn make_test_item(
-        function_name: &str,
-        decorators: Vec<&str>,
-        path: &Path,
-    ) -> TestItem {
+    fn make_test_item(function_name: &str, decorators: Vec<&str>, path: &Path) -> TestItem {
         let id = format!("{}::{}", path.display(), function_name);
         TestItem {
             id,
@@ -546,14 +544,9 @@ def test_square(x):
     assert x * x >= 0
 "#;
         let path = PathBuf::from("tests/test_math.py");
-        let test = make_test_item(
-            "test_square",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let test = make_test_item("test_square", vec!["pytest.mark.parametrize"], &path);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].name, "test_square[1]");
@@ -581,14 +574,9 @@ def test_add(x, y, expected):
     assert x + y == expected
 "#;
         let path = PathBuf::from("tests/test_math.py");
-        let test = make_test_item(
-            "test_add",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let test = make_test_item("test_add", vec!["pytest.mark.parametrize"], &path);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "test_add[1-2-3]");
@@ -622,8 +610,7 @@ def test_slow():
             make_test_item("test_slow", vec!["pytest.mark.slow"], &path),
         ];
 
-        let result =
-            expand_parametrized_tests_from_source(tests, source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(tests, source, &path).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "test_simple");
@@ -642,14 +629,9 @@ def test_named(x):
     assert x > 0
 "#;
         let path = PathBuf::from("tests/test_ids.py");
-        let test = make_test_item(
-            "test_named",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let test = make_test_item("test_named", vec!["pytest.mark.parametrize"], &path);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "test_named[one]");
@@ -675,14 +657,9 @@ def test_multiply(x, y):
     assert x * y > 0
 "#;
         let path = PathBuf::from("tests/test_cross.py");
-        let test = make_test_item(
-            "test_multiply",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let test = make_test_item("test_multiply", vec!["pytest.mark.parametrize"], &path);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 4);
 
@@ -704,14 +681,9 @@ def test_greet(name):
     assert len(name) > 0
 "#;
         let path = PathBuf::from("tests/test_strings.py");
-        let test = make_test_item(
-            "test_greet",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let test = make_test_item("test_greet", vec!["pytest.mark.parametrize"], &path);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "test_greet[alice]");
@@ -728,17 +700,12 @@ def test_one(x):
     pass
 "#;
         let path = PathBuf::from("tests/test_fields.py");
-        let mut test = make_test_item(
-            "test_one",
-            vec!["pytest.mark.parametrize"],
-            &path,
-        );
+        let mut test = make_test_item("test_one", vec!["pytest.mark.parametrize"], &path);
         test.is_async = false;
         test.fixture_deps = vec!["x".to_string()];
         test.line_number = Some(4);
 
-        let result =
-            expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
 
         assert_eq!(result.len(), 1);
         let expanded = &result[0];

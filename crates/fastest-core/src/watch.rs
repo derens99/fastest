@@ -43,13 +43,7 @@ impl TestWatcher {
 
         let debounce = Duration::from_millis(self.debounce_ms);
 
-        loop {
-            // Block until the first event arrives
-            let first = match rx.recv() {
-                Ok(event) => event,
-                Err(_) => break, // channel closed
-            };
-
+        while let Ok(first) = rx.recv() {
             let mut changed: Vec<PathBuf> = Vec::new();
             Self::collect_py_paths(&first, &mut changed);
 

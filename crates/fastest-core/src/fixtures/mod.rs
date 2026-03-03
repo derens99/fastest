@@ -25,9 +25,10 @@ pub use scope::FixtureCache;
 /// The scope of a fixture, controlling how long its value is cached.
 ///
 /// Ordered from narrowest (per-test) to broadest (per-session).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum FixtureScope {
     /// A new instance is created for each test function (default).
+    #[default]
     Function,
     /// Shared across all methods in a test class.
     Class,
@@ -37,12 +38,6 @@ pub enum FixtureScope {
     Package,
     /// Shared across the entire test session.
     Session,
-}
-
-impl Default for FixtureScope {
-    fn default() -> Self {
-        FixtureScope::Function
-    }
 }
 
 impl std::fmt::Display for FixtureScope {
@@ -192,18 +187,9 @@ mod tests {
     fn test_resolve_with_chain() {
         let mut available = HashMap::new();
         available.insert("config".to_string(), make_fixture("config", vec![]));
-        available.insert(
-            "db".to_string(),
-            make_fixture("db", vec!["config"]),
-        );
-        available.insert(
-            "user".to_string(),
-            make_fixture("user", vec!["db"]),
-        );
-        available.insert(
-            "admin".to_string(),
-            make_fixture("admin", vec!["user"]),
-        );
+        available.insert("db".to_string(), make_fixture("db", vec!["config"]));
+        available.insert("user".to_string(), make_fixture("user", vec!["db"]));
+        available.insert("admin".to_string(), make_fixture("admin", vec!["user"]));
 
         let order = resolve_fixture_order(&["admin".to_string()], &available).unwrap();
 

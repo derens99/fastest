@@ -305,9 +305,12 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     plugins.shutdown_all()?;
 
     // Return success if no failures/errors
-    let has_failures = results
-        .iter()
-        .any(|r| matches!(r.outcome, fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }));
+    let has_failures = results.iter().any(|r| {
+        matches!(
+            r.outcome,
+            fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+        )
+    });
     Ok(!has_failures)
 }
 
@@ -316,10 +319,7 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 // ---------------------------------------------------------------------------
 
 fn run_watch(cli: &Cli) -> anyhow::Result<()> {
-    eprintln!(
-        "{} watching for changes...",
-        "fastest".cyan().bold()
-    );
+    eprintln!("{} watching for changes...", "fastest".cyan().bold());
 
     let watcher = TestWatcher::new(300); // 300ms debounce
     let watch_path = PathBuf::from(cli.paths.first().map(|s| s.as_str()).unwrap_or("."));

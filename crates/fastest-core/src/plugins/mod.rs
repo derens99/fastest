@@ -238,9 +238,7 @@ mod tests {
         manager.initialize_all().unwrap();
 
         let args = HookArgs::new();
-        let results = manager
-            .call_hook(hooks::COLLECTION_START, &args)
-            .unwrap();
+        let results = manager.call_hook(hooks::COLLECTION_START, &args).unwrap();
 
         // Every built-in plugin responds to every hook with a result
         assert_eq!(results.len(), 4);
@@ -310,7 +308,10 @@ mod tests {
             .register(Box::new(builtin::MarkerPlugin::new()))
             .unwrap();
 
-        let names: Vec<&str> = manager.plugins().map(|p| p.metadata().name.as_str()).collect();
+        let names: Vec<&str> = manager
+            .plugins()
+            .map(|p| p.metadata().name.as_str())
+            .collect();
         assert_eq!(names, vec!["fixture", "marker", "reporting", "capture"]);
     }
 }

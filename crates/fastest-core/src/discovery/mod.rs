@@ -61,10 +61,7 @@ fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
                 }
             }
         } else if path.is_dir() {
-            for entry in WalkDir::new(path)
-                .into_iter()
-                .filter_map(|e| e.ok())
-            {
+            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
                 if entry.file_type().is_file() {
                     if let Some(name) = entry.file_name().to_str() {
                         if config.is_test_file(name) {
@@ -92,9 +89,7 @@ pub fn discover_tests_cached(
 
     let results: Vec<(PathBuf, Vec<u8>)> = test_files
         .into_iter()
-        .filter_map(|path| {
-            fs::read(&path).ok().map(|content| (path, content))
-        })
+        .filter_map(|path| fs::read(&path).ok().map(|content| (path, content)))
         .collect();
 
     let mut all_items = Vec::new();
@@ -220,10 +215,7 @@ class TestString:
         assert!(names.contains(&"test_lower"));
 
         // Verify class tests have class_name set
-        let class_tests: Vec<&TestItem> = items
-            .iter()
-            .filter(|i| i.class_name.is_some())
-            .collect();
+        let class_tests: Vec<&TestItem> = items.iter().filter(|i| i.class_name.is_some()).collect();
         assert_eq!(class_tests.len(), 2);
         assert!(class_tests
             .iter()

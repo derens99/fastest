@@ -205,34 +205,35 @@ impl SubprocessPool {
 
                 scope.spawn(move |_| {
                     // Spawn a persistent worker process
-                    let mut worker = match spawn_worker(python_path, &harness_path.to_string_lossy()) {
-                        Ok(w) => w,
-                        Err(e) => {
-                            // Drain remaining work and mark as errors
-                            loop {
-                                match injector.steal() {
-                                    Steal::Success((idx, test)) => {
-                                        let result = TestResult {
-                                            test_id: test.id.clone(),
-                                            outcome: TestOutcome::Error {
-                                                message: format!("Worker spawn failed: {e}"),
-                                            },
-                                            duration: Duration::ZERO,
-                                            output: String::new(),
-                                            error: Some(e.to_string()),
-                                            stdout: String::new(),
-                                            stderr: String::new(),
-                                        };
-                                        let mut guard = results_lock.lock();
-                                        guard[idx] = Some(result);
+                    let mut worker =
+                        match spawn_worker(python_path, &harness_path.to_string_lossy()) {
+                            Ok(w) => w,
+                            Err(e) => {
+                                // Drain remaining work and mark as errors
+                                loop {
+                                    match injector.steal() {
+                                        Steal::Success((idx, test)) => {
+                                            let result = TestResult {
+                                                test_id: test.id.clone(),
+                                                outcome: TestOutcome::Error {
+                                                    message: format!("Worker spawn failed: {e}"),
+                                                },
+                                                duration: Duration::ZERO,
+                                                output: String::new(),
+                                                error: Some(e.to_string()),
+                                                stdout: String::new(),
+                                                stderr: String::new(),
+                                            };
+                                            let mut guard = results_lock.lock();
+                                            guard[idx] = Some(result);
+                                        }
+                                        Steal::Empty => break,
+                                        Steal::Retry => continue,
                                     }
-                                    Steal::Empty => break,
-                                    Steal::Retry => continue,
                                 }
+                                return;
                             }
-                            return;
-                        }
-                    };
+                        };
 
                     loop {
                         let (idx, test) = match injector.steal() {
@@ -300,11 +301,7 @@ fn spawn_worker(python_path: &str, harness_path: &str) -> Result<Child, std::io:
 }
 
 /// Send a test to a worker process and read back the result.
-fn execute_on_worker(
-    worker: &mut Child,
-    test: &TestItem,
-    timeout: &TimeoutConfig,
-) -> TestResult {
+fn execute_on_worker(worker: &mut Child, test: &TestItem, timeout: &TimeoutConfig) -> TestResult {
     let start = Instant::now();
 
     let input = WorkerInput::from_test_item(test);

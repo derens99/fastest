@@ -40,11 +40,7 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
 
     for conftest_path in &conftest_paths {
         let source = std::fs::read_to_string(conftest_path).map_err(|e| {
-            Error::Discovery(format!(
-                "Failed to read {}: {}",
-                conftest_path.display(),
-                e
-            ))
+            Error::Discovery(format!("Failed to read {}: {}", conftest_path.display(), e))
         })?;
 
         match extract_fixtures_from_source(&source, conftest_path) {
@@ -70,17 +66,9 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
 ///
 /// Parses the source with `rustpython-parser` and looks for top-level
 /// function definitions decorated with `@pytest.fixture` or `@pytest.fixture(...)`.
-pub fn extract_fixtures_from_source(
-    source: &str,
-    path: &Path,
-) -> Result<HashMap<String, Fixture>> {
-    let stmts = ast::Suite::parse(source, &path.display().to_string()).map_err(|e| {
-        Error::Parse(format!(
-            "Failed to parse {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+pub fn extract_fixtures_from_source(source: &str, path: &Path) -> Result<HashMap<String, Fixture>> {
+    let stmts = ast::Suite::parse(source, &path.display().to_string())
+        .map_err(|e| Error::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
 
     let mut fixtures = HashMap::new();
 
@@ -97,24 +85,20 @@ pub fn extract_fixtures_from_source(
 /// `@pytest.fixture`-decorated function definition.
 fn try_extract_fixture(stmt: &Stmt, path: &Path) -> Option<Fixture> {
     match stmt {
-        Stmt::FunctionDef(func_def) => {
-            extract_fixture_from_decorators(
-                func_def.name.as_str(),
-                &func_def.decorator_list,
-                &func_def.args,
-                &func_def.body,
-                path,
-            )
-        }
-        Stmt::AsyncFunctionDef(func_def) => {
-            extract_fixture_from_decorators(
-                func_def.name.as_str(),
-                &func_def.decorator_list,
-                &func_def.args,
-                &func_def.body,
-                path,
-            )
-        }
+        Stmt::FunctionDef(func_def) => extract_fixture_from_decorators(
+            func_def.name.as_str(),
+            &func_def.decorator_list,
+            &func_def.args,
+            &func_def.body,
+            path,
+        ),
+        Stmt::AsyncFunctionDef(func_def) => extract_fixture_from_decorators(
+            func_def.name.as_str(),
+            &func_def.decorator_list,
+            &func_def.args,
+            &func_def.body,
+            path,
+        ),
         _ => None,
     }
 }
@@ -181,9 +165,7 @@ fn extract_fixture_from_decorators(
 /// Check whether an expression is `pytest.fixture` or `pytest.fixture(...)`.
 fn is_pytest_fixture(expr: &Expr) -> bool {
     match expr {
-        Expr::Attribute(attr) => {
-            attr.attr.as_str() == "fixture" && is_pytest_name(&attr.value)
-        }
+        Expr::Attribute(attr) => attr.attr.as_str() == "fixture" && is_pytest_name(&attr.value),
         Expr::Call(call) => is_pytest_fixture(&call.func),
         _ => false,
     }
@@ -309,16 +291,13 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Expr(expr_stmt) => contains_yield_expr(&expr_stmt.value),
         Stmt::If(if_stmt) => {
-            body_contains_yield(&if_stmt.body)
-                || body_contains_yield(&if_stmt.orelse)
+            body_contains_yield(&if_stmt.body) || body_contains_yield(&if_stmt.orelse)
         }
         Stmt::Try(try_stmt) => {
-            body_contains_yield(&try_stmt.body)
-                || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
         }
         Stmt::TryStar(try_stmt) => {
-            body_contains_yield(&try_stmt.body)
-                || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
         }
         Stmt::For(for_stmt) => body_contains_yield(&for_stmt.body),
         Stmt::While(while_stmt) => body_contains_yield(&while_stmt.body),

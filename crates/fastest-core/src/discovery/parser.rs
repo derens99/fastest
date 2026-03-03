@@ -15,13 +15,8 @@ use std::path::Path;
 /// and extracts top-level `def test_*()` functions and `class Test*` classes
 /// with their nested `def test_*()` methods.
 pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
-    let stmts = ast::Suite::parse(source, &path.display().to_string()).map_err(|e| {
-        Error::Parse(format!(
-            "Failed to parse {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
+    let stmts = ast::Suite::parse(source, &path.display().to_string())
+        .map_err(|e| Error::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
 
     let line_index = LineIndex::new(source);
     let path_str = path.display().to_string();
@@ -66,13 +61,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             Stmt::ClassDef(class_def) => {
                 let class_name = class_def.name.as_str();
                 if is_test_class_name(class_name) {
-                    extract_class_methods(
-                        class_def,
-                        &path_str,
-                        path,
-                        &line_index,
-                        &mut items,
-                    );
+                    extract_class_methods(class_def, &path_str, path, &line_index, &mut items);
                 }
             }
             _ => {}
@@ -134,6 +123,7 @@ fn extract_class_methods(
 }
 
 /// Build a TestItem from function definition components.
+#[allow(clippy::too_many_arguments)]
 fn build_test_item_from_function(
     func_name: &str,
     args: &ast::Arguments,
@@ -202,7 +192,7 @@ fn extract_fixture_deps(args: &ast::Arguments, is_method: bool) -> Vec<String> {
 fn extract_decorators(decorator_list: &[Expr]) -> Vec<String> {
     decorator_list
         .iter()
-        .filter_map(|expr| extract_decorator_name(expr))
+        .filter_map(extract_decorator_name)
         .collect()
 }
 
@@ -321,10 +311,7 @@ class HelperClass:
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].function_name, "test_add");
         assert_eq!(items[0].class_name, Some("TestCalculator".to_string()));
-        assert_eq!(
-            items[0].id,
-            "tests/test_calc.py::TestCalculator::test_add"
-        );
+        assert_eq!(items[0].id, "tests/test_calc.py::TestCalculator::test_add");
 
         assert_eq!(items[1].function_name, "test_multiply");
         assert_eq!(items[1].class_name, Some("TestCalculator".to_string()));

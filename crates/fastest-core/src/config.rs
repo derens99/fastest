@@ -219,12 +219,10 @@ impl Config {
 
                 match key {
                     "testpaths" => {
-                        config.testpaths =
-                            value.split_whitespace().map(PathBuf::from).collect();
+                        config.testpaths = value.split_whitespace().map(PathBuf::from).collect();
                     }
                     "python_files" => {
-                        config.python_files =
-                            value.split_whitespace().map(String::from).collect();
+                        config.python_files = value.split_whitespace().map(String::from).collect();
                     }
                     "python_classes" => {
                         config.python_classes =

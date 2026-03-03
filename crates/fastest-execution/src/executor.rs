@@ -114,18 +114,9 @@ mod tests {
     #[test]
     fn test_hybrid_executor_strategy() {
         let executor = HybridExecutor::new();
-        assert_eq!(
-            executor.strategy_for(5),
-            ExecutionStrategy::InProcess
-        );
-        assert_eq!(
-            executor.strategy_for(20),
-            ExecutionStrategy::InProcess
-        );
-        assert_eq!(
-            executor.strategy_for(21),
-            ExecutionStrategy::Subprocess
-        );
+        assert_eq!(executor.strategy_for(5), ExecutionStrategy::InProcess);
+        assert_eq!(executor.strategy_for(20), ExecutionStrategy::InProcess);
+        assert_eq!(executor.strategy_for(21), ExecutionStrategy::Subprocess);
     }
 
     #[test]
