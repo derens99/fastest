@@ -4,6 +4,7 @@
 //! each one using `rustpython-parser` to extract functions decorated with
 //! `@pytest.fixture`.
 
+use crate::discovery::should_skip_dir;
 use crate::error::{Error, Result};
 use crate::fixtures::{Fixture, FixtureScope};
 use rustpython_parser::ast::{self, Constant, Expr, Stmt};
@@ -25,7 +26,15 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
     // Deeper conftest files can then override shallower ones.
     let mut conftest_paths: Vec<std::path::PathBuf> = Vec::new();
 
-    for entry in WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+    let walker = WalkDir::new(root).into_iter().filter_entry(|e| {
+        if e.file_type().is_dir() {
+            if let Some(name) = e.file_name().to_str() {
+                return !should_skip_dir(name);
+            }
+        }
+        true
+    });
+    for entry in walker.filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
             if let Some(name) = entry.file_name().to_str() {
                 if name == "conftest.py" {
@@ -39,9 +48,13 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
     conftest_paths.sort_by_key(|p| p.components().count());
 
     for conftest_path in &conftest_paths {
-        let source = std::fs::read_to_string(conftest_path).map_err(|e| {
-            Error::Discovery(format!("Failed to read {}: {}", conftest_path.display(), e))
-        })?;
+        let source = match std::fs::read_to_string(conftest_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Warning: failed to read {}: {}", conftest_path.display(), e);
+                continue;
+            }
+        };
 
         match extract_fixtures_from_source(&source, conftest_path) {
             Ok(file_fixtures) => {
@@ -290,6 +303,18 @@ fn body_contains_yield(body: &[Stmt]) -> bool {
 fn stmt_contains_yield(stmt: &Stmt) -> bool {
     match stmt {
         Stmt::Expr(expr_stmt) => contains_yield_expr(&expr_stmt.value),
+        // Handle `result = yield value` — yield on RHS of assignment
+        Stmt::Assign(assign) => contains_yield_expr(&assign.value),
+        Stmt::AnnAssign(ann_assign) => ann_assign
+            .value
+            .as_ref()
+            .map(|v| contains_yield_expr(v))
+            .unwrap_or(false),
+        Stmt::Return(ret) => ret
+            .value
+            .as_ref()
+            .map(|v| contains_yield_expr(v))
+            .unwrap_or(false),
         Stmt::If(if_stmt) => {
             body_contains_yield(&if_stmt.body) || body_contains_yield(&if_stmt.orelse)
         }

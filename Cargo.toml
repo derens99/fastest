@@ -16,7 +16,7 @@ repository = "https://github.com/derens99/fastest"
 [profile.release]
 lto = true
 codegen-units = 1
-strip = true
+strip = "debuginfo"
 
 [workspace.dependencies]
 anyhow = "1.0"

@@ -61,7 +61,9 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def _restore(self):\n\
              \x20       sys.stdout = self._old_stdout\n\
              \x20       sys.stderr = self._old_stderr\n\
-             capsys = _Capsys()"
+             capsys = _Capsys()\n\
+             import atexit as _atexit\n\
+             _atexit.register(capsys._restore)"
             .to_string(),
         "capfd" => "import io, sys\n\
              class _CapturedFd:\n\
@@ -78,14 +80,18 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def __init__(self):\n\
              \x20       self._patches = []\n\
              \x20       self._env_patches = []\n\
-             \x20   def setattr(self, target, name, value=None):\n\
-             \x20       if value is None and isinstance(name, str) is False:\n\
+             \x20   _NOTSET = object()\n\
+             \x20   def setattr(self, target, name, value=_NOTSET):\n\
+             \x20       if value is self._NOTSET:\n\
+             \x20           # Two-arg form: setattr(\"pkg.mod.Class.attr\", value)\n\
              \x20           value = name\n\
-             \x20           name = target\n\
-             \x20       else:\n\
-             \x20           old = getattr(target, name)\n\
-             \x20           self._patches.append((target, name, old))\n\
-             \x20           setattr(target, name, value)\n\
+             \x20           parts = target.rsplit('.', 1)\n\
+             \x20           import importlib\n\
+             \x20           target = importlib.import_module(parts[0]) if len(parts) == 2 else target\n\
+             \x20           name = parts[-1]\n\
+             \x20       old = getattr(target, name)\n\
+             \x20       self._patches.append((target, name, old))\n\
+             \x20       setattr(target, name, value)\n\
              \x20   def delattr(self, target, name):\n\
              \x20       old = getattr(target, name)\n\
              \x20       self._patches.append((target, name, old))\n\

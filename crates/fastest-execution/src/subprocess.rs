@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crossbeam_deque::{Injector, Steal};
+use fastest_core::markers::{classify_marker, BuiltinMarker};
 use fastest_core::model::{TestItem, TestOutcome, TestResult};
 use serde::{Deserialize, Serialize};
 
@@ -25,15 +26,62 @@ struct WorkerInput {
     path: String,
     function_name: String,
     class_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    parameters: Option<WorkerParameters>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    markers: Option<Vec<WorkerMarker>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fixture_deps: Option<Vec<String>>,
+}
+
+/// A marker serialized for the worker process.
+#[derive(Debug, Serialize)]
+struct WorkerMarker {
+    name: String,
+    args: Vec<serde_json::Value>,
+    kwargs: std::collections::HashMap<String, serde_json::Value>,
+}
+
+/// Parametrize values sent to worker processes.
+#[derive(Debug, Serialize)]
+struct WorkerParameters {
+    names: Vec<String>,
+    values: std::collections::HashMap<String, serde_json::Value>,
 }
 
 impl WorkerInput {
     fn from_test_item(item: &TestItem) -> Self {
+        let parameters = item.parameters.as_ref().map(|p| WorkerParameters {
+            names: p.names.clone(),
+            values: p.values.clone(),
+        });
+        let fixture_deps = if item.fixture_deps.is_empty() {
+            None
+        } else {
+            Some(item.fixture_deps.clone())
+        };
+        let markers = if item.markers.is_empty() {
+            None
+        } else {
+            Some(
+                item.markers
+                    .iter()
+                    .map(|m| WorkerMarker {
+                        name: m.name.clone(),
+                        args: m.args.clone(),
+                        kwargs: m.kwargs.clone(),
+                    })
+                    .collect(),
+            )
+        };
         Self {
             id: item.id.clone(),
             path: item.path.to_string_lossy().to_string(),
             function_name: item.function_name.clone(),
             class_name: item.class_name.clone(),
+            parameters,
+            markers,
+            fixture_deps,
         }
     }
 }
@@ -47,6 +95,7 @@ pub struct WorkerResult {
     pub error: Option<String>,
     pub stdout: Option<String>,
     pub stderr: Option<String>,
+    pub reason: Option<String>,
 }
 
 impl WorkerResult {
@@ -62,6 +111,13 @@ impl WorkerResult {
         let outcome = match self.outcome.as_deref() {
             Some("Passed") => TestOutcome::Passed,
             Some("Failed") => TestOutcome::Failed,
+            Some("Skipped") => TestOutcome::Skipped {
+                reason: self.reason.clone(),
+            },
+            Some("XFailed") => TestOutcome::XFailed {
+                reason: self.reason.clone(),
+            },
+            Some("XPassed") => TestOutcome::XPassed,
             _ => TestOutcome::Error {
                 message: self
                     .error
@@ -88,17 +144,70 @@ pub fn parse_worker_result(json_line: &str) -> Result<WorkerResult, serde_json::
 }
 
 /// Locate a Python interpreter on the system.
+///
+/// Checks (in order): `PYO3_PYTHON` env var, active virtual environment,
+/// then common executable names via `PATH`.  On Windows, candidates found
+/// via PATH are validated by running `--version` to skip the Windows Store
+/// app execution aliases which are stubs, not real interpreters.
 pub fn find_python() -> Option<String> {
-    // Check PYO3_PYTHON env var first
+    // Check PYO3_PYTHON env var first (explicit override)
     if let Ok(python) = std::env::var("PYO3_PYTHON") {
         return Some(python);
     }
 
-    // Try common Python executable names
-    let candidates = ["python3", "python", "python3.12", "python3.11"];
+    // Prefer the active virtual environment's Python
+    for env_var in &["VIRTUAL_ENV", "CONDA_PREFIX"] {
+        if let Ok(venv) = std::env::var(env_var) {
+            let venv_path = std::path::PathBuf::from(&venv);
+            // Unix: bin/python, Windows: Scripts/python.exe
+            let candidates = if cfg!(windows) {
+                vec![venv_path.join("Scripts").join("python.exe")]
+            } else {
+                vec![
+                    venv_path.join("bin").join("python3"),
+                    venv_path.join("bin").join("python"),
+                ]
+            };
+            for candidate in candidates {
+                if candidate.is_file() {
+                    return Some(candidate.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    // Try common Python executable names.
+    // Use which_all to iterate over ALL matching paths, not just the first,
+    // because the first match may be a Windows Store stub.
+    let candidates = [
+        "python3",
+        "python",
+        "python3.13",
+        "python3.12",
+        "python3.11",
+    ];
     for candidate in &candidates {
-        if which::which(candidate).is_ok() {
-            return Some(candidate.to_string());
+        if let Ok(paths) = which::which_all(candidate) {
+            for path in paths {
+                let path_str = path.to_string_lossy().to_string();
+                if cfg!(windows) {
+                    // Validate the candidate actually works — the Windows Store
+                    // "app execution aliases" appear on PATH but are stubs that
+                    // print an error instead of running Python.
+                    if let Ok(output) = std::process::Command::new(&path_str)
+                        .arg("--version")
+                        .stdout(std::process::Stdio::piped())
+                        .stderr(std::process::Stdio::piped())
+                        .output()
+                    {
+                        if output.status.success() {
+                            return Some(path_str);
+                        }
+                    }
+                } else {
+                    return Some(path_str);
+                }
+            }
         }
     }
 
@@ -161,9 +270,9 @@ impl SubprocessPool {
             return Vec::new();
         }
 
-        // Write the harness to a temp file
-        let harness_file = match write_harness_to_temp() {
-            Ok(f) => f,
+        // Write the harness to a temp file (persisted so subprocesses can open it)
+        let harness_path = match write_harness_to_temp() {
+            Ok(p) => p,
             Err(e) => {
                 return tests
                     .iter()
@@ -200,7 +309,7 @@ impl SubprocessPool {
                 let injector = &injector;
                 let results_lock = &results_lock;
                 let python_path = &self.python_path;
-                let harness_path = harness_file.path();
+                let harness_path = &harness_path;
                 let timeout = &self.timeout_config;
 
                 scope.spawn(move |_| {
@@ -258,6 +367,9 @@ impl SubprocessPool {
         })
         .expect("Worker threads panicked");
 
+        // Clean up the persisted harness file
+        let _ = std::fs::remove_file(&harness_path);
+
         // Collect results, filling in any gaps with errors
         results
             .into_iter()
@@ -279,15 +391,20 @@ impl SubprocessPool {
     }
 }
 
-/// Write the worker harness to a temporary file and return the handle.
-fn write_harness_to_temp() -> Result<tempfile::NamedTempFile, std::io::Error> {
+/// Write the worker harness to a temporary file and return the persisted path.
+///
+/// On Windows, `NamedTempFile` uses `FILE_FLAG_DELETE_ON_CLOSE` which prevents
+/// other processes from opening the file. We persist it so Python subprocesses
+/// can read it, and callers must delete the file when done.
+fn write_harness_to_temp() -> Result<std::path::PathBuf, std::io::Error> {
     let mut file = tempfile::Builder::new()
         .prefix("fastest_worker_")
         .suffix(".py")
         .tempfile()?;
     file.write_all(WORKER_HARNESS.as_bytes())?;
     file.flush()?;
-    Ok(file)
+    let (_, path) = file.keep().map_err(|e| e.error)?;
+    Ok(path)
 }
 
 /// Spawn a persistent Python worker process.
@@ -302,6 +419,21 @@ fn spawn_worker(python_path: &str, harness_path: &str) -> Result<Child, std::io:
 
 /// Send a test to a worker process and read back the result.
 fn execute_on_worker(worker: &mut Child, test: &TestItem, timeout: &TimeoutConfig) -> TestResult {
+    // Pre-check skip markers in Rust (avoid worker overhead)
+    for marker in &test.markers {
+        if let BuiltinMarker::Skip { reason } = classify_marker(marker) {
+            return TestResult {
+                test_id: test.id.clone(),
+                outcome: TestOutcome::Skipped { reason },
+                duration: Duration::ZERO,
+                output: String::new(),
+                error: None,
+                stdout: String::new(),
+                stderr: String::new(),
+            };
+        }
+    }
+
     let start = Instant::now();
 
     let input = WorkerInput::from_test_item(test);

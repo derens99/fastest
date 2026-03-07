@@ -6,7 +6,6 @@
 
 pub mod builtin;
 pub mod hooks;
-pub mod loader;
 
 use crate::error::{Error, Result};
 use std::any::Any;

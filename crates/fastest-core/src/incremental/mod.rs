@@ -38,11 +38,16 @@ impl IncrementalTester {
 
     /// Return only the tests whose source files have been modified since HEAD.
     ///
-    /// If the repository cannot be opened (e.g. not a git repo), all tests are
-    /// returned unchanged so that a full run is performed.
+    /// If the directory is not a git repository, returns **all** tests so that
+    /// a full run is performed (the caller should warn the user).
     pub fn filter_unchanged(&self, tests: Vec<TestItem>) -> Result<Vec<TestItem>> {
-        let changed = self.get_changed_files()?;
-        Ok(find_affected_tests(&tests, &changed))
+        match self.get_changed_files()? {
+            Some(changed) => Ok(find_affected_tests(&tests, &changed)),
+            None => {
+                // Not a git repo — run everything.
+                Ok(tests)
+            }
+        }
     }
 
     /// Return a mutable reference to the internal result cache.
@@ -50,31 +55,30 @@ impl IncrementalTester {
         &mut self.cache
     }
 
+    /// Returns `true` if the repo root is inside a git repository.
+    pub fn is_git_repo(&self) -> bool {
+        Repository::open(&self.repo_root).is_ok()
+    }
+
     /// Detect files that have changed relative to HEAD using libgit2.
     ///
-    /// Returns every file path (relative to repo root) that differs between
-    /// the HEAD tree and the working directory.  If the path is not a git
-    /// repository, returns an empty set (so all tests will match via the
-    /// impact analysis fallback).
-    fn get_changed_files(&self) -> Result<HashSet<PathBuf>> {
+    /// Returns `None` if the path is not inside a git repository (caller
+    /// should fall back to running all tests).  Returns `Some(set)` with
+    /// the changed file paths on success.
+    fn get_changed_files(&self) -> Result<Option<HashSet<PathBuf>>> {
         let repo = match Repository::open(&self.repo_root) {
             Ok(r) => r,
-            Err(_) => {
-                // Not a git repo — return empty set; callers should treat
-                // "no changed files detected in non-git context" by running
-                // all tests.  The impact module handles this: when no
-                // changed_files match, and no config changed, no tests are
-                // returned — but the caller (filter_unchanged) can decide
-                // to fall back to a full run.  In practice we return the
-                // full set by diffing everything.
-                //
-                // Actually — to be safe, we collect *all* test file paths
-                // so that every test is considered changed.
-                return Ok(HashSet::new());
-            }
+            Err(_) => return Ok(None),
         };
 
-        let head = repo.head()?;
+        let head = match repo.head() {
+            Ok(h) => h,
+            Err(e) if e.code() == git2::ErrorCode::UnbornBranch => {
+                // New repo with no commits — treat as "everything changed"
+                return Ok(None);
+            }
+            Err(e) => return Err(e.into()),
+        };
         let head_commit = head.peel_to_commit()?;
         let head_tree = head_commit.tree()?;
 
@@ -99,7 +103,7 @@ impl IncrementalTester {
             None,
         )?;
 
-        Ok(changed)
+        Ok(Some(changed))
     }
 }
 
@@ -136,9 +140,16 @@ mod tests {
             name: "test_a".to_string(),
         }];
 
-        // Non-git directory → get_changed_files returns empty set → no matches
+        // Non-git directory → all tests returned (fallback to full run)
         let filtered = tester.filter_unchanged(tests).unwrap();
-        // With an empty changed set and no config files, nothing matches
-        assert!(filtered.is_empty());
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].id, "test_a");
+    }
+
+    #[test]
+    fn test_is_git_repo() {
+        let dir = TempDir::new().unwrap();
+        let tester = IncrementalTester::new(dir.path()).unwrap();
+        assert!(!tester.is_git_repo());
     }
 }

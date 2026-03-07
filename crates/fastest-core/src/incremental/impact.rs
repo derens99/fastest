@@ -38,11 +38,29 @@ pub fn find_affected_tests(tests: &[TestItem], changed_files: &HashSet<PathBuf>)
         return tests.to_vec();
     }
 
+    // Git returns paths relative to the repo root, but TestItem::path may be
+    // absolute or relative to CWD (which can differ from the repo root).
+    // Compare by filename suffix: a test is affected if any changed file's
+    // path ends with the same components as the test's path, or vice versa.
     tests
         .iter()
-        .filter(|t| changed_files.contains(&t.path))
+        .filter(|t| {
+            changed_files
+                .iter()
+                .any(|changed| paths_match(&t.path, changed))
+        })
         .cloned()
         .collect()
+}
+
+/// Check whether two paths refer to the same file, tolerating relative vs absolute
+/// differences.  Returns true if one path ends with the other's components.
+fn paths_match(a: &std::path::Path, b: &std::path::Path) -> bool {
+    if a == b {
+        return true;
+    }
+    // Check if one is a suffix of the other
+    a.ends_with(b) || b.ends_with(a)
 }
 
 #[cfg(test)]

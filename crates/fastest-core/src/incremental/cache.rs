@@ -17,8 +17,10 @@ pub struct ResultCache {
 
 impl ResultCache {
     /// Create a new cache with the given maximum capacity.
+    ///
+    /// A capacity of 0 is silently clamped to 1.
     pub fn new(capacity: usize) -> Self {
-        let cap = NonZeroUsize::new(capacity).expect("cache capacity must be > 0");
+        let cap = NonZeroUsize::new(capacity.max(1)).expect("capacity.max(1) is always >= 1");
         Self {
             cache: LruCache::new(cap),
         }

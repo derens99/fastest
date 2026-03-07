@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
 
 [project]
 name = "fastest-runner"
@@ -8,7 +8,7 @@ version = "2.0.0"
 description = "Blazing-fast Python test runner written in Rust"
 readme = "README.md"
 authors = [
-    {name = "Fastest Team", email = "hello@fastest.dev"}
+    {name = "Fastest Team", email = "derens99@gmail.com"}
 ]
 license = {text = "MIT"}
 classifiers = [
@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Programming Language :: Rust",
     "Topic :: Software Development :: Testing",
     "Topic :: Software Development :: Testing :: Unit",
@@ -47,3 +48,8 @@ Documentation = "https://github.com/derens99/fastest/tree/main/docs"
 Repository = "https://github.com/derens99/fastest"
 Issues = "https://github.com/derens99/fastest/issues"
 Changelog = "https://github.com/derens99/fastest/blob/main/CHANGELOG.md"
+
+[tool.maturin]
+bindings = "bin"
+manifest-path = "crates/fastest-cli/Cargo.toml"
+strip = true

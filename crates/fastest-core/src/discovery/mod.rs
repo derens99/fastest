@@ -3,7 +3,6 @@
 //! Recursively walks directories to find Python test files, then parses them
 //! in parallel using rayon to extract test items.
 
-pub mod cache;
 pub mod parser;
 
 use crate::config::Config;
@@ -50,6 +49,33 @@ pub fn discover_tests(paths: &[PathBuf], config: &Config) -> Result<Vec<TestItem
 ///
 /// Filters files based on the configuration's `python_files` patterns
 /// (e.g., `test_*.py`, `*_test.py`).
+/// Directories that should never be traversed during test discovery.
+const SKIP_DIRS: &[&str] = &[
+    ".venv",
+    "venv",
+    ".env",
+    "env",
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".hg",
+    ".svn",
+    ".tox",
+    ".nox",
+    ".mypy_cache",
+    ".pytest_cache",
+    "dist",
+    "build",
+    ".eggs",
+];
+
+/// Check whether a directory name should be skipped during traversal.
+///
+/// Matches exact names in [`SKIP_DIRS`] and any directory ending with `.egg-info`.
+pub(crate) fn should_skip_dir(name: &str) -> bool {
+    SKIP_DIRS.contains(&name) || name.ends_with(".egg-info")
+}
+
 fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
     let mut test_files = Vec::new();
 
@@ -61,7 +87,15 @@ fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
                 }
             }
         } else if path.is_dir() {
-            for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+            let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
+                if e.file_type().is_dir() {
+                    if let Some(name) = e.file_name().to_str() {
+                        return !should_skip_dir(name);
+                    }
+                }
+                true
+            });
+            for entry in walker.filter_map(|e| e.ok()) {
                 if entry.file_type().is_file() {
                     if let Some(name) = entry.file_name().to_str() {
                         if config.is_test_file(name) {
@@ -74,49 +108,6 @@ fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
     }
 
     test_files
-}
-
-/// Discover tests with caching support.
-///
-/// Uses the discovery cache to skip re-parsing files that have not changed.
-/// Falls back to full parsing for cache misses or changed files.
-pub fn discover_tests_cached(
-    paths: &[PathBuf],
-    config: &Config,
-    cache: &mut cache::DiscoveryCache,
-) -> Result<Vec<TestItem>> {
-    let test_files = collect_test_files(paths, config);
-
-    let results: Vec<(PathBuf, Vec<u8>)> = test_files
-        .into_iter()
-        .filter_map(|path| fs::read(&path).ok().map(|content| (path, content)))
-        .collect();
-
-    let mut all_items = Vec::new();
-
-    for (path, content) in &results {
-        let hash = cache::hash_content(content);
-
-        if let Some(cached_items) = cache.get(path, hash) {
-            all_items.extend(cached_items.clone());
-        } else {
-            let source = match std::str::from_utf8(content) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-            match parser::parse_test_file(source, path) {
-                Ok(items) => {
-                    cache.insert(path.clone(), hash, items.clone());
-                    all_items.extend(items);
-                }
-                Err(e) => {
-                    eprintln!("Warning: {}", e);
-                }
-            }
-        }
-    }
-
-    Ok(all_items)
 }
 
 #[cfg(test)]

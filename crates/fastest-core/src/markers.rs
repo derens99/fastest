@@ -74,6 +74,13 @@ pub fn filter_by_markers(tests: &[TestItem], expr: &str) -> Vec<TestItem> {
         return tests.to_vec();
     }
     let tokens = tokenize(expr);
+    if tokens.is_empty() {
+        eprintln!(
+            "Warning: marker expression {:?} produced no valid tokens, running all tests",
+            expr
+        );
+        return tests.to_vec();
+    }
     let ast = parse_expression(&tokens);
     tests
         .iter()
@@ -95,6 +102,13 @@ pub fn filter_by_keyword(tests: &[TestItem], expr: &str) -> Vec<TestItem> {
         return tests.to_vec();
     }
     let tokens = tokenize(expr);
+    if tokens.is_empty() {
+        eprintln!(
+            "Warning: keyword expression {:?} produced no valid tokens, running all tests",
+            expr
+        );
+        return tests.to_vec();
+    }
     let ast = parse_expression(&tokens);
     tests
         .iter()
@@ -206,6 +220,8 @@ enum Expr {
     Not(Box<Expr>),
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
+    /// Always evaluates to `false`. Used for unexpected/invalid tokens.
+    Never,
 }
 
 /// Parser state wrapping a token slice with a cursor position.
@@ -278,10 +294,13 @@ impl<'a> Parser<'a> {
                 self.advance();
                 Expr::Name(name)
             }
-            _ => {
-                // Fallback: treat as empty name (should not happen with valid input)
+            other => {
+                // Unexpected token — warn and skip it
+                if let Some(tok) = other {
+                    eprintln!("Warning: unexpected token in expression: {:?}", tok);
+                }
                 self.advance();
-                Expr::Name(String::new())
+                Expr::Never
             }
         }
     }
@@ -300,6 +319,7 @@ fn evaluate(expr: &Expr, matcher: &dyn Fn(&str) -> bool) -> bool {
         Expr::Not(inner) => !evaluate(inner, matcher),
         Expr::And(left, right) => evaluate(left, matcher) && evaluate(right, matcher),
         Expr::Or(left, right) => evaluate(left, matcher) || evaluate(right, matcher),
+        Expr::Never => false,
     }
 }
 

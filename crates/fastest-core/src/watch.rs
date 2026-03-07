@@ -32,14 +32,24 @@ impl TestWatcher {
     ///
     /// This function blocks the calling thread until the underlying watcher
     /// channel is closed (e.g. if the watcher is dropped from another thread).
-    pub fn watch<F>(&self, path: &Path, mut on_change: F) -> Result<()>
+    pub fn watch<F>(&self, path: &Path, on_change: F) -> Result<()>
+    where
+        F: FnMut(&[PathBuf]) + Send + 'static,
+    {
+        self.watch_paths(&[path.to_path_buf()], on_change)
+    }
+
+    /// Start watching multiple paths recursively for `.py` file changes.
+    pub fn watch_paths<F>(&self, paths: &[PathBuf], mut on_change: F) -> Result<()>
     where
         F: FnMut(&[PathBuf]) + Send + 'static,
     {
         let (tx, rx) = mpsc::channel::<notify::Result<Event>>();
 
         let mut watcher = RecommendedWatcher::new(tx, Config::default())?;
-        watcher.watch(path, RecursiveMode::Recursive)?;
+        for path in paths {
+            watcher.watch(path, RecursiveMode::Recursive)?;
+        }
 
         let debounce = Duration::from_millis(self.debounce_ms);
 
@@ -60,8 +70,7 @@ impl TestWatcher {
             }
         }
 
-        // Keep watcher alive until the loop ends
-        drop(watcher);
+        drop(watcher); // prevent early drop — watcher must outlive the loop
         Ok(())
     }
 

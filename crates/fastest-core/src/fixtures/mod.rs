@@ -117,8 +117,7 @@ pub fn resolve_fixture_order(
         }
     }
 
-    let total = ts.len();
-    let mut order = Vec::with_capacity(total);
+    let mut order = Vec::with_capacity(ts.len());
 
     while !ts.is_empty() {
         let batch = ts.pop_all();
@@ -130,19 +129,6 @@ pub fn resolve_fixture_order(
         }
         order.extend(batch);
     }
-
-    // Filter to only fixtures that were actually requested or needed
-    let order: Vec<String> = order
-        .into_iter()
-        .filter(|name| visited.contains(name))
-        .collect();
-
-    debug_assert!(
-        order.len() == total,
-        "Expected {} fixtures in order, got {}",
-        total,
-        order.len()
-    );
 
     Ok(order)
 }

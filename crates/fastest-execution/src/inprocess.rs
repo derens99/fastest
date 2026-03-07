@@ -7,6 +7,8 @@
 use std::ffi::CString;
 use std::time::Instant;
 
+use fastest_core::fixtures::builtin::generate_builtin_code;
+use fastest_core::markers::{classify_marker, BuiltinMarker};
 use fastest_core::model::{TestItem, TestOutcome, TestResult};
 use pyo3::ffi::c_str;
 use pyo3::prelude::*;
@@ -39,6 +41,48 @@ impl InProcessExecutor {
 
     /// Run a single test item using the embedded Python interpreter.
     fn run_single(&self, test: &TestItem) -> TestResult {
+        // Check for skip/skipif markers BEFORE execution
+        for marker in &test.markers {
+            match classify_marker(marker) {
+                BuiltinMarker::Skip { reason } => {
+                    return TestResult {
+                        test_id: test.id.clone(),
+                        outcome: TestOutcome::Skipped { reason },
+                        duration: std::time::Duration::ZERO,
+                        output: String::new(),
+                        error: None,
+                        stdout: String::new(),
+                        stderr: String::new(),
+                    };
+                }
+                BuiltinMarker::Skipif { condition, reason } => {
+                    let should_skip = Python::with_gil(|py| {
+                        let setup = CString::new("import sys, os, platform").unwrap();
+                        let _ = py.run(&setup, None, None);
+                        match CString::new(condition.as_str()) {
+                            Ok(cond_cstr) => match py.eval(&cond_cstr, None, None) {
+                                Ok(result) => result.is_truthy().unwrap_or(false),
+                                Err(_) => false,
+                            },
+                            Err(_) => false,
+                        }
+                    });
+                    if should_skip {
+                        return TestResult {
+                            test_id: test.id.clone(),
+                            outcome: TestOutcome::Skipped { reason },
+                            duration: std::time::Duration::ZERO,
+                            output: String::new(),
+                            error: None,
+                            stdout: String::new(),
+                            stderr: String::new(),
+                        };
+                    }
+                }
+                _ => {}
+            }
+        }
+
         let timer = TestTimer::start(self.timeout_config.clone());
         let start = Instant::now();
 
@@ -121,7 +165,7 @@ impl InProcessExecutor {
 
         let duration = start.elapsed();
 
-        TestResult {
+        let mut result = TestResult {
             test_id: test.id.clone(),
             outcome,
             duration,
@@ -129,7 +173,30 @@ impl InProcessExecutor {
             error,
             stdout: captured.stdout,
             stderr: captured.stderr,
+        };
+
+        // After execution, check for xfail markers and transform outcome
+        let xfail_reason = test.markers.iter().find_map(|m| {
+            if let BuiltinMarker::Xfail { reason } = classify_marker(m) {
+                Some(reason)
+            } else {
+                None
+            }
+        });
+
+        if let Some(reason) = xfail_reason {
+            result.outcome = match result.outcome {
+                TestOutcome::Failed => TestOutcome::XFailed { reason },
+                TestOutcome::Passed => TestOutcome::XPassed,
+                other => other,
+            };
+            // XFailed should not have error field (it's expected)
+            if matches!(result.outcome, TestOutcome::XFailed { .. }) {
+                result.error = None;
+            }
         }
+
+        result
     }
 }
 
@@ -152,6 +219,48 @@ fn extract_captured_output(py: Python<'_>) -> CapturedOutput {
     CapturedOutput::from_strings(stdout, stderr)
 }
 
+/// Convert a JSON value to a Python literal expression.
+fn json_value_to_python(val: &serde_json::Value) -> String {
+    match val {
+        serde_json::Value::Null => "None".to_string(),
+        serde_json::Value::Bool(b) => {
+            if *b {
+                "True".to_string()
+            } else {
+                "False".to_string()
+            }
+        }
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => {
+            format!("'{}'", escape_for_python_string(s))
+        }
+        serde_json::Value::Array(arr) => {
+            let items: Vec<String> = arr.iter().map(json_value_to_python).collect();
+            format!("[{}]", items.join(", "))
+        }
+        serde_json::Value::Object(map) => {
+            let items: Vec<String> = map
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "'{}': {}",
+                        escape_for_python_string(k),
+                        json_value_to_python(v)
+                    )
+                })
+                .collect();
+            format!("{{{}}}", items.join(", "))
+        }
+    }
+}
+
+/// Escape a string for safe embedding in a Python single-quoted string literal.
+fn escape_for_python_string(s: &str) -> String {
+    s.replace('\'', "\\'")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+}
+
 /// Build the Python code string needed to execute a test item.
 ///
 /// The generated code:
@@ -160,11 +269,12 @@ fn extract_captured_output(py: Python<'_>) -> CapturedOutput {
 /// 3. For class-based tests: instantiates the class, calls the method
 /// 4. For function tests: calls the function directly
 pub fn build_test_code(test: &TestItem) -> String {
-    let path_str = test.path.to_string_lossy().replace('\\', "/");
+    // Escape characters that could break out of Python string literals
+    let path_str = escape_for_python_string(&test.path.to_string_lossy().replace('\\', "/"));
     let parent_dir = test
         .path
         .parent()
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
+        .map(|p| escape_for_python_string(&p.to_string_lossy().replace('\\', "/")))
         .unwrap_or_default();
 
     let module_name = test
@@ -173,34 +283,214 @@ pub fn build_test_code(test: &TestItem) -> String {
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".into());
 
+    // Validate module_name is a valid Python identifier to prevent code injection
+    let module_name = if module_name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        && !module_name.is_empty()
+        && !module_name.starts_with(|c: char| c.is_ascii_digit())
+    {
+        module_name
+    } else {
+        // Sanitize: keep only valid identifier characters
+        let sanitized: String = module_name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect();
+        if sanitized.is_empty() {
+            "unknown".to_string()
+        } else {
+            sanitized
+        }
+    };
+
+    // Python identifiers cannot contain single quotes, but escape defensively
+    let func_name = test.function_name.replace('\'', "\\'");
+
+    // Determine which fixture_deps are actual fixtures (not parametrize params)
+    let param_names: std::collections::HashSet<&str> = test
+        .parameters
+        .as_ref()
+        .map(|p| p.names.iter().map(|n| n.as_str()).collect())
+        .unwrap_or_default();
+
+    // Build fixture setup code and kwargs
+    let mut fixture_setup_parts: Vec<String> = Vec::new();
+    let mut fixture_cleanup_parts: Vec<String> = Vec::new();
+    let mut fixture_kwarg_names: Vec<String> = Vec::new();
+    let mut conftest_fixture_names: Vec<String> = Vec::new();
+
+    for dep in &test.fixture_deps {
+        if dep == "self" || dep == "request" || param_names.contains(dep.as_str()) {
+            continue;
+        }
+        if let Some(code) = generate_builtin_code(dep) {
+            fixture_setup_parts.push(code);
+            fixture_kwarg_names.push(dep.clone());
+            if dep == "monkeypatch" {
+                fixture_cleanup_parts.push("monkeypatch.undo()".to_string());
+            } else if dep == "capsys" {
+                fixture_cleanup_parts.push("capsys._restore()".to_string());
+            }
+        } else {
+            conftest_fixture_names.push(dep.clone());
+            // Don't add to fixture_kwarg_names — conftest fixtures use dynamic kwargs
+        }
+    }
+
+    // Generate conftest loading code for non-builtin fixtures
+    // Uses a dynamic dict (__fastest_fix_kwargs) so unresolved deps
+    // don't cause NameError — the function can use its default values.
+    let has_conftest_fixtures = !conftest_fixture_names.is_empty();
+    if has_conftest_fixtures {
+        fixture_setup_parts.push(
+            "__fastest_fix_kwargs = {}\n\
+             import importlib.util as __fastest_ilu\n\
+             __fastest_cd = __fastest_test_dir\n\
+             __fastest_cmod = None\n\
+             while True:\n\
+             \x20   __fastest_cp = os.path.join(__fastest_cd, 'conftest.py')\n\
+             \x20   if os.path.exists(__fastest_cp):\n\
+             \x20       if 'conftest' in sys.modules:\n\
+             \x20           del sys.modules['conftest']\n\
+             \x20       import pytest as __fastest_pt\n\
+             \x20       __fastest_orig_fix = __fastest_pt.fixture\n\
+             \x20       __fastest_pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)\n\
+             \x20       __fastest_cspec = __fastest_ilu.spec_from_file_location('conftest', __fastest_cp)\n\
+             \x20       __fastest_cmod = __fastest_ilu.module_from_spec(__fastest_cspec)\n\
+             \x20       __fastest_cspec.loader.exec_module(__fastest_cmod)\n\
+             \x20       __fastest_pt.fixture = __fastest_orig_fix\n\
+             \x20       break\n\
+             \x20   __fastest_pd = os.path.dirname(__fastest_cd)\n\
+             \x20   if __fastest_pd == __fastest_cd:\n\
+             \x20       break\n\
+             \x20   __fastest_cd = __fastest_pd"
+                .to_string(),
+        );
+        for name in &conftest_fixture_names {
+            fixture_setup_parts.push(format!(
+                "if __fastest_cmod and hasattr(__fastest_cmod, '{name}'):\n\
+                 \x20   __fastest_fix_kwargs['{name}'] = __fastest_cmod.{name}()"
+            ));
+        }
+    }
+
+    let fixture_setup = if fixture_setup_parts.is_empty() {
+        String::new()
+    } else {
+        fixture_setup_parts.join("\n") + "\n"
+    };
+
+    // Merge parametrize kwargs with fixture kwargs
+    let mut all_kwargs_parts: Vec<String> = Vec::new();
+    if let Some(ref params) = test.parameters {
+        for name in &params.names {
+            if let Some(val) = params.values.get(name) {
+                all_kwargs_parts.push(format!("{}={}", name, json_value_to_python(val)));
+            }
+        }
+    }
+    for name in &fixture_kwarg_names {
+        all_kwargs_parts.push(format!("{name}={name}"));
+    }
+    if has_conftest_fixtures {
+        all_kwargs_parts.push("**__fastest_fix_kwargs".to_string());
+    }
+    let kwargs = all_kwargs_parts.join(", ");
+
+    // Build cleanup code string
+    let cleanup_code = fixture_cleanup_parts.join("\n\x20   ");
+
+    // Build the complete call expression with setup/teardown and fixture cleanup
     let call_code = if let Some(ref class_name) = test.class_name {
+        let class_name = class_name.replace('\'', "\\'");
+        let async_part = if test.is_async {
+            "\n\
+             \x20   if asyncio.iscoroutine(__fastest_result):\n\
+             \x20       asyncio.run(__fastest_result)"
+        } else {
+            ""
+        };
+        let cleanup_part = if !fixture_cleanup_parts.is_empty() {
+            format!("\n\x20   {cleanup_code}")
+        } else {
+            String::new()
+        };
+        let async_import = if test.is_async {
+            "import asyncio\n"
+        } else {
+            ""
+        };
         format!(
-            "__fastest_cls = getattr(__fastest_mod, '{class_name}')\n\
+            "{async_import}\
+             __fastest_cls = getattr(__fastest_mod, '{class_name}')\n\
+             if hasattr(__fastest_cls, 'setup_class'):\n\
+             \x20   __fastest_cls.setup_class()\n\
              __fastest_instance = __fastest_cls()\n\
-             getattr(__fastest_instance, '{func_name}')()",
-            class_name = class_name,
-            func_name = test.function_name,
+             try:\n\
+             \x20   if hasattr(__fastest_instance, 'setup_method'):\n\
+             \x20       __fastest_instance.setup_method()\n\
+             \x20   __fastest_result = getattr(__fastest_instance, '{func_name}')({kwargs}){async_part}\n\
+             finally:\n\
+             \x20   if hasattr(__fastest_instance, 'teardown_method'):\n\
+             \x20       __fastest_instance.teardown_method(){cleanup_part}"
+        )
+    } else if !fixture_cleanup_parts.is_empty() && test.is_async {
+        format!(
+            "import asyncio\n\
+             try:\n\
+             \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
+             \x20   if asyncio.iscoroutine(__fastest_result):\n\
+             \x20       asyncio.run(__fastest_result)\n\
+             finally:\n\
+             \x20   {cleanup_code}"
+        )
+    } else if !fixture_cleanup_parts.is_empty() {
+        format!(
+            "try:\n\
+             \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
+             finally:\n\
+             \x20   {cleanup_code}"
+        )
+    } else if test.is_async {
+        format!(
+            "import asyncio\n\
+             __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
+             if asyncio.iscoroutine(__fastest_result):\n\
+             \x20   asyncio.run(__fastest_result)"
         )
     } else {
+        format!("__fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})")
+    };
+
+    let parent_path_setup = if parent_dir.is_empty() {
+        String::new()
+    } else {
         format!(
-            "getattr(__fastest_mod, '{func_name}')()",
-            func_name = test.function_name,
+            "if '{parent}' not in sys.path:\n\
+             \x20   sys.path.insert(0, '{parent}')\n",
+            parent = parent_dir,
         )
     };
 
     format!(
-        r#"import sys, importlib, os
-__fastest_test_dir = os.path.dirname(os.path.abspath(r'{path}'))
-if __fastest_test_dir not in sys.path:
-    sys.path.insert(0, __fastest_test_dir)
-if r'{parent}' and r'{parent}' not in sys.path:
-    sys.path.insert(0, r'{parent}')
-__fastest_mod = importlib.import_module('{module}')
-importlib.reload(__fastest_mod)
-{call}"#,
+        "import sys, importlib, os\n\
+         __fastest_test_dir = os.path.dirname(os.path.abspath('{path}'))\n\
+         if __fastest_test_dir not in sys.path:\n\
+         \x20   sys.path.insert(0, __fastest_test_dir)\n\
+         {parent_setup}\
+         __fastest_mod = importlib.import_module('{module}')\n\
+         importlib.reload(__fastest_mod)\n\
+         {fixture_setup}\
+         {call}",
         path = path_str,
-        parent = parent_dir,
+        parent_setup = parent_path_setup,
         module = module_name,
+        fixture_setup = fixture_setup,
         call = call_code,
     )
 }
@@ -235,9 +525,10 @@ mod tests {
         assert!(code.contains("test_math"));
         assert!(code.contains("importlib.reload"));
         assert!(code.contains("getattr(__fastest_mod, 'test_add')()"));
-        // Should NOT contain class instantiation
+        // Should NOT contain class instantiation or async handling
         assert!(!code.contains("__fastest_cls"));
         assert!(!code.contains("__fastest_instance"));
+        assert!(!code.contains("asyncio"));
     }
 
     #[test]
@@ -250,6 +541,18 @@ mod tests {
         assert!(code.contains("getattr(__fastest_mod, 'TestCalc')"));
         assert!(code.contains("__fastest_instance = __fastest_cls()"));
         assert!(code.contains("getattr(__fastest_instance, 'test_add')()"));
+        assert!(!code.contains("asyncio"));
+    }
+
+    #[test]
+    fn test_build_test_code_async_function() {
+        let mut item = make_test_item("test_async_add", None, "tests/test_async.py");
+        item.is_async = true;
+        let code = build_test_code(&item);
+
+        assert!(code.contains("import asyncio"));
+        assert!(code.contains("asyncio.iscoroutine(__fastest_result)"));
+        assert!(code.contains("asyncio.run(__fastest_result)"));
     }
 
     #[test]

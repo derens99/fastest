@@ -20,7 +20,7 @@ use fastest_core::{
 use fastest_execution::HybridExecutor;
 
 use crate::output::{format_results, print_summary, write_junit_xml, OutputFormat};
-use crate::progress::create_progress_bar;
+use crate::progress::create_spinner;
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -229,6 +229,12 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let tests = if cli.incremental {
         let cwd = std::env::current_dir()?;
         let tester = IncrementalTester::new(&cwd)?;
+        if !tester.is_git_repo() {
+            eprintln!(
+                "{}: --incremental requires a git repository; running all tests",
+                "warning".yellow().bold()
+            );
+        }
         tester.filter_unchanged(tests)?
     } else {
         tests
@@ -253,10 +259,11 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let executor = HybridExecutor::with_workers(cli.workers);
 
     let results = if cli.exitfirst {
-        // Run one at a time, stop on first failure
+        // Run tests one at a time via in-process executor, stop on first failure.
+        let inprocess = executor.inprocess();
         let mut results = Vec::new();
         for test in &tests {
-            let batch = executor.execute(std::slice::from_ref(test));
+            let batch = inprocess.execute(std::slice::from_ref(test));
             let result = batch.into_iter().next().unwrap();
             let failed = !result.passed();
             results.push(result);
@@ -266,14 +273,10 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         }
         results
     } else if !cli.no_progress && !cli.verbose {
-        // Run with progress bar
-        let pb = create_progress_bar(tests.len());
+        // Run with spinner (execution is synchronous, results arrive in bulk)
+        let spinner = create_spinner(tests.len());
         let results = executor.execute(&tests);
-        for (i, result) in results.iter().enumerate() {
-            pb.set_position((i + 1) as u64);
-            pb.set_message(result.test_id.clone());
-        }
-        pb.finish_and_clear();
+        spinner.finish_and_clear();
         results
     } else {
         executor.execute(&tests)
@@ -304,11 +307,13 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // Shutdown plugins
     plugins.shutdown_all()?;
 
-    // Return success if no failures/errors
+    // Return success if no failures/errors (XPassed is a failure per pytest conventions)
     let has_failures = results.iter().any(|r| {
         matches!(
             r.outcome,
-            fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+            fastest_core::TestOutcome::Failed
+                | fastest_core::TestOutcome::XPassed
+                | fastest_core::TestOutcome::Error { .. }
         )
     });
     Ok(!has_failures)
@@ -318,16 +323,54 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 // Watch mode
 // ---------------------------------------------------------------------------
 
+/// Configuration snapshot for watch mode re-runs (captured from CLI args).
+#[derive(Clone)]
+struct WatchConfig {
+    paths: Vec<String>,
+    keyword: Option<String>,
+    marker: Option<String>,
+    output_format: String,
+    junit_xml: Option<String>,
+    verbose: bool,
+    no_plugins: bool,
+    workers: Option<usize>,
+    exitfirst: bool,
+    incremental: bool,
+}
+
+impl WatchConfig {
+    fn from_cli(cli: &Cli) -> Self {
+        Self {
+            paths: cli.paths.clone(),
+            keyword: cli.keyword.clone(),
+            marker: cli.marker.clone(),
+            output_format: cli.output_format.clone(),
+            junit_xml: cli.junit_xml.clone(),
+            verbose: cli.verbose,
+            no_plugins: cli.no_plugins,
+            workers: cli.workers,
+            exitfirst: cli.exitfirst,
+            incremental: cli.incremental,
+        }
+    }
+}
+
 fn run_watch(cli: &Cli) -> anyhow::Result<()> {
     eprintln!("{} watching for changes...", "fastest".cyan().bold());
 
     let watcher = TestWatcher::new(300); // 300ms debounce
-    let watch_path = PathBuf::from(cli.paths.first().map(|s| s.as_str()).unwrap_or("."));
+    let watch_paths: Vec<PathBuf> = if cli.paths.is_empty() {
+        vec![PathBuf::from(".")]
+    } else {
+        cli.paths.iter().map(PathBuf::from).collect()
+    };
 
     // Initial run
     let _ = run_tests(cli);
 
-    watcher.watch(&watch_path, |changed_paths| {
+    let watch_cfg = WatchConfig::from_cli(cli);
+
+    watcher.watch_paths(&watch_paths, move |changed_paths| {
         eprintln!(
             "\n{} {} file{} changed, re-running tests...",
             "fastest".cyan().bold(),
@@ -337,10 +380,92 @@ fn run_watch(cli: &Cli) -> anyhow::Result<()> {
         for path in changed_paths {
             eprintln!("  {}", path.display().to_string().dimmed());
         }
-        // Note: In watch mode we can't easily re-run with the full CLI context
-        // because the callback doesn't have access to &Cli. A full implementation
-        // would clone the necessary config. For now, this triggers re-discovery.
+        if let Err(e) = run_watch_cycle(&watch_cfg) {
+            eprintln!("{}: {}", "error".red().bold(), e);
+        }
     })?;
 
+    Ok(())
+}
+
+/// Execute a test cycle from a watch-mode re-run.
+fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
+    let start = Instant::now();
+    let config = Config::load()?;
+
+    let mut plugins = if cfg.no_plugins {
+        PluginManager::new()
+    } else {
+        PluginManager::with_builtins()?
+    };
+    plugins.initialize_all()?;
+
+    let search_paths: Vec<PathBuf> = cfg.paths.iter().map(PathBuf::from).collect();
+    let tests = discover_tests(&search_paths, &config)?;
+    let tests = expand_parametrized_tests(tests)?;
+
+    let tests = if let Some(ref expr) = cfg.marker {
+        filter_by_markers(&tests, expr)
+    } else {
+        tests
+    };
+    let tests = if let Some(ref expr) = cfg.keyword {
+        filter_by_keyword(&tests, expr)
+    } else {
+        tests
+    };
+
+    // Incremental filtering
+    let tests = if cfg.incremental {
+        let cwd = std::env::current_dir()?;
+        let tester = IncrementalTester::new(&cwd)?;
+        tester.filter_unchanged(tests)?
+    } else {
+        tests
+    };
+
+    if tests.is_empty() {
+        eprintln!("{}", "no tests collected".yellow());
+        plugins.shutdown_all()?;
+        return Ok(());
+    }
+
+    eprintln!(
+        "{} {} collecting {} test{}...",
+        "fastest".cyan().bold(),
+        format!("v{}", fastest_core::VERSION).dimmed(),
+        tests.len(),
+        if tests.len() == 1 { "" } else { "s" }
+    );
+
+    let executor = HybridExecutor::with_workers(cfg.workers);
+
+    let results = if cfg.exitfirst {
+        let inprocess = executor.inprocess();
+        let mut results = Vec::new();
+        for test in &tests {
+            let batch = inprocess.execute(std::slice::from_ref(test));
+            let result = batch.into_iter().next().unwrap();
+            let failed = !result.passed();
+            results.push(result);
+            if failed {
+                break;
+            }
+        }
+        results
+    } else {
+        executor.execute(&tests)
+    };
+
+    let output_format =
+        OutputFormat::from_str_with_junit(Some(&cfg.output_format), cfg.junit_xml.clone());
+    let formatted = format_results(&results, &output_format, cfg.verbose);
+    if !formatted.is_empty() {
+        println!("{}", formatted);
+    }
+
+    let duration = start.elapsed();
+    print_summary(&results, duration);
+    plugins.shutdown_all()?;
     Ok(())
 }

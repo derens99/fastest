@@ -1,15 +1,20 @@
-# Build stage
-FROM rust:slim AS builder
+# Build stage — use python:3.12-slim so PyO3 compiles against the same
+# Python version used at runtime.
+FROM python:3.12-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies (OpenSSL for git2, Python for PyO3)
+# Install Rust and build dependencies
 RUN apt-get update && apt-get install -y \
+    curl \
     pkg-config \
     libssl-dev \
     python3-dev \
-    python3 \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Rust via rustup
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+ENV PATH="/root/.cargo/bin:${PATH}"
 
 # Copy workspace files
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./

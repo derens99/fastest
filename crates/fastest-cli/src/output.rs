@@ -108,18 +108,30 @@ fn format_json(results: &[TestResult]) -> String {
 
 /// Count summary: "N passed, N failed, N skipped"
 fn format_count(results: &[TestResult]) -> String {
-    let (passed, failed, skipped, errors) = count_outcomes(results);
-    format!(
-        "{} passed, {} failed, {} skipped, {} errors",
-        passed, failed, skipped, errors
-    )
+    let c = count_outcomes(results);
+    let mut parts = vec![
+        format!("{} passed", c.passed),
+        format!("{} failed", c.failed),
+        format!("{} skipped", c.skipped),
+        format!("{} errors", c.errors),
+    ];
+    if c.xfailed > 0 {
+        parts.push(format!("{} xfailed", c.xfailed));
+    }
+    if c.xpassed > 0 {
+        parts.push(format!("{} xpassed", c.xpassed));
+    }
+    parts.join(", ")
 }
 
 /// Write JUnit XML to a file.
 ///
 /// Produces a minimal JUnit XML report compatible with most CI systems.
 pub fn write_junit_xml(results: &[TestResult], path: &str) -> anyhow::Result<()> {
-    let (_passed, failed, skipped, errors) = count_outcomes(results);
+    let c = count_outcomes(results);
+    let failed = c.failed;
+    let skipped = c.skipped;
+    let errors = c.errors;
     let total_time: f64 = results.iter().map(|r| r.duration.as_secs_f64()).sum();
 
     let mut file = std::fs::File::create(Path::new(path))?;
@@ -207,22 +219,28 @@ pub fn write_junit_xml(results: &[TestResult], path: &str) -> anyhow::Result<()>
 ///
 /// Example: "4 passed, 1 failed in 2.34s"
 pub fn print_summary(results: &[TestResult], duration: Duration) {
-    let (passed, failed, skipped, errors) = count_outcomes(results);
+    let c = count_outcomes(results);
     let total = results.len();
 
     let mut parts: Vec<String> = Vec::new();
 
-    if passed > 0 {
-        parts.push(format!("{} passed", passed).green().bold().to_string());
+    if c.passed > 0 {
+        parts.push(format!("{} passed", c.passed).green().bold().to_string());
     }
-    if failed > 0 {
-        parts.push(format!("{} failed", failed).red().bold().to_string());
+    if c.failed > 0 {
+        parts.push(format!("{} failed", c.failed).red().bold().to_string());
     }
-    if skipped > 0 {
-        parts.push(format!("{} skipped", skipped).yellow().to_string());
+    if c.skipped > 0 {
+        parts.push(format!("{} skipped", c.skipped).yellow().to_string());
     }
-    if errors > 0 {
-        parts.push(format!("{} errors", errors).red().to_string());
+    if c.xfailed > 0 {
+        parts.push(format!("{} xfailed", c.xfailed).yellow().to_string());
+    }
+    if c.xpassed > 0 {
+        parts.push(format!("{} xpassed", c.xpassed).yellow().bold().to_string());
+    }
+    if c.errors > 0 {
+        parts.push(format!("{} errors", c.errors).red().to_string());
     }
 
     let summary = if parts.is_empty() {
@@ -231,7 +249,8 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
         parts.join(", ")
     };
 
-    let decoration = if failed > 0 || errors > 0 {
+    let has_failures = c.failed > 0 || c.errors > 0 || c.xpassed > 0;
+    let decoration = if has_failures {
         "=".repeat(60).red().to_string()
     } else {
         "=".repeat(60).green().to_string()
@@ -251,23 +270,39 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Outcome counts for summary display.
+struct OutcomeCounts {
+    passed: usize,
+    failed: usize,
+    skipped: usize,
+    errors: usize,
+    xfailed: usize,
+    xpassed: usize,
+}
+
 /// Count outcomes by category.
-fn count_outcomes(results: &[TestResult]) -> (usize, usize, usize, usize) {
-    let mut passed = 0usize;
-    let mut failed = 0usize;
-    let mut skipped = 0usize;
-    let mut errors = 0usize;
+fn count_outcomes(results: &[TestResult]) -> OutcomeCounts {
+    let mut c = OutcomeCounts {
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        errors: 0,
+        xfailed: 0,
+        xpassed: 0,
+    };
 
     for r in results {
         match &r.outcome {
-            TestOutcome::Passed | TestOutcome::XFailed { .. } => passed += 1,
-            TestOutcome::Failed | TestOutcome::XPassed => failed += 1,
-            TestOutcome::Skipped { .. } => skipped += 1,
-            TestOutcome::Error { .. } => errors += 1,
+            TestOutcome::Passed => c.passed += 1,
+            TestOutcome::Failed => c.failed += 1,
+            TestOutcome::Skipped { .. } => c.skipped += 1,
+            TestOutcome::Error { .. } => c.errors += 1,
+            TestOutcome::XFailed { .. } => c.xfailed += 1,
+            TestOutcome::XPassed => c.xpassed += 1,
         }
     }
 
-    (passed, failed, skipped, errors)
+    c
 }
 
 /// Split a test ID like "tests/test_math.py::TestCalc::test_add" into
@@ -281,9 +316,15 @@ fn split_test_id(id: &str) -> (String, String) {
     }
 }
 
-/// Escape special XML characters.
+/// Escape special XML characters and strip control characters illegal in XML 1.0.
 fn xml_escape(s: &str) -> String {
-    s.replace('&', "&amp;")
+    s.chars()
+        .filter(|&c| {
+            // XML 1.0 legal characters: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+            matches!(c, '\u{09}' | '\u{0A}' | '\u{0D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
+        })
+        .collect::<String>()
+        .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")

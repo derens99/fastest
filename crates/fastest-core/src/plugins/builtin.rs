@@ -20,256 +20,116 @@ fn standard_result(plugin_name: &str, hook: &str) -> HookResult {
 }
 
 // ---------------------------------------------------------------------------
-// FixturePlugin (priority 100)
+// Declarative macro for built-in plugins
 // ---------------------------------------------------------------------------
 
-/// Manages fixture setup / teardown coordination.
-#[derive(Debug)]
-pub struct FixturePlugin {
-    metadata: PluginMetadata,
-    initialized: bool,
-    hooks_received: Vec<String>,
-}
-
-impl Default for FixturePlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FixturePlugin {
-    pub fn new() -> Self {
-        Self {
-            metadata: PluginMetadata {
-                name: "fixture".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                description: "Manages fixture setup and teardown coordination".into(),
-                priority: 100,
-            },
-            initialized: false,
-            hooks_received: Vec::new(),
+/// Generates a built-in plugin struct with the standard fields, constructors,
+/// and `Plugin` trait implementation.  The only differences between built-in
+/// plugins are the struct name, plugin name string, description, and priority.
+macro_rules! builtin_plugin {
+    (
+        $(#[$attr:meta])*
+        $struct_name:ident,
+        name: $plugin_name:expr,
+        description: $description:expr,
+        priority: $priority:expr
+    ) => {
+        $(#[$attr])*
+        #[derive(Debug)]
+        pub struct $struct_name {
+            metadata: PluginMetadata,
+            initialized: bool,
+            hooks_received: Vec<String>,
         }
-    }
 
-    /// Return a snapshot of hook names this plugin has processed.
-    pub fn hooks_received(&self) -> &[String] {
-        &self.hooks_received
-    }
-}
-
-impl Plugin for FixturePlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn initialize(&mut self) -> Result<()> {
-        self.initialized = true;
-        Ok(())
-    }
-
-    fn shutdown(&mut self) -> Result<()> {
-        self.initialized = false;
-        Ok(())
-    }
-
-    fn on_hook(&mut self, hook: &str, _args: &HookArgs) -> Result<Option<HookResult>> {
-        self.hooks_received.push(hook.to_string());
-        Ok(Some(standard_result(&self.metadata.name, hook)))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
-// MarkerPlugin (priority 90)
-// ---------------------------------------------------------------------------
-
-/// Processes pytest markers (skip, xfail, parametrize, etc.).
-#[derive(Debug)]
-pub struct MarkerPlugin {
-    metadata: PluginMetadata,
-    initialized: bool,
-    hooks_received: Vec<String>,
-}
-
-impl Default for MarkerPlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl MarkerPlugin {
-    pub fn new() -> Self {
-        Self {
-            metadata: PluginMetadata {
-                name: "marker".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                description: "Processes pytest markers for test selection and behavior".into(),
-                priority: 90,
-            },
-            initialized: false,
-            hooks_received: Vec::new(),
+        impl Default for $struct_name {
+            fn default() -> Self {
+                Self::new()
+            }
         }
-    }
 
-    /// Return a snapshot of hook names this plugin has processed.
-    pub fn hooks_received(&self) -> &[String] {
-        &self.hooks_received
-    }
-}
+        impl $struct_name {
+            pub fn new() -> Self {
+                Self {
+                    metadata: PluginMetadata {
+                        name: $plugin_name.into(),
+                        version: env!("CARGO_PKG_VERSION").into(),
+                        description: $description.into(),
+                        priority: $priority,
+                    },
+                    initialized: false,
+                    hooks_received: Vec::new(),
+                }
+            }
 
-impl Plugin for MarkerPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
-
-    fn initialize(&mut self) -> Result<()> {
-        self.initialized = true;
-        Ok(())
-    }
-
-    fn shutdown(&mut self) -> Result<()> {
-        self.initialized = false;
-        Ok(())
-    }
-
-    fn on_hook(&mut self, hook: &str, _args: &HookArgs) -> Result<Option<HookResult>> {
-        self.hooks_received.push(hook.to_string());
-        Ok(Some(standard_result(&self.metadata.name, hook)))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ReportingPlugin (priority 80)
-// ---------------------------------------------------------------------------
-
-/// Collects and formats test results for output.
-#[derive(Debug)]
-pub struct ReportingPlugin {
-    metadata: PluginMetadata,
-    initialized: bool,
-    hooks_received: Vec<String>,
-}
-
-impl Default for ReportingPlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ReportingPlugin {
-    pub fn new() -> Self {
-        Self {
-            metadata: PluginMetadata {
-                name: "reporting".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                description: "Collects and formats test results for output".into(),
-                priority: 80,
-            },
-            initialized: false,
-            hooks_received: Vec::new(),
+            /// Return a snapshot of hook names this plugin has processed.
+            pub fn hooks_received(&self) -> &[String] {
+                &self.hooks_received
+            }
         }
-    }
 
-    /// Return a snapshot of hook names this plugin has processed.
-    pub fn hooks_received(&self) -> &[String] {
-        &self.hooks_received
-    }
-}
+        impl Plugin for $struct_name {
+            fn metadata(&self) -> &PluginMetadata {
+                &self.metadata
+            }
 
-impl Plugin for ReportingPlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
+            fn initialize(&mut self) -> Result<()> {
+                self.initialized = true;
+                Ok(())
+            }
 
-    fn initialize(&mut self) -> Result<()> {
-        self.initialized = true;
-        Ok(())
-    }
+            fn shutdown(&mut self) -> Result<()> {
+                self.initialized = false;
+                Ok(())
+            }
 
-    fn shutdown(&mut self) -> Result<()> {
-        self.initialized = false;
-        Ok(())
-    }
+            fn on_hook(&mut self, hook: &str, _args: &HookArgs) -> Result<Option<HookResult>> {
+                self.hooks_received.push(hook.to_string());
+                Ok(Some(standard_result(&self.metadata.name, hook)))
+            }
 
-    fn on_hook(&mut self, hook: &str, _args: &HookArgs) -> Result<Option<HookResult>> {
-        self.hooks_received.push(hook.to_string());
-        Ok(Some(standard_result(&self.metadata.name, hook)))
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
-
-// ---------------------------------------------------------------------------
-// CapturePlugin (priority 70)
-// ---------------------------------------------------------------------------
-
-/// Captures stdout/stderr during test execution.
-#[derive(Debug)]
-pub struct CapturePlugin {
-    metadata: PluginMetadata,
-    initialized: bool,
-    hooks_received: Vec<String>,
-}
-
-impl Default for CapturePlugin {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CapturePlugin {
-    pub fn new() -> Self {
-        Self {
-            metadata: PluginMetadata {
-                name: "capture".into(),
-                version: env!("CARGO_PKG_VERSION").into(),
-                description: "Captures stdout and stderr during test execution".into(),
-                priority: 70,
-            },
-            initialized: false,
-            hooks_received: Vec::new(),
+            fn as_any(&self) -> &dyn Any {
+                self
+            }
         }
-    }
-
-    /// Return a snapshot of hook names this plugin has processed.
-    pub fn hooks_received(&self) -> &[String] {
-        &self.hooks_received
-    }
+    };
 }
 
-impl Plugin for CapturePlugin {
-    fn metadata(&self) -> &PluginMetadata {
-        &self.metadata
-    }
+// ---------------------------------------------------------------------------
+// Built-in plugin definitions
+// ---------------------------------------------------------------------------
 
-    fn initialize(&mut self) -> Result<()> {
-        self.initialized = true;
-        Ok(())
-    }
+builtin_plugin!(
+    /// Manages fixture setup / teardown coordination.
+    FixturePlugin,
+    name: "fixture",
+    description: "Manages fixture setup and teardown coordination",
+    priority: 100
+);
 
-    fn shutdown(&mut self) -> Result<()> {
-        self.initialized = false;
-        Ok(())
-    }
+builtin_plugin!(
+    /// Processes pytest markers (skip, xfail, parametrize, etc.).
+    MarkerPlugin,
+    name: "marker",
+    description: "Processes pytest markers for test selection and behavior",
+    priority: 90
+);
 
-    fn on_hook(&mut self, hook: &str, _args: &HookArgs) -> Result<Option<HookResult>> {
-        self.hooks_received.push(hook.to_string());
-        Ok(Some(standard_result(&self.metadata.name, hook)))
-    }
+builtin_plugin!(
+    /// Collects and formats test results for output.
+    ReportingPlugin,
+    name: "reporting",
+    description: "Collects and formats test results for output",
+    priority: 80
+);
 
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-}
+builtin_plugin!(
+    /// Captures stdout/stderr during test execution.
+    CapturePlugin,
+    name: "capture",
+    description: "Captures stdout and stderr during test execution",
+    priority: 70
+);
 
 // ---------------------------------------------------------------------------
 // Tests

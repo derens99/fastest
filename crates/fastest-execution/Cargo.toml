@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Hybrid test execution engine for Fastest"
+keywords = ["testing", "pytest", "test-runner", "python", "parallel"]
+categories = ["development-tools::testing"]
 
 [features]
 default = ["mimalloc"]
@@ -13,11 +15,8 @@ mimalloc = ["dep:mimalloc"]
 
 [dependencies]
 fastest-core = { path = "../fastest-core" }
-anyhow.workspace = true
-thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-rayon.workspace = true
 num_cpus.workspace = true
 parking_lot.workspace = true
 

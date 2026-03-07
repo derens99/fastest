@@ -4,9 +4,10 @@
 //! test functions and test classes into [`TestItem`] instances.
 
 use crate::error::{Error, Result};
-use crate::model::TestItem;
+use crate::model::{Marker, TestItem};
 use rustpython_parser::ast::{self, Expr, Ranged, Stmt};
 use rustpython_parser::Parse;
+use std::collections::HashMap;
 use std::path::Path;
 
 /// Parse a Python test file and return all discovered test items.
@@ -139,6 +140,7 @@ fn build_test_item_from_function(
 
     let fixture_deps = extract_fixture_deps(args, class_name.is_some());
     let decorators = extract_decorators(decorator_list);
+    let markers = extract_markers_from_decorators(decorator_list);
 
     let id = if let Some(cls) = class_name {
         format!("{}::{}::{}", path_str, cls, func_name)
@@ -155,10 +157,173 @@ fn build_test_item_from_function(
         is_async,
         fixture_deps,
         class_name: class_name.map(|s| s.to_string()),
-        markers: Vec::new(),
+        markers,
         parameters: None,
         name: func_name.to_string(),
     }
+}
+
+/// Convert an AST expression to its Python source string representation.
+/// Used for complex expressions like skipif conditions.
+fn ast_expr_to_source(expr: &Expr) -> String {
+    match expr {
+        Expr::Name(name) => name.id.to_string(),
+        Expr::Attribute(attr) => {
+            format!("{}.{}", ast_expr_to_source(&attr.value), attr.attr.as_str())
+        }
+        Expr::Constant(c) => match &c.value {
+            ast::Constant::Str(s) => format!("'{}'", s),
+            ast::Constant::Int(n) => n.to_string(),
+            ast::Constant::Float(f) => f.to_string(),
+            ast::Constant::Bool(true) => "True".to_string(),
+            ast::Constant::Bool(false) => "False".to_string(),
+            ast::Constant::None => "None".to_string(),
+            _ => "None".to_string(),
+        },
+        Expr::Compare(cmp) => {
+            let left = ast_expr_to_source(&cmp.left);
+            let parts: Vec<String> = cmp
+                .ops
+                .iter()
+                .zip(cmp.comparators.iter())
+                .map(|(op, right)| {
+                    let op_str = match op {
+                        ast::CmpOp::Eq => "==",
+                        ast::CmpOp::NotEq => "!=",
+                        ast::CmpOp::Lt => "<",
+                        ast::CmpOp::LtE => "<=",
+                        ast::CmpOp::Gt => ">",
+                        ast::CmpOp::GtE => ">=",
+                        ast::CmpOp::Is => "is",
+                        ast::CmpOp::IsNot => "is not",
+                        ast::CmpOp::In => "in",
+                        ast::CmpOp::NotIn => "not in",
+                    };
+                    format!("{} {}", op_str, ast_expr_to_source(right))
+                })
+                .collect();
+            format!("{} {}", left, parts.join(" "))
+        }
+        Expr::BoolOp(bo) => {
+            let op_str = match bo.op {
+                ast::BoolOp::And => "and",
+                ast::BoolOp::Or => "or",
+            };
+            let parts: Vec<String> = bo.values.iter().map(ast_expr_to_source).collect();
+            parts.join(&format!(" {} ", op_str))
+        }
+        Expr::UnaryOp(uo) => {
+            let op_str = match uo.op {
+                ast::UnaryOp::Not => "not ",
+                _ => "",
+            };
+            format!("{}{}", op_str, ast_expr_to_source(&uo.operand))
+        }
+        Expr::Call(call) => {
+            let func = ast_expr_to_source(&call.func);
+            let args: Vec<String> = call.args.iter().map(ast_expr_to_source).collect();
+            format!("{}({})", func, args.join(", "))
+        }
+        _ => "True".to_string(),
+    }
+}
+
+/// Convert an AST expression to a JSON value for marker args/kwargs.
+/// String constants become JSON strings; complex expressions are stringified
+/// so they can be eval()-ed in Python.
+fn ast_expr_to_json(expr: &Expr) -> serde_json::Value {
+    match expr {
+        Expr::Constant(c) => match &c.value {
+            ast::Constant::Str(s) => serde_json::Value::String(s.clone()),
+            ast::Constant::Int(n) => {
+                let s = n.to_string();
+                if let Ok(i) = s.parse::<i64>() {
+                    serde_json::Value::Number(i.into())
+                } else {
+                    serde_json::Value::String(s)
+                }
+            }
+            ast::Constant::Float(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            ast::Constant::Bool(b) => serde_json::Value::Bool(*b),
+            ast::Constant::None => serde_json::Value::Null,
+            _ => serde_json::Value::Null,
+        },
+        Expr::Name(name) => match name.id.as_str() {
+            "True" => serde_json::Value::Bool(true),
+            "False" => serde_json::Value::Bool(false),
+            "None" => serde_json::Value::Null,
+            _ => serde_json::Value::String(name.id.to_string()),
+        },
+        // For complex expressions (conditions etc.), stringify them
+        _ => serde_json::Value::String(ast_expr_to_source(expr)),
+    }
+}
+
+/// Extract pytest markers from decorator AST expressions, preserving args and kwargs.
+fn extract_markers_from_decorators(decorator_list: &[Expr]) -> Vec<Marker> {
+    decorator_list
+        .iter()
+        .filter_map(extract_single_marker)
+        .collect()
+}
+
+/// Try to extract a pytest marker from a single decorator expression.
+fn extract_single_marker(expr: &Expr) -> Option<Marker> {
+    match expr {
+        Expr::Attribute(attr) => {
+            // @pytest.mark.skip (no parentheses, no args)
+            let base = extract_decorator_name(&attr.value)?;
+            if base == "pytest.mark" {
+                return Some(Marker {
+                    name: attr.attr.as_str().to_string(),
+                    args: Vec::new(),
+                    kwargs: HashMap::new(),
+                });
+            }
+            None
+        }
+        Expr::Call(call) => {
+            // @pytest.mark.skipif(condition, reason="...")
+            let full_name = extract_decorator_name(&call.func)?;
+            let marker_name = full_name.strip_prefix("pytest.mark.")?;
+
+            let args: Vec<serde_json::Value> = call.args.iter().map(ast_expr_to_json).collect();
+
+            let mut kwargs = HashMap::new();
+            for kw in &call.keywords {
+                if let Some(ref arg_name) = kw.arg {
+                    kwargs.insert(arg_name.as_str().to_string(), ast_expr_to_json(&kw.value));
+                }
+            }
+
+            Some(Marker {
+                name: marker_name.to_string(),
+                args,
+                kwargs,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Convert `@pytest.mark.X` decorator strings into [`Marker`] structs.
+///
+/// Only decorators that start with `pytest.mark.` are converted.
+/// The marker name is the portion after the last `pytest.mark.` prefix.
+#[allow(dead_code)]
+fn extract_markers(decorators: &[String]) -> Vec<Marker> {
+    decorators
+        .iter()
+        .filter_map(|d| {
+            d.strip_prefix("pytest.mark.").map(|name| Marker {
+                name: name.to_string(),
+                args: Vec::new(),
+                kwargs: HashMap::new(),
+            })
+        })
+        .collect()
 }
 
 /// Extract fixture dependencies from function arguments, excluding `self`.
@@ -210,8 +375,10 @@ fn extract_decorator_name(expr: &Expr) -> Option<String> {
 }
 
 /// Check if a function name matches the test function naming convention.
+///
+/// Matches `test_*` only, consistent with pytest's default `python_functions` pattern.
 fn is_test_function_name(name: &str) -> bool {
-    name.starts_with("test_") || name == "test"
+    name.starts_with("test_")
 }
 
 /// Check if a class name matches the test class naming convention.

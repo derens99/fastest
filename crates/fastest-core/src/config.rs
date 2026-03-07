@@ -325,17 +325,48 @@ impl Config {
             .any(|pattern| Self::matches_pattern(func_name, pattern))
     }
 
-    /// Simple glob pattern matching (supports * wildcard)
+    /// Glob pattern matching that supports `*` wildcards.
+    ///
+    /// Uses simple string matching for the common single-`*` case
+    /// (e.g. `test_*.py`, `*_test.py`, `Test*`) to avoid regex overhead.
+    /// Falls back to regex only for patterns with multiple wildcards.
     fn matches_pattern(text: &str, pattern: &str) -> bool {
-        if let Some(star_pos) = pattern.find('*') {
-            let prefix = &pattern[..star_pos];
-            let suffix = &pattern[star_pos + 1..];
-            text.len() >= prefix.len() + suffix.len()
-                && text.starts_with(prefix)
-                && text.ends_with(suffix)
-        } else {
-            text == pattern
+        if !pattern.contains('*') {
+            return text == pattern;
         }
+
+        // Fast path: single `*` — covers all default pytest patterns
+        let star_count = pattern.chars().filter(|&c| c == '*').count();
+        if star_count == 1 {
+            if let Some(suffix) = pattern.strip_prefix('*') {
+                return text.ends_with(suffix);
+            }
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                return text.starts_with(prefix);
+            }
+            // `*` in the middle: split on it
+            let parts: Vec<&str> = pattern.splitn(2, '*').collect();
+            return text.len() >= parts[0].len() + parts[1].len()
+                && text.starts_with(parts[0])
+                && text.ends_with(parts[1]);
+        }
+
+        // Multi-wildcard fallback: build a regex
+        let mut re = String::from("^");
+        for ch in pattern.chars() {
+            match ch {
+                '*' => re.push_str(".*"),
+                '.' | '+' | '?' | '(' | ')' | '[' | ']' | '{' | '}' | '^' | '$' | '|' | '\\' => {
+                    re.push('\\');
+                    re.push(ch);
+                }
+                _ => re.push(ch),
+            }
+        }
+        re.push('$');
+        regex::Regex::new(&re)
+            .map(|r| r.is_match(text))
+            .unwrap_or(false)
     }
 }
 
