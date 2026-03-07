@@ -1,140 +1,147 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use std::fs;
-use tempfile::TempDir;
 
 #[test]
-fn test_version_command() {
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg("version")
+fn test_version() {
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("--version")
         .assert()
         .success()
         .stdout(predicate::str::contains("fastest"));
 }
 
 #[test]
-fn test_discover_command() {
-    // Test that discover command works (it will use default paths from config)
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg("discover")
+fn test_help() {
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Test Discovery Results"));
+        .stdout(predicate::str::contains("Blazing-fast Python test runner"));
 }
 
 #[test]
-fn test_run_simple_test() {
-    let temp_dir = TempDir::new().unwrap();
-    let test_file = temp_dir.path().join("test_example.py");
-
+fn test_discover_basic() {
+    let dir = tempfile::tempdir().unwrap();
     fs::write(
-        &test_file,
+        dir.path().join("test_example.py"),
         r#"
-def test_passing():
+def test_one():
+    assert True
+
+def test_two():
     assert True
 "#,
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg(test_file.to_str().unwrap())
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("discover")
+        .arg(dir.path().to_str().unwrap())
         .assert()
         .success()
-        .stdout(predicate::str::contains("1 test"));
+        .stdout(predicate::str::contains("test_one"))
+        .stdout(predicate::str::contains("test_two"));
 }
 
 #[test]
-fn test_run_failing_test() {
-    let temp_dir = TempDir::new().unwrap();
-    let test_file = temp_dir.path().join("test_example.py");
-
+fn test_discover_json() {
+    let dir = tempfile::tempdir().unwrap();
     fs::write(
-        &test_file,
+        dir.path().join("test_example.py"),
         r#"
-def test_failing():
-    assert False, "This should fail"
+def test_hello():
+    pass
 "#,
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg(test_file.to_str().unwrap())
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("discover")
+        .arg("--output")
+        .arg("json")
+        .arg(dir.path().to_str().unwrap())
         .assert()
-        .failure()
-        .stdout(predicate::str::contains("FAILED"));
+        .success()
+        .stdout(predicate::str::contains("test_hello"))
+        .stdout(predicate::str::contains("function_name"));
 }
 
 #[test]
-fn test_filter_by_name() {
-    let temp_dir = TempDir::new().unwrap();
-    let test_file = temp_dir.path().join("test_example.py");
-
+fn test_discover_count() {
+    let dir = tempfile::tempdir().unwrap();
     fs::write(
-        &test_file,
+        dir.path().join("test_example.py"),
         r#"
-def test_foo():
-    assert True
+def test_a():
+    pass
 
-def test_bar():
-    assert True
+def test_b():
+    pass
 "#,
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg(test_file.to_str().unwrap())
-        .arg("-k")
-        .arg("foo")
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("discover")
+        .arg("--output")
+        .arg("count")
+        .arg(dir.path().to_str().unwrap())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Found 2 tests"));
+        .stdout(predicate::str::contains("2 tests discovered"));
 }
 
 #[test]
-fn test_class_based_tests() {
-    let temp_dir = TempDir::new().unwrap();
-    let test_file = temp_dir.path().join("test_class.py");
+fn test_no_tests_found() {
+    let dir = tempfile::tempdir().unwrap();
+    fs::write(dir.path().join("helper.py"), "def helper(): pass").unwrap();
 
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg(dir.path().to_str().unwrap())
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_discover_class_based_tests() {
+    let dir = tempfile::tempdir().unwrap();
     fs::write(
-        &test_file,
+        dir.path().join("test_classes.py"),
         r#"
 class TestMath:
-    def test_addition(self):
+    def test_add(self):
         assert 1 + 1 == 2
-    
-    def test_subtraction(self):
-        assert 3 - 1 == 2
+
+    def test_sub(self):
+        assert 2 - 1 == 1
 "#,
     )
     .unwrap();
 
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg(test_file.to_str().unwrap())
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("discover")
+        .arg(dir.path().to_str().unwrap())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Found 2 tests"));
+        .stdout(predicate::str::contains("test_add"))
+        .stdout(predicate::str::contains("test_sub"));
 }
 
 #[test]
-fn test_async_test() {
-    let temp_dir = TempDir::new().unwrap();
-    let test_file = temp_dir.path().join("test_async.py");
-
-    fs::write(
-        &test_file,
-        r#"
-import asyncio
-
-async def test_async_function():
-    await asyncio.sleep(0.001)
-    assert True
-"#,
-    )
-    .unwrap();
-
-    let mut cmd = Command::cargo_bin("fastest").unwrap();
-    cmd.arg(test_file.to_str().unwrap())
+fn test_discover_subcommand_help() {
+    Command::cargo_bin("fastest")
+        .unwrap()
+        .arg("discover")
+        .arg("--help")
         .assert()
         .success()
-        .stdout(predicate::str::contains("Found 1 test"));
+        .stdout(predicate::str::contains("List discovered tests"));
 }

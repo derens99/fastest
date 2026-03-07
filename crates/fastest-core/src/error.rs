@@ -11,7 +11,7 @@ pub enum Error {
     #[error("Parse error: {0}")]
     Parse(String),
 
-    #[error("Test execution error: {0}")]
+    #[error("Execution error: {0}")]
     Execution(String),
 
     #[error("Discovery error: {0}")]
@@ -25,6 +25,15 @@ pub enum Error {
 
     #[error("Configuration error: {0}")]
     Config(String),
+
+    #[error("Plugin error: {0}")]
+    Plugin(String),
+
+    #[error("Git error: {0}")]
+    Git(#[from] git2::Error),
+
+    #[error("Watch error: {0}")]
+    Watch(#[from] notify::Error),
 
     #[error(transparent)]
     Other(#[from] anyhow::Error),
