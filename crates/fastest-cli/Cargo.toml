@@ -8,6 +8,7 @@ repository.workspace = true
 description = "CLI for Fastest Python test runner"
 keywords = ["testing", "pytest", "test-runner", "python", "cli"]
 categories = ["development-tools::testing", "command-line-utilities"]
+publish = false
 
 [[bin]]
 name = "fastest"

@@ -31,7 +31,7 @@ test:
 
 # Run integration tests with Python
 test-integration: build
-	./target/release/fastest-cli tests/ -v
+	./target/release/fastest tests/ -v
 
 # Compare performance with pytest
 compare:
@@ -80,11 +80,11 @@ quick-check: build
 	@git status --short || echo "$(YELLOW)⚠️  Not a git repository$(NC)"
 	@echo ""
 	@echo "🏗️  Binary status:"
-	@if [ -f "target/release/fastest-cli" ]; then \
-		echo "$(GREEN)✅ fastest-cli binary exists$(NC)"; \
-		./target/release/fastest-cli --version 2>/dev/null || echo "$(YELLOW)⚠️  Binary version check failed$(NC)"; \
+	@if [ -f "target/release/fastest" ]; then \
+		echo "$(GREEN)✅ fastest binary exists$(NC)"; \
+		./target/release/fastest --version 2>/dev/null || echo "$(YELLOW)⚠️  Binary version check failed$(NC)"; \
 	else \
-		echo "$(RED)❌ fastest-cli binary not found$(NC)"; \
+		echo "$(RED)❌ fastest binary not found$(NC)"; \
 	fi
 
 # Watch mode dashboard
@@ -178,8 +178,8 @@ audit:
 # Create a release build
 release:
 	cargo build --release --all-features
-	strip target/release/fastest-cli
-	ls -lh target/release/fastest-cli
+	strip target/release/fastest
+	ls -lh target/release/fastest
 
 # Docker operations
 docker-build:
@@ -205,7 +205,7 @@ check: format lint test
 
 # Performance profiling
 profile: build
-	cargo flamegraph --bin fastest-cli -- tests/
+	cargo flamegraph --bin fastest -- tests/
 
 # Update dependencies
 update:

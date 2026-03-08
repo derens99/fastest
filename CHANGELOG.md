@@ -26,39 +26,3 @@
 ### Features
 
 * add CLI flags, fixture improvements, and better error reporting ([#20](https://github.com/derens99/fastest/issues/20)) ([2ee3ef4](https://github.com/derens99/fastest/commit/2ee3ef4cb13d66bed8318a9a0bddb308964ccbd5))
-
-# Changelog
-
-All notable changes to this project will be documented in this file.
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [2.0.0] - 2026-03-02
-
-### Added
-- **Complete rewrite** of the test runner from scratch
-- **3-crate architecture**: fastest-core, fastest-execution, fastest-cli
-- **AST-based discovery**: rustpython-parser for reliable Python test parsing
-- **Hybrid execution engine**: PyO3 in-process for small suites (<=20 tests), subprocess pool with crossbeam work-stealing for larger suites
-- **Plugin system**: Trait-based with 4 built-in plugins (fixture, marker, reporting, capture) and pytest-compatible hooks
-- **Fixture system**: Topological sort dependency resolution, conftest.py discovery, scope-aware caching, 8 built-in fixtures
-- **Marker system**: Recursive descent expression parser for `-m "slow and not integration"`
-- **Keyword filtering**: Boolean expression support for `-k "test_add or test_sub"`
-- **Parametrize expansion**: Full `@pytest.mark.parametrize` support with cross-product
-- **Incremental testing**: git2-based change detection with blake3 hashing and LRU result cache
-- **Watch mode**: File system monitoring via notify with debounced re-execution
-- **Full CLI**: clap-based with discover subcommand, pretty/JSON/count/JUnit XML output, progress bars
-- **CI/CD**: GitHub Actions for CI (check/test/build) and semantic-release for automated versioning and binary releases
-- **Cross-platform binaries**: Linux (x86_64, aarch64), macOS (x86_64, aarch64, universal), Windows (x86_64)
-
-### Changed
-- Reduced from 6 crates to 3 (removed fastest-advanced, fastest-plugins, fastest-plugins-macros)
-- Replaced tree-sitter with rustpython-parser for more reliable AST parsing
-- Removed ~30K lines of dead code, stubs, and unused dependencies
-- Removed disabled JIT transpiler (Cranelift), simulated zero-copy, and experimental modules
-
-### Removed
-- PyPI publishing (binary-only distribution for now)
-- Python wrapper package (fastest-runner)
-- 15+ unused heavy dependencies (Cranelift, bumpalo, string-interner, dashmap, etc.)

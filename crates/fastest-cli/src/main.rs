@@ -380,10 +380,9 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         tests
             .into_iter()
             .filter(|t| {
-                let test_path = t.path.to_string_lossy();
                 !cli.ignore_paths
                     .iter()
-                    .any(|p| test_path.starts_with(p.as_str()))
+                    .any(|p| t.path.starts_with(std::path::Path::new(p)))
             })
             .collect()
     } else {
@@ -713,10 +712,9 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         tests
             .into_iter()
             .filter(|t| {
-                let test_path = t.path.to_string_lossy();
                 !cfg.ignore_paths
                     .iter()
-                    .any(|p| test_path.starts_with(p.as_str()))
+                    .any(|p| t.path.starts_with(std::path::Path::new(p)))
             })
             .collect()
     } else {

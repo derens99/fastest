@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Core types, discovery, and parsing for Fastest test runner"
 keywords = ["testing", "pytest", "test-runner", "python"]
 categories = ["development-tools::testing"]
+publish = false
 
 [dependencies]
 anyhow.workspace = true
