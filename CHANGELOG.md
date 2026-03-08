@@ -1,3 +1,10 @@
+## [2.1.1](https://github.com/derens99/fastest/compare/v2.1.0...v2.1.1) (2026-03-08)
+
+
+### Bug Fixes
+
+* critical bug fixes, security hardening, and new features ([#21](https://github.com/derens99/fastest/issues/21)) ([0b5d569](https://github.com/derens99/fastest/commit/0b5d5690c2fd309924c0100ffae32be5fd8f1c2d))
+
 # [2.1.0](https://github.com/derens99/fastest/compare/v2.0.0...v2.1.0) (2026-03-08)
 
 
