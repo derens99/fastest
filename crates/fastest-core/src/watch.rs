@@ -70,7 +70,11 @@ impl TestWatcher {
             }
         }
 
-        drop(watcher); // prevent early drop — watcher must outlive the loop
+        // `watcher` is declared before `rx` so Rust's drop order (reverse
+        // declaration order) drops `rx` first, then `watcher`.  The watcher
+        // must outlive the loop to keep the sender alive; once the loop exits
+        // (channel closed), cleanup happens automatically.
+        drop(watcher);
         Ok(())
     }
 

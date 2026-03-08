@@ -213,20 +213,53 @@ fn main() -> ExitCode {
 }
 
 // ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+/// Debounce interval for watch mode (milliseconds).
+const WATCH_DEBOUNCE_MS: u64 = 300;
+
+/// Resolve the set of directories to search for tests.
+///
+/// Priority: explicit CLI paths > `testpaths` from config > current directory.
+fn resolve_search_paths(paths: &[String], config: &Config) -> Vec<PathBuf> {
+    if !paths.is_empty() {
+        paths.iter().map(PathBuf::from).collect()
+    } else if !config.testpaths.is_empty() {
+        config.testpaths.clone()
+    } else {
+        vec![PathBuf::from(".")]
+    }
+}
+
+/// Inject autouse fixtures from conftest.py files into test items.
+fn inject_autouse_fixtures(tests: &mut [fastest_core::TestItem]) {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
+        let autouse_names: Vec<String> = conftest_fixtures
+            .values()
+            .filter(|f| f.autouse)
+            .map(|f| f.name.clone())
+            .collect();
+        if !autouse_names.is_empty() {
+            for test in tests.iter_mut() {
+                for name in &autouse_names {
+                    if !test.fixture_deps.contains(name) {
+                        test.fixture_deps.push(name.clone());
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Discover subcommand
 // ---------------------------------------------------------------------------
 
 fn run_discover(paths: &[String], output_format: &str) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let search_paths: Vec<PathBuf> = if paths.is_empty() {
-        if !config.testpaths.is_empty() {
-            config.testpaths.clone()
-        } else {
-            vec![PathBuf::from(".")]
-        }
-    } else {
-        paths.iter().map(PathBuf::from).collect()
-    };
+    let search_paths = resolve_search_paths(paths, &config);
 
     let tests = discover_tests(&search_paths, &config)?;
     let tests = expand_parametrized_tests(tests)?;
@@ -244,7 +277,7 @@ fn run_discover(paths: &[String], output_format: &str) -> anyhow::Result<()> {
                 let location = if let Some(line) = test.line_number {
                     format!("{}:{}", test.path.display(), line)
                 } else {
-                    format!("{}", test.path.display())
+                    test.path.display().to_string()
                 };
                 println!("  {} {}", location.dimmed(), test.id);
             }
@@ -319,41 +352,14 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     plugins.initialize_all()?;
 
     // 3. Discover tests
-    let search_paths: Vec<PathBuf> = if cli.paths.is_empty() {
-        if !config.testpaths.is_empty() {
-            config.testpaths.clone()
-        } else {
-            vec![PathBuf::from(".")]
-        }
-    } else {
-        cli.paths.iter().map(PathBuf::from).collect()
-    };
+    let search_paths = resolve_search_paths(&cli.paths, &config);
     let tests = discover_tests(&search_paths, &config)?;
 
     // 4. Expand parametrized tests
-    let tests = expand_parametrized_tests(tests)?;
+    let mut tests = expand_parametrized_tests(tests)?;
 
     // 4b. Inject autouse fixtures into test fixture_deps
-    let mut tests = tests;
-    {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
-            let autouse_names: Vec<String> = conftest_fixtures
-                .values()
-                .filter(|f| f.autouse)
-                .map(|f| f.name.clone())
-                .collect();
-            if !autouse_names.is_empty() {
-                for test in &mut tests {
-                    for name in &autouse_names {
-                        if !test.fixture_deps.contains(name) {
-                            test.fixture_deps.push(name.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
+    inject_autouse_fixtures(&mut tests);
 
     // 5. Filter by markers
     let tests = if let Some(ref expr) = cli.marker {
@@ -478,7 +484,17 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         let mut fail_count = 0;
         for test in &tests {
             let batch = inprocess.execute(std::slice::from_ref(test));
-            let result = batch.into_iter().next().unwrap();
+            let result = match batch.into_iter().next() {
+                Some(r) => r,
+                None => {
+                    eprintln!(
+                        "{}: executor returned no result for {}",
+                        "error".red().bold(),
+                        test.id
+                    );
+                    break;
+                }
+            };
             if !result.passed() {
                 fail_count += 1;
             }
@@ -632,7 +648,7 @@ impl WatchConfig {
 fn run_watch(cli: &Cli) -> anyhow::Result<()> {
     eprintln!("{} watching for changes...", "fastest".cyan().bold());
 
-    let watcher = TestWatcher::new(300); // 300ms debounce
+    let watcher = TestWatcher::new(WATCH_DEBOUNCE_MS);
     let watch_paths: Vec<PathBuf> = if cli.paths.is_empty() {
         vec![PathBuf::from(".")]
     } else {
@@ -674,39 +690,12 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     };
     plugins.initialize_all()?;
 
-    let search_paths: Vec<PathBuf> = if cfg.paths.is_empty() {
-        if !config.testpaths.is_empty() {
-            config.testpaths.clone()
-        } else {
-            vec![PathBuf::from(".")]
-        }
-    } else {
-        cfg.paths.iter().map(PathBuf::from).collect()
-    };
+    let search_paths = resolve_search_paths(&cfg.paths, &config);
     let tests = discover_tests(&search_paths, &config)?;
-    let tests = expand_parametrized_tests(tests)?;
+    let mut tests = expand_parametrized_tests(tests)?;
 
     // Inject autouse fixtures into test fixture_deps
-    let mut tests = tests;
-    {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
-            let autouse_names: Vec<String> = conftest_fixtures
-                .values()
-                .filter(|f| f.autouse)
-                .map(|f| f.name.clone())
-                .collect();
-            if !autouse_names.is_empty() {
-                for test in &mut tests {
-                    for name in &autouse_names {
-                        if !test.fixture_deps.contains(name) {
-                            test.fixture_deps.push(name.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
+    inject_autouse_fixtures(&mut tests);
 
     let tests = if let Some(ref expr) = cfg.marker {
         filter_by_markers(&tests, expr)
@@ -814,7 +803,17 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         let mut fail_count = 0;
         for test in &tests {
             let batch = inprocess.execute(std::slice::from_ref(test));
-            let result = batch.into_iter().next().unwrap();
+            let result = match batch.into_iter().next() {
+                Some(r) => r,
+                None => {
+                    eprintln!(
+                        "{}: executor returned no result for {}",
+                        "error".red().bold(),
+                        test.id
+                    );
+                    break;
+                }
+            };
             if !result.passed() {
                 fail_count += 1;
             }

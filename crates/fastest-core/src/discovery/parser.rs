@@ -372,24 +372,6 @@ fn extract_single_marker(expr: &Expr) -> Option<Marker> {
     }
 }
 
-/// Convert `@pytest.mark.X` decorator strings into [`Marker`] structs.
-///
-/// Only decorators that start with `pytest.mark.` are converted.
-/// The marker name is the portion after the last `pytest.mark.` prefix.
-#[allow(dead_code)]
-fn extract_markers(decorators: &[String]) -> Vec<Marker> {
-    decorators
-        .iter()
-        .filter_map(|d| {
-            d.strip_prefix("pytest.mark.").map(|name| Marker {
-                name: name.to_string(),
-                args: Vec::new(),
-                kwargs: HashMap::new(),
-            })
-        })
-        .collect()
-}
-
 /// Extract fixture dependencies from function arguments, excluding `self`.
 fn extract_fixture_deps(args: &ast::Arguments, is_method: bool) -> Vec<String> {
     let mut deps = Vec::new();

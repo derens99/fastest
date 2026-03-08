@@ -31,7 +31,8 @@ pub fn expand_parametrized_tests(tests: Vec<TestItem>) -> Result<Vec<TestItem>> 
     for test in tests {
         if test
             .decorators
-            .contains(&"pytest.mark.parametrize".to_string())
+            .iter()
+            .any(|d| d == "pytest.mark.parametrize")
         {
             by_file.entry(test.path.clone()).or_default().push(test);
         } else {
@@ -583,7 +584,8 @@ pub fn expand_parametrized_tests_from_source(
     for test in tests {
         if test
             .decorators
-            .contains(&"pytest.mark.parametrize".to_string())
+            .iter()
+            .any(|d| d == "pytest.mark.parametrize")
         {
             match expand_single_test(&test, &stmts) {
                 Some(expanded) => result.extend(expanded),

@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use topological_sort::TopologicalSort;
 
 pub use builtin::{generate_builtin_code, BUILTIN_FIXTURES};
-pub use conftest::discover_conftest_fixtures;
+pub use conftest::{discover_conftest_fixtures, discover_conftest_fixtures_with_config};
 pub use scope::FixtureCache;
 
 /// The scope of a fixture, controlling how long its value is cached.
