@@ -40,12 +40,17 @@ impl OutputFormat {
 }
 
 /// Format test results according to the chosen output format.
-pub fn format_results(results: &[TestResult], format: &OutputFormat, verbose: bool) -> String {
+pub fn format_results(
+    results: &[TestResult],
+    format: &OutputFormat,
+    verbose: bool,
+    tb: &str,
+) -> String {
     match format {
-        OutputFormat::Pretty => format_pretty(results, verbose),
+        OutputFormat::Pretty => format_pretty(results, verbose, tb),
         OutputFormat::Json => format_json(results),
         OutputFormat::Count => format_count(results),
-        OutputFormat::JunitXml(_) => format_pretty(results, verbose),
+        OutputFormat::JunitXml(_) => format_pretty(results, verbose, tb),
     }
 }
 
@@ -53,7 +58,7 @@ pub fn format_results(results: &[TestResult], format: &OutputFormat, verbose: bo
 ///
 /// Each test is printed with a status indicator (PASSED/FAILED/SKIPPED/etc.)
 /// followed by a summary line.
-fn format_pretty(results: &[TestResult], verbose: bool) -> String {
+fn format_pretty(results: &[TestResult], verbose: bool, tb: &str) -> String {
     let mut out = String::new();
 
     for result in results {
@@ -85,12 +90,19 @@ fn format_pretty(results: &[TestResult], verbose: bool) -> String {
             if !result.stderr.is_empty() {
                 out.push_str(&format!("    --- stderr ---\n    {}\n", result.stderr));
             }
-        } else {
-            // Even in non-verbose mode, show error for failures
+        } else if tb != "no" {
+            // In non-verbose mode, show error for failures based on --tb setting
             match &result.outcome {
                 TestOutcome::Failed | TestOutcome::Error { .. } => {
                     if let Some(ref err) = result.error {
-                        out.push_str(&format!("    {}\n", err.red()));
+                        if tb == "short" {
+                            // Show only the last line of the traceback
+                            let last_line = err.lines().last().unwrap_or(err);
+                            out.push_str(&format!("    {}\n", last_line.red()));
+                        } else {
+                            // "long" - show full traceback
+                            out.push_str(&format!("    {}\n", err.red()));
+                        }
                     }
                 }
                 _ => {}

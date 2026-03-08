@@ -107,12 +107,24 @@ def run_test(test_item):
                         self_inner._patches = []
                         self_inner._env_patches = []
                     _NOTSET = object()
-                    def setattr(self_inner, target, name, value=_NOTSET):
+                    def setattr(self_inner, target, name=_NOTSET, value=_NOTSET):
                         if value is self_inner._NOTSET:
+                            if name is self_inner._NOTSET:
+                                raise TypeError("setattr requires at least 2 arguments")
                             value = name
+                            # target is a dotted string like "os.path.exists"
                             parts = target.rsplit('.', 1)
-                            target = importlib.import_module(parts[0]) if len(parts) == 2 else target
-                            name = parts[-1]
+                            if len(parts) == 2:
+                                modpath, attrname = parts
+                                # Walk the dotted path: import module, then getattr for subattrs
+                                segs = modpath.split('.')
+                                obj = importlib.import_module(segs[0])
+                                for seg in segs[1:]:
+                                    obj = getattr(obj, seg)
+                                target = obj
+                                name = attrname
+                            else:
+                                raise TypeError("string target must be dotted path")
                         old = getattr(target, name)
                         self_inner._patches.append((target, name, old))
                         setattr(target, name, value)
@@ -140,27 +152,50 @@ def run_test(test_item):
                 fixture_kwargs["monkeypatch"] = _MonkeyPatch()
                 fixture_cleanups.append(lambda: fixture_kwargs["monkeypatch"].undo())
             else:
-                # Try loading from conftest.py
+                # Try loading from conftest.py files (load entire hierarchy)
+                conftest_paths = []
                 conftest_dir = test_dir
                 while conftest_dir:
                     cp = os.path.join(conftest_dir, "conftest.py")
                     if os.path.exists(cp):
-                        if "conftest" in sys.modules:
-                            del sys.modules["conftest"]
-                        import pytest as _pt
-                        _orig_fix = _pt.fixture
-                        _pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)
-                        spec = importlib.util.spec_from_file_location("conftest", cp)
-                        cmod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(cmod)
-                        _pt.fixture = _orig_fix
-                        if hasattr(cmod, dep):
-                            fixture_kwargs[dep] = getattr(cmod, dep)()
-                        break
+                        conftest_paths.append(cp)
                     parent = os.path.dirname(conftest_dir)
                     if parent == conftest_dir:
                         break
                     conftest_dir = parent
+                # Load from root to leaf so deeper conftest overrides
+                conftest_paths.reverse()
+                for cp in conftest_paths:
+                    conftest_key = "conftest_" + cp.replace(os.sep, "_").replace(".", "_")
+                    if conftest_key in sys.modules:
+                        del sys.modules[conftest_key]
+                    import pytest as _pt
+                    _orig_fix = _pt.fixture
+                    _pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)
+                    spec = importlib.util.spec_from_file_location(conftest_key, cp)
+                    cmod = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(cmod)
+                    _pt.fixture = _orig_fix
+                    if hasattr(cmod, dep):
+                        fixture_func = getattr(cmod, dep)
+                        # Pass already-resolved fixtures as kwargs to support dependencies
+                        import inspect as _insp
+                        _sig = _insp.signature(fixture_func)
+                        _fix_args = {}
+                        for _pname in _sig.parameters:
+                            if _pname in fixture_kwargs:
+                                _fix_args[_pname] = fixture_kwargs[_pname]
+                        result = fixture_func(**_fix_args)
+                        import inspect
+                        if inspect.isgenerator(result):
+                            try:
+                                fixture_kwargs[dep] = next(result)
+                                fixture_cleanups.append(lambda gen=result: next(gen, None))
+                            except StopIteration:
+                                fixture_kwargs[dep] = None
+                        else:
+                            fixture_kwargs[dep] = result
+                        break  # Found the fixture, stop searching conftest files
 
         # Execute test
         try:
@@ -236,9 +271,12 @@ def run_test(test_item):
                 "stderr": stderr_capture.getvalue(),
                 "reason": str(xfail_reason) if xfail_reason else None,
             }
+        # Distinguish import/collection errors from assertion failures
+        is_collection_error = isinstance(e, (ModuleNotFoundError, ImportError, SyntaxError))
+        outcome = "Error" if is_collection_error else "Failed"
         return {
             "test_id": test_item["id"],
-            "outcome": "Failed",
+            "outcome": outcome,
             "duration_ms": int((time.time() - start) * 1000),
             "error": traceback.format_exc(),
             "stdout": stdout_capture.getvalue(),
