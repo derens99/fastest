@@ -5,7 +5,7 @@
 //! fair work distribution across workers.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::{Duration, Instant};
 
 use crossbeam_deque::{Injector, Steal};
@@ -315,7 +315,8 @@ impl SubprocessPool {
                 scope.spawn(move |_| {
                     // Spawn a persistent worker process
                     let mut worker =
-                        match spawn_worker(python_path, &harness_path.to_string_lossy()) {
+                        match PersistentWorker::spawn(python_path, &harness_path.to_string_lossy())
+                        {
                             Ok(w) => w,
                             Err(e) => {
                                 // Drain remaining work and mark as errors
@@ -358,10 +359,7 @@ impl SubprocessPool {
                     }
 
                     // Signal worker to exit
-                    if let Some(ref mut stdin) = worker.stdin {
-                        let _ = writeln!(stdin, "EXIT");
-                    }
-                    let _ = worker.wait();
+                    worker.shutdown();
                 });
             }
         })
@@ -407,18 +405,47 @@ fn write_harness_to_temp() -> Result<std::path::PathBuf, std::io::Error> {
     Ok(path)
 }
 
-/// Spawn a persistent Python worker process.
-fn spawn_worker(python_path: &str, harness_path: &str) -> Result<Child, std::io::Error> {
-    Command::new(python_path)
-        .arg(harness_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+/// A persistent Python worker process with a buffered stdout reader.
+///
+/// Wrapping the `BufReader` alongside the `Child` ensures the internal read
+/// buffer is preserved across calls, preventing data loss when the reader
+/// buffers ahead past one result line.
+struct PersistentWorker {
+    child: Child,
+    reader: BufReader<ChildStdout>,
+}
+
+impl PersistentWorker {
+    /// Spawn a new persistent worker.  Stderr is discarded to avoid deadlocks
+    /// when the worker writes enough to fill the OS pipe buffer.
+    fn spawn(python_path: &str, harness_path: &str) -> Result<Self, std::io::Error> {
+        let mut child = Command::new(python_path)
+            .arg(harness_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null()) // prevent deadlock from full stderr pipe
+            .spawn()?;
+
+        let stdout = child.stdout.take().expect("stdout was piped");
+        let reader = BufReader::new(stdout);
+        Ok(Self { child, reader })
+    }
+
+    /// Signal the worker to exit and wait for process to finish.
+    fn shutdown(&mut self) {
+        if let Some(ref mut stdin) = self.child.stdin {
+            let _ = writeln!(stdin, "EXIT");
+        }
+        let _ = self.child.wait();
+    }
 }
 
 /// Send a test to a worker process and read back the result.
-fn execute_on_worker(worker: &mut Child, test: &TestItem, timeout: &TimeoutConfig) -> TestResult {
+fn execute_on_worker(
+    worker: &mut PersistentWorker,
+    test: &TestItem,
+    timeout: &TimeoutConfig,
+) -> TestResult {
     // Pre-check skip markers in Rust (avoid worker overhead)
     for marker in &test.markers {
         if let BuiltinMarker::Skip { reason } = classify_marker(marker) {
@@ -455,7 +482,7 @@ fn execute_on_worker(worker: &mut Child, test: &TestItem, timeout: &TimeoutConfi
     };
 
     // Write test to worker stdin
-    if let Some(ref mut stdin) = worker.stdin {
+    if let Some(ref mut stdin) = worker.child.stdin {
         if let Err(e) = writeln!(stdin, "{}", json_input) {
             return TestResult {
                 test_id: test.id.clone(),
@@ -484,58 +511,59 @@ fn execute_on_worker(worker: &mut Child, test: &TestItem, timeout: &TimeoutConfi
         }
     }
 
-    // Read result from worker stdout
-    if let Some(ref mut stdout) = worker.stdout {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let line = line.trim().to_string();
-                    if line.is_empty() {
-                        continue;
-                    }
-                    match parse_worker_result(&line) {
-                        Ok(wr) => {
-                            let mut result = wr.into_test_result(&test.id);
-                            // Check timeout
-                            if timeout.is_expired(start.elapsed()) {
-                                result.outcome = TestOutcome::Error {
-                                    message: format!(
-                                        "Test exceeded timeout of {:?}",
-                                        timeout.per_test
-                                    ),
-                                };
-                            }
-                            return result;
-                        }
-                        Err(e) => {
-                            return TestResult {
-                                test_id: test.id.clone(),
-                                outcome: TestOutcome::Error {
-                                    message: format!("Failed to parse worker output: {e}"),
-                                },
-                                duration: start.elapsed(),
-                                output: line,
-                                error: Some(e.to_string()),
-                                stdout: String::new(),
-                                stderr: String::new(),
+    // Read exactly one result line from the persistent BufReader.
+    // The BufReader is stored alongside the worker so its internal buffer
+    // is preserved across calls — no data is lost between invocations.
+    loop {
+        let mut line = String::new();
+        match worker.reader.read_line(&mut line) {
+            Ok(0) => {
+                // EOF — worker process has exited
+                break;
+            }
+            Ok(_) => {
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                match parse_worker_result(&line) {
+                    Ok(wr) => {
+                        let mut result = wr.into_test_result(&test.id);
+                        // Check timeout
+                        if timeout.is_expired(start.elapsed()) {
+                            result.outcome = TestOutcome::Error {
+                                message: format!("Test exceeded timeout of {:?}", timeout.per_test),
                             };
                         }
+                        return result;
+                    }
+                    Err(e) => {
+                        return TestResult {
+                            test_id: test.id.clone(),
+                            outcome: TestOutcome::Error {
+                                message: format!("Failed to parse worker output: {e}"),
+                            },
+                            duration: start.elapsed(),
+                            output: line,
+                            error: Some(e.to_string()),
+                            stdout: String::new(),
+                            stderr: String::new(),
+                        };
                     }
                 }
-                Err(e) => {
-                    return TestResult {
-                        test_id: test.id.clone(),
-                        outcome: TestOutcome::Error {
-                            message: format!("Failed to read worker output: {e}"),
-                        },
-                        duration: start.elapsed(),
-                        output: String::new(),
-                        error: Some(e.to_string()),
-                        stdout: String::new(),
-                        stderr: String::new(),
-                    };
-                }
+            }
+            Err(e) => {
+                return TestResult {
+                    test_id: test.id.clone(),
+                    outcome: TestOutcome::Error {
+                        message: format!("Failed to read worker output: {e}"),
+                    },
+                    duration: start.elapsed(),
+                    output: String::new(),
+                    error: Some(e.to_string()),
+                    stdout: String::new(),
+                    stderr: String::new(),
+                };
             }
         }
     }

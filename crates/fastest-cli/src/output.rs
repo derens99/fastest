@@ -45,12 +45,13 @@ pub fn format_results(
     format: &OutputFormat,
     verbose: bool,
     tb: &str,
+    quiet: bool,
 ) -> String {
     match format {
-        OutputFormat::Pretty => format_pretty(results, verbose, tb),
+        OutputFormat::Pretty => format_pretty(results, verbose, tb, quiet),
         OutputFormat::Json => format_json(results),
         OutputFormat::Count => format_count(results),
-        OutputFormat::JunitXml(_) => format_pretty(results, verbose, tb),
+        OutputFormat::JunitXml(_) => format_pretty(results, verbose, tb, quiet),
     }
 }
 
@@ -58,10 +59,18 @@ pub fn format_results(
 ///
 /// Each test is printed with a status indicator (PASSED/FAILED/SKIPPED/etc.)
 /// followed by a summary line.
-fn format_pretty(results: &[TestResult], verbose: bool, tb: &str) -> String {
+fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -> String {
     let mut out = String::new();
 
     for result in results {
+        // In quiet mode, only show failures and errors
+        if quiet {
+            match &result.outcome {
+                TestOutcome::Failed | TestOutcome::Error { .. } => {}
+                _ => continue,
+            }
+        }
+
         let status = match &result.outcome {
             TestOutcome::Passed => "PASSED".green().bold().to_string(),
             TestOutcome::Failed => "FAILED".red().bold().to_string(),

@@ -271,9 +271,20 @@ fn json_value_to_python(val: &serde_json::Value) -> String {
 
 /// Escape a string for safe embedding in a Python single-quoted string literal.
 fn escape_for_python_string(s: &str) -> String {
-    s.replace('\'', "\\'")
+    s.replace('\\', "\\\\") // must be first to avoid double-escaping
+        .replace('\'', "\\'")
         .replace('\n', "\\n")
         .replace('\r', "\\r")
+}
+
+/// Check that a string is a valid Python identifier (safe for code interpolation).
+fn is_valid_python_identifier(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .next()
+            .map(|c| c.is_alphabetic() || c == '_')
+            .unwrap_or(false)
+        && s.chars().all(|c| c.is_alphanumeric() || c == '_')
 }
 
 /// Build the Python code string needed to execute a test item.
@@ -323,8 +334,22 @@ pub fn build_test_code(test: &TestItem) -> String {
         }
     };
 
-    // Python identifiers cannot contain single quotes, but escape defensively
-    let func_name = test.function_name.replace('\'', "\\'");
+    // Validate function name is a safe Python identifier
+    let func_name = if is_valid_python_identifier(&test.function_name) {
+        test.function_name.clone()
+    } else {
+        // Sanitize: keep only valid identifier characters
+        test.function_name
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect()
+    };
 
     // Determine which fixture_deps are actual fixtures (not parametrize params)
     let param_names: std::collections::HashSet<&str> = test
@@ -380,6 +405,10 @@ pub fn build_test_code(test: &TestItem) -> String {
                 .to_string(),
         );
         for name in &conftest_fixture_names {
+            // Validate fixture name is a safe Python identifier before interpolation
+            if !is_valid_python_identifier(name) {
+                continue;
+            }
             fixture_setup_parts.push(format!(
                 "for __fastest_cp in __fastest_conftest_paths:\n\
                  \x20   __fastest_ck = 'conftest_' + __fastest_cp.replace(os.sep, '_').replace('.', '_')\n\
@@ -441,7 +470,20 @@ pub fn build_test_code(test: &TestItem) -> String {
 
     // Build the complete call expression with setup/teardown and fixture cleanup
     let call_code = if let Some(ref class_name) = test.class_name {
-        let class_name = class_name.replace('\'', "\\'");
+        let class_name = if is_valid_python_identifier(class_name) {
+            class_name.clone()
+        } else {
+            class_name
+                .chars()
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect()
+        };
         let async_part = if test.is_async {
             "\n\
              \x20   if asyncio.iscoroutine(__fastest_result):\n\
@@ -511,18 +553,52 @@ pub fn build_test_code(test: &TestItem) -> String {
         )
     };
 
+    // Install pytest.raises/warns/approx shim if real pytest isn't available
+    let pytest_shim = "\
+if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
+\x20   class _PytestRaisesCtx:\n\
+\x20       def __init__(s, exc, match=None): s.expected_exception = exc; s.match = match; s.value = None\n\
+\x20       def __enter__(s): return s\n\
+\x20       def __exit__(s, et, ev, tb):\n\
+\x20           if et is None: raise AssertionError(f'DID NOT RAISE {s.expected_exception}')\n\
+\x20           if not issubclass(et, s.expected_exception): return False\n\
+\x20           s.value = ev\n\
+\x20           if s.match:\n\
+\x20               import re\n\
+\x20               if not re.search(s.match, str(ev)): raise AssertionError(f'{ev!r} does not match {s.match!r}')\n\
+\x20           return True\n\
+\x20   class _PytestShim:\n\
+\x20       class _M:\n\
+\x20           def __getattr__(s, n):\n\
+\x20               def d(*a, **k): return a[0] if a and callable(a[0]) else (lambda f: f)\n\
+\x20               return d\n\
+\x20       mark = _M()\n\
+\x20       def raises(s, exc, *a, match=None, **kw): return _PytestRaisesCtx(exc, match=match)\n\
+\x20       def approx(s, exp, rel=None, abs=None): return exp\n\
+\x20       def fixture(s, f=None, **kw): return f if f else (lambda fn: fn)\n\
+\x20       def param(s, *v, id=None, marks=()): return v if len(v)!=1 else v[0]\n\
+\x20       def skip(s, reason=''): raise Exception(f'SKIPPED: {reason}')\n\
+\x20       def fail(s, reason=''): raise AssertionError(reason)\n\
+\x20   try:\n\
+\x20       import pytest\n\
+\x20       if not hasattr(pytest, 'raises'): pytest.raises = _PytestShim().raises\n\
+\x20   except ImportError:\n\
+\x20       sys.modules['pytest'] = _PytestShim()\n";
+
     format!(
         "import sys, importlib, os\n\
          __fastest_test_dir = os.path.dirname(os.path.abspath('{path}'))\n\
          if __fastest_test_dir not in sys.path:\n\
          \x20   sys.path.insert(0, __fastest_test_dir)\n\
          {parent_setup}\
+         {pytest_shim}\
          __fastest_mod = importlib.import_module('{module}')\n\
          importlib.reload(__fastest_mod)\n\
          {fixture_setup}\
          {call}",
         path = path_str,
         parent_setup = parent_path_setup,
+        pytest_shim = pytest_shim,
         module = module_name,
         fixture_setup = fixture_setup,
         call = call_code,

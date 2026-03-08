@@ -172,7 +172,7 @@ fn ast_expr_to_source(expr: &Expr) -> String {
             format!("{}.{}", ast_expr_to_source(&attr.value), attr.attr.as_str())
         }
         Expr::Constant(c) => match &c.value {
-            ast::Constant::Str(s) => format!("'{}'", s),
+            ast::Constant::Str(s) => format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'")),
             ast::Constant::Int(n) => n.to_string(),
             ast::Constant::Float(f) => f.to_string(),
             ast::Constant::Bool(true) => "True".to_string(),

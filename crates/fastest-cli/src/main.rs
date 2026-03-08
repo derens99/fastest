@@ -104,6 +104,10 @@ struct Cli {
     #[arg(long = "color", default_value = "auto")]
     color: String,
 
+    /// Quiet output (only show failures and summary)
+    #[arg(short = 'q', long = "quiet")]
+    quiet: bool,
+
     /// Alias for discover subcommand
     #[arg(long = "collect-only")]
     collect_only: bool,
@@ -335,7 +339,13 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let output_format =
         OutputFormat::from_str_with_junit(Some(&cli.output_format), cli.junit_xml.clone());
 
-    let formatted = format_results(&results, &output_format, cli.verbose, &cli.traceback);
+    let formatted = format_results(
+        &results,
+        &output_format,
+        cli.verbose,
+        &cli.traceback,
+        cli.quiet,
+    );
     if !formatted.is_empty() {
         println!("{}", formatted);
     }
@@ -397,6 +407,7 @@ struct WatchConfig {
     incremental: bool,
     maxfail: Option<usize>,
     traceback: String,
+    quiet: bool,
 }
 
 impl WatchConfig {
@@ -414,6 +425,7 @@ impl WatchConfig {
             incremental: cli.incremental,
             maxfail: cli.maxfail,
             traceback: cli.traceback.clone(),
+            quiet: cli.quiet,
         }
     }
 }
@@ -527,7 +539,13 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     let output_format =
         OutputFormat::from_str_with_junit(Some(&cfg.output_format), cfg.junit_xml.clone());
-    let formatted = format_results(&results, &output_format, cfg.verbose, &cfg.traceback);
+    let formatted = format_results(
+        &results,
+        &output_format,
+        cfg.verbose,
+        &cfg.traceback,
+        cfg.quiet,
+    );
     if !formatted.is_empty() {
         println!("{}", formatted);
     }

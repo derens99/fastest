@@ -1,5 +1,87 @@
 import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib
 
+# Provide a minimal pytest compatibility shim so tests using pytest.raises/pytest.mark etc. work
+class _PytestRaisesContext:
+    """Context manager for pytest.raises."""
+    def __init__(self, expected_exception, match=None):
+        self.expected_exception = expected_exception
+        self.match = match
+        self.value = None
+    def __enter__(self):
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            raise AssertionError(f"DID NOT RAISE {self.expected_exception}")
+        if not issubclass(exc_type, self.expected_exception):
+            return False  # Re-raise
+        self.value = exc_val
+        if self.match:
+            import re
+            if not re.search(self.match, str(exc_val)):
+                raise AssertionError(f"{exc_val!r} does not match {self.match!r}")
+        return True  # Suppress the exception
+
+class _PytestWarnsContext:
+    """Context manager for pytest.warns."""
+    def __init__(self, expected_warning=None, match=None):
+        self.expected_warning = expected_warning
+        self.match = match
+    def __enter__(self):
+        import warnings
+        self._catch = warnings.catch_warnings(record=True)
+        self._warnings = self._catch.__enter__()
+        return self._warnings
+    def __exit__(self, *args):
+        self._catch.__exit__(*args)
+
+class _PytestApprox:
+    """Approximate equality for floating point comparisons."""
+    def __init__(self, expected, rel=None, abs=None):
+        self.expected = expected
+        self.rel = rel
+        self.abs_tol = abs if abs is not None else 1e-6
+    def __eq__(self, actual):
+        return __builtins__['abs'](actual - self.expected) <= self.abs_tol if isinstance(self.abs_tol, (int, float)) else False
+    def __repr__(self):
+        return f"approx({self.expected})"
+
+class _PytestShim:
+    """Minimal pytest shim providing raises, warns, approx, mark, fixture, param."""
+    class _MarkNamespace:
+        def __getattr__(self, name):
+            def decorator(*args, **kwargs):
+                if args and callable(args[0]):
+                    return args[0]
+                return lambda f: f
+            return decorator
+    mark = _MarkNamespace()
+    def raises(self, expected_exception, *args, match=None, **kwargs):
+        return _PytestRaisesContext(expected_exception, match=match)
+    def warns(self, expected_warning=None, *args, match=None, **kwargs):
+        return _PytestWarnsContext(expected_warning, match=match)
+    def approx(self, expected, rel=None, abs=None):
+        return _PytestApprox(expected, rel=rel, abs=abs)
+    def fixture(self, func=None, **kwargs):
+        if func is not None:
+            return func
+        return lambda f: f
+    def param(self, *values, id=None, marks=()):
+        return values if len(values) != 1 else values[0]
+    def skip(self, reason=""):
+        raise Exception(f"SKIPPED: {reason}")
+    def fail(self, reason=""):
+        raise AssertionError(reason)
+
+# Install the shim as 'pytest' if the real package isn't available
+try:
+    import pytest as _real_pytest
+    # Real pytest is available — patch in raises/warns/approx if missing
+    if not hasattr(_real_pytest, 'raises'):
+        _shim = _PytestShim()
+        _real_pytest.raises = _shim.raises
+except ImportError:
+    sys.modules['pytest'] = _PytestShim()
+
 
 def run_test(test_item):
     """Execute a single test item and return the result as a dict."""
@@ -198,6 +280,7 @@ def run_test(test_item):
                         break  # Found the fixture, stop searching conftest files
 
         # Execute test
+        result = None
         try:
             if test_item.get("class_name"):
                 cls = getattr(mod, test_item["class_name"])
@@ -237,7 +320,7 @@ def run_test(test_item):
                 except Exception:
                     pass
         # If the test is async, the call returns a coroutine — run it
-        if asyncio.iscoroutine(result):
+        if result is not None and asyncio.iscoroutine(result):
             asyncio.run(result)
         # Test passed — check if xfail (passed when expected to fail = XPassed)
         if xfail_marker is not None:
