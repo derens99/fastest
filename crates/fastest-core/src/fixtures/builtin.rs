@@ -14,6 +14,7 @@ pub const BUILTIN_FIXTURES: &[&str] = &[
     "request",
     "pytestconfig",
     "cache",
+    "caplog",
 ];
 
 /// Generate Python setup code that creates the value for a built-in fixture.
@@ -136,6 +137,13 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       self.node = None\n\
              \x20       self.config = None\n\
              \x20       self.fspath = None\n\
+             \x20       self._finalizers = []\n\
+             \x20   def addfinalizer(self, func):\n\
+             \x20       self._finalizers.append(func)\n\
+             \x20   def _run_finalizers(self):\n\
+             \x20       for func in reversed(self._finalizers):\n\
+             \x20           func()\n\
+             \x20       self._finalizers.clear()\n\
              request = _FixtureRequest()"
             .to_string(),
         "pytestconfig" => "class _PytestConfig:\n\
@@ -156,6 +164,38 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def set(self, key, value):\n\
              \x20       self._data[key] = value\n\
              cache = _Cache()"
+            .to_string(),
+        "caplog" => "import logging\n\
+             class _LogCaptureHandler(logging.Handler):\n\
+             \x20   def __init__(self):\n\
+             \x20       super().__init__()\n\
+             \x20       self.records = []\n\
+             \x20   def emit(self, record):\n\
+             \x20       self.records.append(record)\n\
+             class _Caplog:\n\
+             \x20   def __init__(self):\n\
+             \x20       self.handler = _LogCaptureHandler()\n\
+             \x20       self.handler.setLevel(logging.DEBUG)\n\
+             \x20       logging.root.addHandler(self.handler)\n\
+             \x20       self._initial_level = logging.root.level\n\
+             \x20       logging.root.setLevel(logging.DEBUG)\n\
+             \x20   @property\n\
+             \x20   def records(self):\n\
+             \x20       return self.handler.records\n\
+             \x20   @property\n\
+             \x20   def text(self):\n\
+             \x20       return '\\n'.join(self.handler.format(r) for r in self.records)\n\
+             \x20   @property\n\
+             \x20   def messages(self):\n\
+             \x20       return [r.getMessage() for r in self.records]\n\
+             \x20   def set_level(self, level):\n\
+             \x20       self.handler.setLevel(level)\n\
+             \x20   def clear(self):\n\
+             \x20       self.handler.records.clear()\n\
+             \x20   def _restore(self):\n\
+             \x20       logging.root.removeHandler(self.handler)\n\
+             \x20       logging.root.setLevel(self._initial_level)\n\
+             caplog = _Caplog()"
             .to_string(),
         _ => return None,
     };

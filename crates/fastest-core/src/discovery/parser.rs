@@ -62,7 +62,14 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             Stmt::ClassDef(class_def) => {
                 let class_name = class_def.name.as_str();
                 if is_test_class_name(class_name) {
-                    extract_class_methods(class_def, &path_str, path, &line_index, &mut items);
+                    extract_class_methods(
+                        class_def,
+                        &path_str,
+                        path,
+                        &line_index,
+                        &mut items,
+                        None,
+                    );
                 }
             }
             _ => {}
@@ -73,14 +80,25 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
 }
 
 /// Extract test methods from a class definition.
+///
+/// Supports nested test classes: when a `class Test*` is found inside another
+/// test class, this function recurses with the full class chain (e.g.
+/// `"TestOuter::TestInner"`). The `parent_class` parameter carries the
+/// accumulated chain from outer classes, or `None` for a top-level class.
 fn extract_class_methods(
     class_def: &ast::StmtClassDef,
     path_str: &str,
     path: &Path,
     line_index: &LineIndex,
     items: &mut Vec<TestItem>,
+    parent_class: Option<&str>,
 ) {
-    let class_name = class_def.name.as_str();
+    let own_name = class_def.name.as_str();
+    let full_class_name = if let Some(parent) = parent_class {
+        format!("{}::{}", parent, own_name)
+    } else {
+        own_name.to_string()
+    };
 
     for stmt in &class_def.body {
         match stmt {
@@ -93,7 +111,7 @@ fn extract_class_methods(
                         &func_def.decorator_list,
                         false,
                         func_def.range(),
-                        Some(class_name),
+                        Some(&full_class_name),
                         path_str,
                         path,
                         line_index,
@@ -110,12 +128,25 @@ fn extract_class_methods(
                         &func_def.decorator_list,
                         true,
                         func_def.range(),
-                        Some(class_name),
+                        Some(&full_class_name),
                         path_str,
                         path,
                         line_index,
                     );
                     items.push(item);
+                }
+            }
+            Stmt::ClassDef(nested_class_def) => {
+                let nested_name = nested_class_def.name.as_str();
+                if is_test_class_name(nested_name) {
+                    extract_class_methods(
+                        nested_class_def,
+                        path_str,
+                        path,
+                        line_index,
+                        items,
+                        Some(&full_class_name),
+                    );
                 }
             }
             _ => {}
@@ -600,5 +631,32 @@ def test_multiple_decorators():
             index.line_number(rustpython_parser::text_size::TextSize::from(12)),
             3
         );
+    }
+
+    #[test]
+    fn test_parse_nested_classes() {
+        let source = r#"
+class TestOuter:
+    class TestInner:
+        def test_nested(self):
+            pass
+    def test_outer(self):
+        pass
+"#;
+        let path = PathBuf::from("tests/test_nested.py");
+        let items = parse_test_file(source, &path).unwrap();
+        assert_eq!(items.len(), 2);
+        // test_outer should have class_name "TestOuter"
+        let outer = items
+            .iter()
+            .find(|i| i.function_name == "test_outer")
+            .unwrap();
+        assert_eq!(outer.class_name, Some("TestOuter".to_string()));
+        // test_nested should have class_name "TestOuter::TestInner"
+        let nested = items
+            .iter()
+            .find(|i| i.function_name == "test_nested")
+            .unwrap();
+        assert_eq!(nested.class_name, Some("TestOuter::TestInner".to_string()));
     }
 }

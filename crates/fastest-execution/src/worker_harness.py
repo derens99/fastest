@@ -159,7 +159,7 @@ def run_test(test_item):
         fixture_cleanups = []
 
         for dep in fixture_deps:
-            if dep == "self" or dep == "request":
+            if dep == "self":
                 continue
             # Check if it's a parametrize param (already in params)
             params = test_item.get("parameters")
@@ -233,6 +233,55 @@ def run_test(test_item):
                         self_inner._env_patches.clear()
                 fixture_kwargs["monkeypatch"] = _MonkeyPatch()
                 fixture_cleanups.append(lambda: fixture_kwargs["monkeypatch"].undo())
+            elif dep == "caplog":
+                import logging as _logging
+                class _LogCaptureHandler(_logging.Handler):
+                    def __init__(self):
+                        super().__init__()
+                        self.records = []
+                    def emit(self, record):
+                        self.records.append(record)
+                class _Caplog:
+                    def __init__(self):
+                        self.handler = _LogCaptureHandler()
+                        self.handler.setLevel(_logging.DEBUG)
+                        _logging.root.addHandler(self.handler)
+                        self._initial_level = _logging.root.level
+                        _logging.root.setLevel(_logging.DEBUG)
+                    @property
+                    def records(self):
+                        return self.handler.records
+                    @property
+                    def text(self):
+                        return '\n'.join(self.handler.format(r) for r in self.records)
+                    @property
+                    def messages(self):
+                        return [r.getMessage() for r in self.records]
+                    def set_level(self, level):
+                        self.handler.setLevel(level)
+                    def clear(self):
+                        self.handler.records.clear()
+                    def _restore(self):
+                        _logging.root.removeHandler(self.handler)
+                        _logging.root.setLevel(self._initial_level)
+                fixture_kwargs["caplog"] = _Caplog()
+                fixture_cleanups.append(lambda: fixture_kwargs["caplog"]._restore())
+            elif dep == "request":
+                class _FixtureRequest:
+                    def __init__(self):
+                        self.param = None
+                        self.node = None
+                        self.config = None
+                        self.fspath = None
+                        self._finalizers = []
+                    def addfinalizer(self, func):
+                        self._finalizers.append(func)
+                    def _run_finalizers(self):
+                        for func in reversed(self._finalizers):
+                            func()
+                        self._finalizers.clear()
+                fixture_kwargs["request"] = _FixtureRequest()
+                fixture_cleanups.append(lambda: fixture_kwargs["request"]._run_finalizers())
             else:
                 # Try loading from conftest.py files (load entire hierarchy)
                 conftest_paths = []
