@@ -83,6 +83,30 @@ struct Cli {
     /// Don't show progress bar
     #[arg(long = "no-progress")]
     no_progress: bool,
+
+    /// Disable output capturing (show stdout/stderr in real-time)
+    #[arg(short = 's')]
+    no_capture: bool,
+
+    /// Stop after N failures
+    #[arg(long = "maxfail")]
+    maxfail: Option<usize>,
+
+    /// Traceback format: short, long, no
+    #[arg(long = "tb", default_value = "short")]
+    traceback: String,
+
+    /// Show N slowest test durations (0 to disable)
+    #[arg(long = "durations")]
+    durations: Option<usize>,
+
+    /// Force color output (yes/no/auto)
+    #[arg(long = "color", default_value = "auto")]
+    color: String,
+
+    /// Alias for discover subcommand
+    #[arg(long = "collect-only")]
+    collect_only: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -106,6 +130,13 @@ enum Commands {
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
+    // Handle color setting
+    match cli.color.as_str() {
+        "yes" | "true" | "always" => colored::control::set_override(true),
+        "no" | "false" | "never" => colored::control::set_override(false),
+        _ => {} // "auto" - let colored decide
+    }
+
     match cli.command {
         Some(Commands::Discover {
             paths,
@@ -118,6 +149,16 @@ fn main() -> ExitCode {
             }
         },
         None => {
+            if cli.collect_only {
+                match run_discover(&cli.paths, &cli.output_format) {
+                    Ok(_) => return ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("{}: {}", "error".red().bold(), e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+
             if cli.watch {
                 match run_watch(&cli) {
                     Ok(_) => ExitCode::SUCCESS,
@@ -258,16 +299,21 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // 9. Execute tests
     let executor = HybridExecutor::with_workers(cli.workers);
 
-    let results = if cli.exitfirst {
-        // Run tests one at a time via in-process executor, stop on first failure.
+    let max_failures = if cli.exitfirst { Some(1) } else { cli.maxfail };
+
+    let results = if let Some(max_fail) = max_failures {
+        // Run tests one at a time, stop after max_fail failures.
         let inprocess = executor.inprocess();
         let mut results = Vec::new();
+        let mut fail_count = 0;
         for test in &tests {
             let batch = inprocess.execute(std::slice::from_ref(test));
             let result = batch.into_iter().next().unwrap();
-            let failed = !result.passed();
+            if !result.passed() {
+                fail_count += 1;
+            }
             results.push(result);
-            if failed {
+            if fail_count >= max_fail {
                 break;
             }
         }
@@ -289,7 +335,7 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let output_format =
         OutputFormat::from_str_with_junit(Some(&cli.output_format), cli.junit_xml.clone());
 
-    let formatted = format_results(&results, &output_format, cli.verbose);
+    let formatted = format_results(&results, &output_format, cli.verbose, &cli.traceback);
     if !formatted.is_empty() {
         println!("{}", formatted);
     }
@@ -303,6 +349,19 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // Print summary
     let duration = start.elapsed();
     print_summary(&results, duration);
+
+    // Show slowest tests if --durations is set
+    if let Some(n) = cli.durations {
+        if n > 0 {
+            let mut sorted: Vec<_> = results.iter().collect();
+            sorted.sort_by(|a, b| b.duration.cmp(&a.duration));
+            let count = n.min(sorted.len());
+            eprintln!("\n{}", format!("slowest {} durations", count).bold());
+            for r in sorted.iter().take(count) {
+                eprintln!("  {:.3}s {}", r.duration.as_secs_f64(), r.test_id);
+            }
+        }
+    }
 
     // Shutdown plugins
     plugins.shutdown_all()?;
@@ -336,6 +395,8 @@ struct WatchConfig {
     workers: Option<usize>,
     exitfirst: bool,
     incremental: bool,
+    maxfail: Option<usize>,
+    traceback: String,
 }
 
 impl WatchConfig {
@@ -351,6 +412,8 @@ impl WatchConfig {
             workers: cli.workers,
             exitfirst: cli.exitfirst,
             incremental: cli.incremental,
+            maxfail: cli.maxfail,
+            traceback: cli.traceback.clone(),
         }
     }
 }
@@ -440,15 +503,20 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     let executor = HybridExecutor::with_workers(cfg.workers);
 
-    let results = if cfg.exitfirst {
+    let max_failures = if cfg.exitfirst { Some(1) } else { cfg.maxfail };
+
+    let results = if let Some(max_fail) = max_failures {
         let inprocess = executor.inprocess();
         let mut results = Vec::new();
+        let mut fail_count = 0;
         for test in &tests {
             let batch = inprocess.execute(std::slice::from_ref(test));
             let result = batch.into_iter().next().unwrap();
-            let failed = !result.passed();
+            if !result.passed() {
+                fail_count += 1;
+            }
             results.push(result);
-            if failed {
+            if fail_count >= max_fail {
                 break;
             }
         }
@@ -459,7 +527,7 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     let output_format =
         OutputFormat::from_str_with_junit(Some(&cfg.output_format), cfg.junit_xml.clone());
-    let formatted = format_results(&results, &output_format, cfg.verbose);
+    let formatted = format_results(&results, &output_format, cfg.verbose, &cfg.traceback);
     if !formatted.is_empty() {
         println!("{}", formatted);
     }

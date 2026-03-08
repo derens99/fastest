@@ -81,14 +81,24 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       self._patches = []\n\
              \x20       self._env_patches = []\n\
              \x20   _NOTSET = object()\n\
-             \x20   def setattr(self, target, name, value=_NOTSET):\n\
+             \x20   def setattr(self, target, name=_NOTSET, value=_NOTSET):\n\
              \x20       if value is self._NOTSET:\n\
+             \x20           if name is self._NOTSET:\n\
+             \x20               raise TypeError('setattr requires at least 2 arguments')\n\
              \x20           # Two-arg form: setattr(\"pkg.mod.Class.attr\", value)\n\
              \x20           value = name\n\
              \x20           parts = target.rsplit('.', 1)\n\
              \x20           import importlib\n\
-             \x20           target = importlib.import_module(parts[0]) if len(parts) == 2 else target\n\
-             \x20           name = parts[-1]\n\
+             \x20           if len(parts) == 2:\n\
+             \x20               modpath, attrname = parts\n\
+             \x20               segs = modpath.split('.')\n\
+             \x20               obj = importlib.import_module(segs[0])\n\
+             \x20               for seg in segs[1:]:\n\
+             \x20                   obj = getattr(obj, seg)\n\
+             \x20               target = obj\n\
+             \x20               name = attrname\n\
+             \x20           else:\n\
+             \x20               raise TypeError('string target must be dotted path')\n\
              \x20       old = getattr(target, name)\n\
              \x20       self._patches.append((target, name, old))\n\
              \x20       setattr(target, name, value)\n\

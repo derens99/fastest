@@ -158,7 +158,22 @@ impl InProcessExecutor {
                 }
                 Err(e) => {
                     let error_msg = e.to_string();
-                    (TestOutcome::Failed, captured, Some(error_msg))
+                    // Distinguish import/collection errors from test assertion failures
+                    let is_collection_error = error_msg.contains("ModuleNotFoundError")
+                        || error_msg.contains("ImportError")
+                        || error_msg.contains("SyntaxError")
+                        || error_msg.contains("AttributeError: module");
+                    if is_collection_error {
+                        (
+                            TestOutcome::Error {
+                                message: error_msg.clone(),
+                            },
+                            captured,
+                            Some(error_msg),
+                        )
+                    } else {
+                        (TestOutcome::Failed, captured, Some(error_msg))
+                    }
                 }
             }
         });
@@ -350,31 +365,50 @@ pub fn build_test_code(test: &TestItem) -> String {
         fixture_setup_parts.push(
             "__fastest_fix_kwargs = {}\n\
              import importlib.util as __fastest_ilu\n\
+             import inspect as __fastest_insp\n\
+             __fastest_conftest_paths = []\n\
              __fastest_cd = __fastest_test_dir\n\
-             __fastest_cmod = None\n\
              while True:\n\
              \x20   __fastest_cp = os.path.join(__fastest_cd, 'conftest.py')\n\
              \x20   if os.path.exists(__fastest_cp):\n\
-             \x20       if 'conftest' in sys.modules:\n\
-             \x20           del sys.modules['conftest']\n\
-             \x20       import pytest as __fastest_pt\n\
-             \x20       __fastest_orig_fix = __fastest_pt.fixture\n\
-             \x20       __fastest_pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)\n\
-             \x20       __fastest_cspec = __fastest_ilu.spec_from_file_location('conftest', __fastest_cp)\n\
-             \x20       __fastest_cmod = __fastest_ilu.module_from_spec(__fastest_cspec)\n\
-             \x20       __fastest_cspec.loader.exec_module(__fastest_cmod)\n\
-             \x20       __fastest_pt.fixture = __fastest_orig_fix\n\
-             \x20       break\n\
+             \x20       __fastest_conftest_paths.append(__fastest_cp)\n\
              \x20   __fastest_pd = os.path.dirname(__fastest_cd)\n\
              \x20   if __fastest_pd == __fastest_cd:\n\
              \x20       break\n\
-             \x20   __fastest_cd = __fastest_pd"
+             \x20   __fastest_cd = __fastest_pd\n\
+             __fastest_conftest_paths.reverse()"
                 .to_string(),
         );
         for name in &conftest_fixture_names {
             fixture_setup_parts.push(format!(
-                "if __fastest_cmod and hasattr(__fastest_cmod, '{name}'):\n\
-                 \x20   __fastest_fix_kwargs['{name}'] = __fastest_cmod.{name}()"
+                "for __fastest_cp in __fastest_conftest_paths:\n\
+                 \x20   __fastest_ck = 'conftest_' + __fastest_cp.replace(os.sep, '_').replace('.', '_')\n\
+                 \x20   if __fastest_ck in sys.modules:\n\
+                 \x20       del sys.modules[__fastest_ck]\n\
+                 \x20   import pytest as __fastest_pt\n\
+                 \x20   __fastest_orig_fix = __fastest_pt.fixture\n\
+                 \x20   __fastest_pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)\n\
+                 \x20   __fastest_cspec = __fastest_ilu.spec_from_file_location(__fastest_ck, __fastest_cp)\n\
+                 \x20   __fastest_cmod = __fastest_ilu.module_from_spec(__fastest_cspec)\n\
+                 \x20   __fastest_cspec.loader.exec_module(__fastest_cmod)\n\
+                 \x20   __fastest_pt.fixture = __fastest_orig_fix\n\
+                 \x20   if hasattr(__fastest_cmod, '{name}'):\n\
+                 \x20       __fastest_fix_sig = __fastest_insp.signature(__fastest_cmod.{name})\n\
+                 \x20       __fastest_fix_args = {{}}\n\
+                 \x20       for __fastest_pn in __fastest_fix_sig.parameters:\n\
+                 \x20           if __fastest_pn in __fastest_fix_kwargs:\n\
+                 \x20               __fastest_fix_args[__fastest_pn] = __fastest_fix_kwargs[__fastest_pn]\n\
+                 \x20           elif __fastest_pn in locals():\n\
+                 \x20               __fastest_fix_args[__fastest_pn] = locals()[__fastest_pn]\n\
+                 \x20       __fastest_fix_result = __fastest_cmod.{name}(**__fastest_fix_args)\n\
+                 \x20       if __fastest_insp.isgenerator(__fastest_fix_result):\n\
+                 \x20           try:\n\
+                 \x20               __fastest_fix_kwargs['{name}'] = next(__fastest_fix_result)\n\
+                 \x20           except StopIteration:\n\
+                 \x20               __fastest_fix_kwargs['{name}'] = None\n\
+                 \x20       else:\n\
+                 \x20           __fastest_fix_kwargs['{name}'] = __fastest_fix_result\n\
+                 \x20       break"
             ));
         }
     }
