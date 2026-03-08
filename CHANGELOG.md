@@ -1,3 +1,10 @@
+# [2.1.0](https://github.com/derens99/fastest/compare/v2.0.0...v2.1.0) (2026-03-08)
+
+
+### Features
+
+* add CLI flags, fixture improvements, and better error reporting ([#20](https://github.com/derens99/fastest/issues/20)) ([2ee3ef4](https://github.com/derens99/fastest/commit/2ee3ef4cb13d66bed8318a9a0bddb308964ccbd5))
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
