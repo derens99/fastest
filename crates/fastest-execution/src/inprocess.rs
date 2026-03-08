@@ -86,6 +86,16 @@ impl InProcessExecutor {
         let code = build_test_code(test);
 
         let (outcome, captured, error) = Python::with_gil(|py| {
+            // Snapshot sys.path, sys.modules, os.environ for isolation
+            // (must happen BEFORE capture redirect to avoid saving redirected state)
+            let snapshot_isolation = c_str!(
+                "import sys, os\n\
+                 __fastest_saved_path = sys.path[:]\n\
+                 __fastest_saved_modules = set(sys.modules.keys())\n\
+                 __fastest_saved_env = dict(os.environ)"
+            );
+            let snapshot_ok = py.run(snapshot_isolation, None, None).is_ok();
+
             // Set up stdout/stderr capture in Python
             let setup_capture = c_str!(
                 "import sys, io\n\
@@ -133,6 +143,19 @@ impl InProcessExecutor {
 
             // Restore stdout/stderr and collect captured output
             let _ = py.run(restore_capture, None, None);
+
+            // Restore sys.path, sys.modules, os.environ for isolation
+            if snapshot_ok {
+                let restore_isolation = c_str!(
+                    "sys.path[:] = __fastest_saved_path\n\
+                     for __fastest_mn in list(sys.modules.keys()):\n\
+                     \x20   if __fastest_mn not in __fastest_saved_modules:\n\
+                     \x20       del sys.modules[__fastest_mn]\n\
+                     os.environ.clear()\n\
+                     os.environ.update(__fastest_saved_env)"
+                );
+                let _ = py.run(restore_isolation, None, None);
+            }
 
             let captured = extract_captured_output(py);
 

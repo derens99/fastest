@@ -17,6 +17,7 @@ use fastest_core::{
     discover_conftest_fixtures, discover_tests, expand_parametrized_tests, filter_by_keyword,
     filter_by_markers, Config, HookArgs, IncrementalTester, PluginManager, TestWatcher,
 };
+use fastest_execution::timeout::TimeoutConfig;
 use fastest_execution::HybridExecutor;
 
 use crate::output::{format_results, print_summary, write_junit_xml, OutputFormat};
@@ -70,6 +71,10 @@ struct Cli {
     /// Number of parallel workers (default: num CPUs)
     #[arg(long = "workers", short = 'j')]
     workers: Option<usize>,
+
+    /// Per-test timeout in seconds (default: 60)
+    #[arg(long = "timeout")]
+    timeout: Option<u64>,
 
     /// Run only tests affected by uncommitted changes
     #[arg(long = "incremental")]
@@ -472,7 +477,9 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     );
 
     // 9. Execute tests
-    let executor = HybridExecutor::with_workers(cli.workers);
+    let timeout_config =
+        TimeoutConfig::with_duration(std::time::Duration::from_secs(cli.timeout.unwrap_or(60)));
+    let executor = HybridExecutor::with_config(cli.workers, timeout_config);
 
     let max_failures = if cli.exitfirst { Some(1) } else { cli.maxfail };
 
@@ -605,6 +612,7 @@ struct WatchConfig {
     verbose: bool,
     no_plugins: bool,
     workers: Option<usize>,
+    timeout: Option<u64>,
     exitfirst: bool,
     incremental: bool,
     maxfail: Option<usize>,
@@ -629,6 +637,7 @@ impl WatchConfig {
             verbose: cli.verbose,
             no_plugins: cli.no_plugins,
             workers: cli.workers,
+            timeout: cli.timeout,
             exitfirst: cli.exitfirst,
             incremental: cli.incremental,
             maxfail: cli.maxfail,
@@ -791,7 +800,9 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         if tests.len() == 1 { "" } else { "s" }
     );
 
-    let executor = HybridExecutor::with_workers(cfg.workers);
+    let timeout_config =
+        TimeoutConfig::with_duration(std::time::Duration::from_secs(cfg.timeout.unwrap_or(60)));
+    let executor = HybridExecutor::with_config(cfg.workers, timeout_config);
 
     let max_failures = if cfg.exitfirst { Some(1) } else { cfg.maxfail };
 

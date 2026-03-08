@@ -1,7 +1,13 @@
-import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib
+import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib, inspect
 
 # Cache the builtin abs() to avoid issues when __builtins__ is a module vs dict
 builtins_abs = abs
+
+# Worker-level caches (persist across test runs within a single worker process)
+_module_cache = {}         # abs_path -> module object
+_conftest_cache = {}       # conftest_abs_path -> module object
+_setup_module_done = set() # abs paths where setup_module has been called
+_setup_class_done = set()  # (abs_path, class_name) tuples where setup_class has been called
 
 # Provide a minimal pytest compatibility shim so tests using pytest.raises/pytest.mark etc. work
 class _PytestRaisesContext:
@@ -105,19 +111,82 @@ _current_module_path = None
 _current_class_name = None
 
 
+def _run_pending_teardowns():
+    """Run teardown_class and teardown_module for the last processed class/module."""
+    global _current_module_path, _current_class_name
+    if _current_class_name is not None and _current_module_path and _current_module_path in _module_cache:
+        mod = _module_cache[_current_module_path]
+        if hasattr(mod, _current_class_name):
+            cls = getattr(mod, _current_class_name)
+            if hasattr(cls, 'teardown_class'):
+                try:
+                    cls.teardown_class()
+                except Exception:
+                    pass
+    if _current_module_path and _current_module_path in _module_cache:
+        mod = _module_cache[_current_module_path]
+        if hasattr(mod, 'teardown_module'):
+            try:
+                _call_module_func(mod.teardown_module, mod)
+            except Exception:
+                pass
+    _current_module_path = None
+    _current_class_name = None
+
+
+def _call_module_func(func, mod):
+    """Call setup_module/teardown_module, passing the module if the function expects an argument."""
+    try:
+        sig = inspect.signature(func)
+        if sig.parameters:
+            func(mod)
+        else:
+            func()
+    except (ValueError, TypeError):
+        # Fallback: try with arg first, then without
+        try:
+            func(mod)
+        except TypeError:
+            func()
+
+
 def run_test(test_item):
     """Execute a single test item and return the result as a dict."""
     global _current_module_path, _current_class_name
     start = time.time()
 
-    # Detect scope boundary transitions for fixture caching
-    new_module = test_item.get("path", "")
+    # Use absolute paths for consistent caching
+    new_module = os.path.abspath(test_item.get("path", ""))
     new_class = test_item.get("class_name")
+
+    # Module transition: run teardowns for previous module/class
     if new_module != _current_module_path:
+        if _current_class_name is not None and _current_module_path and _current_module_path in _module_cache:
+            prev_mod = _module_cache[_current_module_path]
+            if hasattr(prev_mod, _current_class_name):
+                prev_cls = getattr(prev_mod, _current_class_name)
+                if hasattr(prev_cls, 'teardown_class'):
+                    try: prev_cls.teardown_class()
+                    except Exception: pass
+        if _current_module_path and _current_module_path in _module_cache:
+            prev_mod = _module_cache[_current_module_path]
+            if hasattr(prev_mod, 'teardown_module'):
+                try: _call_module_func(prev_mod.teardown_module, prev_mod)
+                except Exception: pass
         _fixture_scope_cache['module'].clear()
         _fixture_scope_cache['class'].clear()
         _current_module_path = new_module
+        _current_class_name = None
+
+    # Class transition: run teardown_class for previous class
     if new_class != _current_class_name:
+        if _current_class_name is not None and _current_module_path in _module_cache:
+            prev_mod = _module_cache[_current_module_path]
+            if hasattr(prev_mod, _current_class_name):
+                prev_cls = getattr(prev_mod, _current_class_name)
+                if hasattr(prev_cls, 'teardown_class'):
+                    try: prev_cls.teardown_class()
+                    except Exception: pass
         _fixture_scope_cache['class'].clear()
         _current_class_name = new_class
 
@@ -142,7 +211,6 @@ def run_test(test_item):
             condition = m.get("args", [""])[0] if m.get("args") else ""
             reason = m.get("kwargs", {}).get("reason")
             try:
-
                 if eval(str(condition)):
                     return {
                         "test_id": test_item["id"],
@@ -177,17 +245,22 @@ def run_test(test_item):
     try:
         sys.stdout, sys.stderr = stdout_capture, stderr_capture
         # Add test dir to path
-        test_dir = os.path.dirname(os.path.abspath(test_item["path"]))
+        test_dir = os.path.dirname(new_module)
         if test_dir not in sys.path:
             sys.path.insert(0, test_dir)
-        # Import module (validate name is a valid Python identifier)
-        module_name = os.path.splitext(os.path.basename(test_item["path"]))[0]
+        # Load module using cache (avoid unnecessary reimport)
+        module_name = os.path.splitext(os.path.basename(new_module))[0]
         if not module_name.isidentifier():
             module_name = "".join(c if c.isalnum() or c == "_" else "_" for c in module_name)
             if not module_name or module_name[0].isdigit():
                 module_name = "_" + module_name
-        mod = importlib.import_module(module_name)
-        importlib.reload(mod)  # Ensure fresh import
+        if new_module in _module_cache:
+            mod = _module_cache[new_module]
+        else:
+            spec = importlib.util.spec_from_file_location(module_name, new_module)
+            mod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(mod)
+            _module_cache[new_module] = mod
         # Get and call test function
         # Setup builtin fixtures
         fixture_deps = test_item.get("fixture_deps") or []
@@ -415,16 +488,22 @@ def run_test(test_item):
                 # Load from root to leaf so deeper conftest overrides
                 conftest_paths.reverse()
                 for cp in conftest_paths:
-                    conftest_key = "conftest_" + cp.replace(os.sep, "_").replace(".", "_")
-                    if conftest_key in sys.modules:
-                        del sys.modules[conftest_key]
-                    import pytest as _pt
-                    _orig_fix = _pt.fixture
-                    _pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)
-                    spec = importlib.util.spec_from_file_location(conftest_key, cp)
-                    cmod = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(cmod)
-                    _pt.fixture = _orig_fix
+                    # Use conftest cache to avoid re-executing conftest.py on every lookup
+                    abs_cp = os.path.abspath(cp)
+                    if abs_cp in _conftest_cache:
+                        cmod = _conftest_cache[abs_cp]
+                    else:
+                        conftest_key = "conftest_" + cp.replace(os.sep, "_").replace(".", "_")
+                        if conftest_key in sys.modules:
+                            del sys.modules[conftest_key]
+                        import pytest as _pt
+                        _orig_fix = _pt.fixture
+                        _pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)
+                        spec = importlib.util.spec_from_file_location(conftest_key, cp)
+                        cmod = importlib.util.module_from_spec(spec)
+                        spec.loader.exec_module(cmod)
+                        _pt.fixture = _orig_fix
+                        _conftest_cache[abs_cp] = cmod
                     if hasattr(cmod, dep):
                         fixture_func = getattr(cmod, dep)
                         # Determine fixture scope
@@ -456,18 +535,19 @@ def run_test(test_item):
                         break  # Found the fixture, stop searching conftest files
 
         # Call setup_module if present and not already called for this module
-        if hasattr(mod, 'setup_module') and not getattr(mod, '_fastest_setup_done', False):
-            mod.setup_module()
-            mod._fastest_setup_done = True
+        if hasattr(mod, 'setup_module') and new_module not in _setup_module_done:
+            _setup_module_done.add(new_module)  # Mark before calling to avoid retry on error
+            _call_module_func(mod.setup_module, mod)
 
         # Execute test
         result = None
         try:
             if test_item.get("class_name"):
                 cls = getattr(mod, test_item["class_name"])
-                if hasattr(cls, "setup_class") and not getattr(cls, '_fastest_setup_class_done', False):
+                cls_key = (new_module, test_item["class_name"])
+                if hasattr(cls, "setup_class") and cls_key not in _setup_class_done:
                     cls.setup_class()
-                    cls._fastest_setup_class_done = True
+                    _setup_class_done.add(cls_key)
                 instance = cls()
                 try:
                     if hasattr(instance, "setup_method"):
@@ -485,9 +565,7 @@ def run_test(test_item):
                 finally:
                     if hasattr(instance, "teardown_method"):
                         instance.teardown_method()
-                    if hasattr(cls, "teardown_class") and not getattr(cls, '_fastest_teardown_class_done', False):
-                        cls.teardown_class()
-                        cls._fastest_teardown_class_done = True
+                    # teardown_class is deferred to class/module transition
             else:
                 func = getattr(mod, test_item["function_name"])
                 if hasattr(mod, 'setup_function'):
@@ -592,6 +670,9 @@ for line in sys.stdin:
         break
     try:
         result = run_test(json.loads(line))
-        print(json.dumps(result), flush=True)
+        print("FASTEST_RESULT:" + json.dumps(result), flush=True)
     except Exception as e:
-        print(json.dumps({"error": str(e)}), flush=True)
+        print("FASTEST_RESULT:" + json.dumps({"error": str(e)}), flush=True)
+
+# Run final teardowns for the last module/class processed
+_run_pending_teardowns()
