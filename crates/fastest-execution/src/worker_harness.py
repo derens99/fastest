@@ -1,4 +1,4 @@
-import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib
+import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib, inspect
 
 # Cache the builtin abs() to avoid issues when __builtins__ is a module vs dict
 builtins_abs = abs
@@ -127,11 +127,27 @@ def _run_pending_teardowns():
         mod = _module_cache[_current_module_path]
         if hasattr(mod, 'teardown_module'):
             try:
-                mod.teardown_module()
+                _call_module_func(mod.teardown_module, mod)
             except Exception:
                 pass
     _current_module_path = None
     _current_class_name = None
+
+
+def _call_module_func(func, mod):
+    """Call setup_module/teardown_module, passing the module if the function expects an argument."""
+    try:
+        sig = inspect.signature(func)
+        if sig.parameters:
+            func(mod)
+        else:
+            func()
+    except (ValueError, TypeError):
+        # Fallback: try with arg first, then without
+        try:
+            func(mod)
+        except TypeError:
+            func()
 
 
 def run_test(test_item):
@@ -155,7 +171,7 @@ def run_test(test_item):
         if _current_module_path and _current_module_path in _module_cache:
             prev_mod = _module_cache[_current_module_path]
             if hasattr(prev_mod, 'teardown_module'):
-                try: prev_mod.teardown_module()
+                try: _call_module_func(prev_mod.teardown_module, prev_mod)
                 except Exception: pass
         _fixture_scope_cache['module'].clear()
         _fixture_scope_cache['class'].clear()
@@ -520,8 +536,8 @@ def run_test(test_item):
 
         # Call setup_module if present and not already called for this module
         if hasattr(mod, 'setup_module') and new_module not in _setup_module_done:
-            mod.setup_module()
-            _setup_module_done.add(new_module)
+            _setup_module_done.add(new_module)  # Mark before calling to avoid retry on error
+            _call_module_func(mod.setup_module, mod)
 
         # Execute test
         result = None

@@ -375,7 +375,20 @@ impl SubprocessPool {
                         let result = execute_on_worker(&mut worker, &test, timeout);
                         let worker_died = !worker.is_alive();
 
-                        {
+                        if worker_died {
+                            // Distinguish timeout kill (keep result) from crash (re-enqueue)
+                            let was_timeout = matches!(
+                                &result.outcome,
+                                TestOutcome::Error { message } if message.contains("timeout")
+                            );
+                            if was_timeout {
+                                let mut guard = results_lock.lock();
+                                guard[idx] = Some(result);
+                            } else {
+                                // Unexpected crash — re-enqueue for retry on new worker
+                                injector.push((idx, test));
+                            }
+                        } else {
                             let mut guard = results_lock.lock();
                             guard[idx] = Some(result);
                         }
@@ -586,6 +599,7 @@ impl PersistentWorker {
     fn kill(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+        self.alive.store(false, Ordering::SeqCst);
     }
 
     /// Signal the worker to exit gracefully and wait for process to finish.
@@ -719,8 +733,13 @@ fn execute_on_worker(
                         Ok(wr) => {
                             let mut result = wr.into_test_result(&test.id);
                             // Merge captured stdout from non-result lines
-                            if !captured_stdout.is_empty() && result.stdout.is_empty() {
-                                result.stdout = captured_stdout;
+                            if !captured_stdout.is_empty() {
+                                if result.stdout.is_empty() {
+                                    result.stdout = captured_stdout;
+                                } else {
+                                    result.stdout =
+                                        format!("{}\n{}", captured_stdout, result.stdout);
+                                }
                             }
                             return result;
                         }
