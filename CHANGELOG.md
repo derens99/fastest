@@ -1,3 +1,10 @@
+# [2.3.0](https://github.com/derens99/fastest/compare/v2.2.0...v2.3.0) (2026-03-08)
+
+
+### Features
+
+* phase 5 full pytest compatibility - setup/teardown, capfd, scope caching, CLI flags ([#33](https://github.com/derens99/fastest/issues/33)) ([6fd83af](https://github.com/derens99/fastest/commit/6fd83aff1efbc52c9a09740c45160d817b1f0650))
+
 # [2.2.0](https://github.com/derens99/fastest/compare/v2.1.1...v2.2.0) (2026-03-08)
 
 
