@@ -21,7 +21,7 @@ use walkdir::WalkDir;
 /// 3. Reads and parses files in parallel using rayon
 /// 4. Collects all discovered [`TestItem`]s
 pub fn discover_tests(paths: &[PathBuf], config: &Config) -> Result<Vec<TestItem>> {
-    let test_files = collect_test_files(paths, config);
+    let test_files = collect_test_files(paths, config, &config.norecursedirs);
 
     let results: Vec<Result<Vec<TestItem>>> = test_files
         .par_iter()
@@ -71,12 +71,19 @@ const SKIP_DIRS: &[&str] = &[
 
 /// Check whether a directory name should be skipped during traversal.
 ///
-/// Matches exact names in [`SKIP_DIRS`] and any directory ending with `.egg-info`.
-pub(crate) fn should_skip_dir(name: &str) -> bool {
-    SKIP_DIRS.contains(&name) || name.ends_with(".egg-info")
+/// Matches exact names in [`SKIP_DIRS`], any directory ending with `.egg-info`,
+/// and any directory name found in `extra_skip` (from `norecursedirs` config).
+pub(crate) fn should_skip_dir(name: &str, extra_skip: &[String]) -> bool {
+    SKIP_DIRS.contains(&name)
+        || name.ends_with(".egg-info")
+        || extra_skip.iter().any(|d| name == d.as_str())
 }
 
-fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
+fn collect_test_files(
+    paths: &[PathBuf],
+    config: &Config,
+    norecursedirs: &[String],
+) -> Vec<PathBuf> {
     let mut test_files = Vec::new();
 
     for path in paths {
@@ -90,7 +97,7 @@ fn collect_test_files(paths: &[PathBuf], config: &Config) -> Vec<PathBuf> {
             let walker = WalkDir::new(path).into_iter().filter_entry(|e| {
                 if e.file_type().is_dir() {
                     if let Some(name) = e.file_name().to_str() {
-                        return !should_skip_dir(name);
+                        return !should_skip_dir(name, norecursedirs);
                     }
                 }
                 true
@@ -141,7 +148,7 @@ mod tests {
 
         let config = Config::default();
         let paths = vec![root.to_path_buf()];
-        let files = collect_test_files(&paths, &config);
+        let files = collect_test_files(&paths, &config, &config.norecursedirs);
 
         // Should find test_basic.py, basic_test.py, subdir/test_nested.py
         assert_eq!(files.len(), 3);

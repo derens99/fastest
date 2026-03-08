@@ -389,6 +389,8 @@ pub fn build_test_code(test: &TestItem) -> String {
                 fixture_cleanup_parts.push("monkeypatch.undo()".to_string());
             } else if dep == "capsys" {
                 fixture_cleanup_parts.push("capsys._restore()".to_string());
+            } else if dep == "capfd" {
+                fixture_cleanup_parts.push("capfd._restore()".to_string());
             } else if dep == "caplog" {
                 fixture_cleanup_parts.push("caplog._restore()".to_string());
             } else if dep == "request" {
@@ -522,8 +524,10 @@ pub fn build_test_code(test: &TestItem) -> String {
         format!(
             "{async_import}\
              __fastest_cls = getattr(__fastest_mod, '{class_name}')\n\
-             if hasattr(__fastest_cls, 'setup_class'):\n\
-             \x20   __fastest_cls.setup_class()\n\
+             if not getattr(__fastest_cls, '_fastest_setup_class_done', False):\n\
+             \x20   if hasattr(__fastest_cls, 'setup_class'):\n\
+             \x20       __fastest_cls.setup_class()\n\
+             \x20   __fastest_cls._fastest_setup_class_done = True\n\
              __fastest_instance = __fastest_cls()\n\
              try:\n\
              \x20   if hasattr(__fastest_instance, 'setup_method'):\n\
@@ -531,34 +535,59 @@ pub fn build_test_code(test: &TestItem) -> String {
              \x20   __fastest_result = getattr(__fastest_instance, '{func_name}')({kwargs}){async_part}\n\
              finally:\n\
              \x20   if hasattr(__fastest_instance, 'teardown_method'):\n\
-             \x20       __fastest_instance.teardown_method(){cleanup_part}"
+             \x20       __fastest_instance.teardown_method()\n\
+             \x20   if hasattr(__fastest_cls, 'teardown_class') and not getattr(__fastest_cls, '_fastest_teardown_class_done', False):\n\
+             \x20       __fastest_cls.teardown_class()\n\
+             \x20       __fastest_cls._fastest_teardown_class_done = True{cleanup_part}"
         )
     } else if !fixture_cleanup_parts.is_empty() && test.is_async {
         format!(
             "import asyncio\n\
+             if hasattr(__fastest_mod, 'setup_function'):\n\
+             \x20   __fastest_mod.setup_function(getattr(__fastest_mod, '{func_name}'))\n\
              try:\n\
              \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
              \x20   if asyncio.iscoroutine(__fastest_result):\n\
              \x20       asyncio.run(__fastest_result)\n\
              finally:\n\
+             \x20   if hasattr(__fastest_mod, 'teardown_function'):\n\
+             \x20       __fastest_mod.teardown_function(getattr(__fastest_mod, '{func_name}'))\n\
              \x20   {cleanup_code}"
         )
     } else if !fixture_cleanup_parts.is_empty() {
         format!(
-            "try:\n\
+            "if hasattr(__fastest_mod, 'setup_function'):\n\
+             \x20   __fastest_mod.setup_function(getattr(__fastest_mod, '{func_name}'))\n\
+             try:\n\
              \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
              finally:\n\
+             \x20   if hasattr(__fastest_mod, 'teardown_function'):\n\
+             \x20       __fastest_mod.teardown_function(getattr(__fastest_mod, '{func_name}'))\n\
              \x20   {cleanup_code}"
         )
     } else if test.is_async {
         format!(
             "import asyncio\n\
-             __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
-             if asyncio.iscoroutine(__fastest_result):\n\
-             \x20   asyncio.run(__fastest_result)"
+             if hasattr(__fastest_mod, 'setup_function'):\n\
+             \x20   __fastest_mod.setup_function(getattr(__fastest_mod, '{func_name}'))\n\
+             try:\n\
+             \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
+             \x20   if asyncio.iscoroutine(__fastest_result):\n\
+             \x20       asyncio.run(__fastest_result)\n\
+             finally:\n\
+             \x20   if hasattr(__fastest_mod, 'teardown_function'):\n\
+             \x20       __fastest_mod.teardown_function(getattr(__fastest_mod, '{func_name}'))"
         )
     } else {
-        format!("__fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})")
+        format!(
+            "if hasattr(__fastest_mod, 'setup_function'):\n\
+             \x20   __fastest_mod.setup_function(getattr(__fastest_mod, '{func_name}'))\n\
+             try:\n\
+             \x20   __fastest_result = getattr(__fastest_mod, '{func_name}')({kwargs})\n\
+             finally:\n\
+             \x20   if hasattr(__fastest_mod, 'teardown_function'):\n\
+             \x20       __fastest_mod.teardown_function(getattr(__fastest_mod, '{func_name}'))"
+        )
     };
 
     let parent_path_setup = if parent_dir.is_empty() {

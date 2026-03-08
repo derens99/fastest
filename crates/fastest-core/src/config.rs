@@ -30,6 +30,9 @@ pub struct Config {
     #[serde(default)]
     pub cache_dir: Option<PathBuf>,
 
+    #[serde(default)]
+    pub norecursedirs: Vec<String>,
+
     /// Fastest-specific config
     #[serde(default)]
     pub fastest: FastestConfig,
@@ -58,6 +61,7 @@ impl Default for Config {
             addopts: String::new(),
             minversion: None,
             cache_dir: None,
+            norecursedirs: vec![],
             fastest: FastestConfig::default(),
         }
     }
@@ -176,6 +180,15 @@ impl Config {
         if let Some(s) = options.get("addopts").and_then(|v| v.as_str()) {
             config.addopts = s.to_string();
         }
+        // norecursedirs: accept an array of strings or a space-separated string
+        if let Some(arr) = options.get("norecursedirs").and_then(|v| v.as_array()) {
+            config.norecursedirs = arr
+                .iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        } else if let Some(s) = options.get("norecursedirs").and_then(|v| v.as_str()) {
+            config.norecursedirs = s.split_whitespace().map(String::from).collect();
+        }
     }
 
     /// Load config from an INI-style file with a specific section
@@ -264,6 +277,9 @@ impl Config {
                     }
                     "cache_dir" => {
                         config.cache_dir = Some(PathBuf::from(value));
+                    }
+                    "norecursedirs" => {
+                        config.norecursedirs = value.split_whitespace().map(String::from).collect();
                     }
                     _ => {}
                 }

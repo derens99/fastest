@@ -29,7 +29,7 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
     let walker = WalkDir::new(root).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
             if let Some(name) = e.file_name().to_str() {
-                return !should_skip_dir(name);
+                return !should_skip_dir(name, &[]);
             }
         }
         true
