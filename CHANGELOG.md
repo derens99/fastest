@@ -1,3 +1,11 @@
+# [2.2.0](https://github.com/derens99/fastest/compare/v2.1.1...v2.2.0) (2026-03-08)
+
+
+### Features
+
+* phase 3 compatibility improvements ([#30](https://github.com/derens99/fastest/issues/30)) ([704c82b](https://github.com/derens99/fastest/commit/704c82b8ccd2640e242b127525a39403eed56191))
+* phase 4 pytest compatibility - nested classes, --lf/--ff, autouse, pytest.param, caplog ([#31](https://github.com/derens99/fastest/issues/31)) ([1df691c](https://github.com/derens99/fastest/commit/1df691cf0786bbc86dca97bcc48533302c16a2f1))
+
 ## [2.1.1](https://github.com/derens99/fastest/compare/v2.1.0...v2.1.1) (2026-03-08)
 
 
