@@ -20,6 +20,14 @@ use walkdir::WalkDir;
 /// function definitions.  Fixtures from deeper directories override those
 /// from shallower ones (closer conftest wins).
 pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture>> {
+    discover_conftest_fixtures_with_config(root, &[])
+}
+
+/// Discover conftest fixtures, respecting additional skip directories from config.
+pub fn discover_conftest_fixtures_with_config(
+    root: &Path,
+    norecursedirs: &[String],
+) -> Result<HashMap<String, Fixture>> {
     let mut fixtures = HashMap::new();
 
     // Collect conftest.py paths, sorted so shallower files come first.
@@ -29,7 +37,7 @@ pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture
     let walker = WalkDir::new(root).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
             if let Some(name) = e.file_name().to_str() {
-                return !should_skip_dir(name, &[]);
+                return !should_skip_dir(name, norecursedirs);
             }
         }
         true

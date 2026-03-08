@@ -136,10 +136,14 @@ impl PluginManager {
     }
 
     /// Register a plugin and maintain descending priority order.
+    ///
+    /// Uses binary search for O(n) insertion instead of sorting the full list.
     pub fn register(&mut self, plugin: Box<dyn Plugin>) -> Result<()> {
-        self.plugins.push(plugin);
-        self.plugins
-            .sort_by(|a, b| b.metadata().priority.cmp(&a.metadata().priority));
+        let priority = plugin.metadata().priority;
+        let pos = self
+            .plugins
+            .partition_point(|p| p.metadata().priority >= priority);
+        self.plugins.insert(pos, plugin);
         Ok(())
     }
 

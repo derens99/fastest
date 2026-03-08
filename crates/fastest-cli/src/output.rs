@@ -3,12 +3,16 @@
 //! Supports multiple output formats: pretty (pytest-style), JSON, count summary,
 //! and JUnit XML for CI integration.
 
+use std::fmt::Write as FmtWrite;
 use std::io::Write;
 use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
 use fastest_core::{TestOutcome, TestResult};
+
+/// Width of separator lines in output (e.g. "=" repeated).
+const SEPARATOR_WIDTH: usize = 60;
 
 /// Supported output formats.
 #[derive(Debug, Clone)]
@@ -80,10 +84,10 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
             TestOutcome::Error { .. } => "ERROR".red().bold().to_string(),
         };
 
-        out.push_str(&format!("{} {}", status, result.test_id));
+        let _ = write!(out, "{} {}", status, result.test_id);
 
         if verbose {
-            out.push_str(&format!(" ({:.3}s)", result.duration.as_secs_f64()));
+            let _ = write!(out, " ({:.3}s)", result.duration.as_secs_f64());
         }
 
         out.push('\n');
@@ -91,13 +95,13 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
         // Print failure details
         if verbose {
             if let Some(ref err) = result.error {
-                out.push_str(&format!("    {}\n", err.red()));
+                let _ = writeln!(out, "    {}", err.red());
             }
             if !result.stdout.is_empty() {
-                out.push_str(&format!("    --- stdout ---\n    {}\n", result.stdout));
+                let _ = writeln!(out, "    --- stdout ---\n    {}", result.stdout);
             }
             if !result.stderr.is_empty() {
-                out.push_str(&format!("    --- stderr ---\n    {}\n", result.stderr));
+                let _ = writeln!(out, "    --- stderr ---\n    {}", result.stderr);
             }
         } else if tb != "no" {
             // In non-verbose mode, show error for failures based on --tb setting
@@ -107,10 +111,10 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
                         if tb == "short" {
                             // Show only the last line of the traceback
                             let last_line = err.lines().last().unwrap_or(err);
-                            out.push_str(&format!("    {}\n", last_line.red()));
+                            let _ = writeln!(out, "    {}", last_line.red());
                         } else {
                             // "long" - show full traceback
-                            out.push_str(&format!("    {}\n", err.red()));
+                            let _ = writeln!(out, "    {}", err.red());
                         }
                     }
                 }
@@ -126,14 +130,14 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
         .collect();
 
     if !failures.is_empty() && !quiet {
-        out.push_str(&format!("\n{}\n", "=".repeat(60)));
-        out.push_str(&"FAILURES".red().bold().to_string());
+        let _ = writeln!(out, "\n{}", "=".repeat(SEPARATOR_WIDTH));
+        let _ = write!(out, "{}", "FAILURES".red().bold());
         out.push('\n');
-        out.push_str(&format!("{}\n", "=".repeat(60)));
+        let _ = writeln!(out, "{}", "=".repeat(SEPARATOR_WIDTH));
         for result in &failures {
-            out.push_str(&format!("___ {} ___\n", result.test_id));
+            let _ = writeln!(out, "___ {} ___", result.test_id);
             if let Some(ref err) = result.error {
-                out.push_str(&format!("{}\n", err));
+                let _ = writeln!(out, "{}", err);
             }
             out.push('\n');
         }
@@ -141,7 +145,7 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
 
     // Short test summary info
     if !failures.is_empty() && !quiet {
-        out.push_str(&format!("\n{}\n", "= SHORT TEST SUMMARY INFO ="));
+        let _ = writeln!(out, "\n= SHORT TEST SUMMARY INFO =");
         for result in &failures {
             let error_summary = result
                 .error
@@ -152,12 +156,13 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
                 TestOutcome::Error { .. } => "ERROR",
                 _ => "FAILED",
             };
-            out.push_str(&format!(
-                "{} {} - {}\n",
+            let _ = writeln!(
+                out,
+                "{} {} - {}",
                 prefix.red().bold(),
                 result.test_id,
                 error_summary
-            ));
+            );
         }
     }
 
@@ -313,10 +318,11 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
     };
 
     let has_failures = c.failed > 0 || c.errors > 0 || c.xpassed > 0;
+    let separator = "=".repeat(SEPARATOR_WIDTH);
     let decoration = if has_failures {
-        "=".repeat(60).red().to_string()
+        separator.red().to_string()
     } else {
-        "=".repeat(60).green().to_string()
+        separator.green().to_string()
     };
 
     // TODO: Warnings summary — collect and display pytest-style warnings here
@@ -466,18 +472,27 @@ fn split_test_id(id: &str) -> (String, String) {
 }
 
 /// Escape special XML characters and strip control characters illegal in XML 1.0.
+///
+/// Single-pass implementation that filters illegal chars and escapes XML
+/// entities without intermediate allocations.
 fn xml_escape(s: &str) -> String {
-    s.chars()
-        .filter(|&c| {
-            // XML 1.0 legal characters: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
-            matches!(c, '\u{09}' | '\u{0A}' | '\u{0D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
-        })
-        .collect::<String>()
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&apos;")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        // XML 1.0 legal characters: #x9 | #xA | #xD | [#x20-#xD7FF] | [#xE000-#xFFFD] | [#x10000-#x10FFFF]
+        if !matches!(c, '\u{09}' | '\u{0A}' | '\u{0D}' | '\u{20}'..='\u{D7FF}' | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}')
+        {
+            continue;
+        }
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            _ => out.push(c),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

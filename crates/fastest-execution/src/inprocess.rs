@@ -5,7 +5,6 @@
 //! because it avoids the overhead of spawning subprocesses.
 
 use std::ffi::CString;
-use std::time::Instant;
 
 use fastest_core::fixtures::builtin::generate_builtin_code;
 use fastest_core::markers::{classify_marker, BuiltinMarker};
@@ -57,8 +56,7 @@ impl InProcessExecutor {
                 }
                 BuiltinMarker::Skipif { condition, reason } => {
                     let should_skip = Python::with_gil(|py| {
-                        let setup = CString::new("import sys, os, platform").unwrap();
-                        let _ = py.run(&setup, None, None);
+                        let _ = py.run(c_str!("import sys, os, platform"), None, None);
                         match CString::new(condition.as_str()) {
                             Ok(cond_cstr) => match py.eval(&cond_cstr, None, None) {
                                 Ok(result) => result.is_truthy().unwrap_or(false),
@@ -84,7 +82,6 @@ impl InProcessExecutor {
         }
 
         let timer = TestTimer::start(self.timeout_config.clone());
-        let start = Instant::now();
 
         let code = build_test_code(test);
 
@@ -184,7 +181,7 @@ impl InProcessExecutor {
             }
         });
 
-        let duration = start.elapsed();
+        let duration = timer.elapsed();
 
         let mut result = TestResult {
             test_id: test.id.clone(),
@@ -308,7 +305,7 @@ fn is_valid_python_identifier(s: &str) -> bool {
 /// 2. Imports the test module
 /// 3. For class-based tests: instantiates the class, calls the method
 /// 4. For function tests: calls the function directly
-pub fn build_test_code(test: &TestItem) -> String {
+pub(crate) fn build_test_code(test: &TestItem) -> String {
     // Escape characters that could break out of Python string literals
     let path_str = escape_for_python_string(&test.path.to_string_lossy().replace('\\', "/"));
     let parent_dir = test

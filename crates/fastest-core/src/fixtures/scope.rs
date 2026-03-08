@@ -11,6 +11,7 @@ use std::collections::HashMap;
 /// Fixture values are cached per scope so that, for example, a session-scoped
 /// fixture is computed once and reused across the entire test session, while a
 /// function-scoped fixture is recomputed for every test.
+#[derive(Debug)]
 pub struct FixtureCache {
     function_cache: HashMap<String, serde_json::Value>,
     class_cache: HashMap<String, serde_json::Value>,

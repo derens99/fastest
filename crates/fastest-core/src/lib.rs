@@ -16,8 +16,8 @@ pub use config::Config;
 pub use discovery::discover_tests;
 pub use error::{Error, Result};
 pub use fixtures::{
-    discover_conftest_fixtures, generate_builtin_code, is_builtin, resolve_fixture_order, Fixture,
-    FixtureCache, FixtureScope,
+    discover_conftest_fixtures, discover_conftest_fixtures_with_config, generate_builtin_code,
+    is_builtin, resolve_fixture_order, Fixture, FixtureCache, FixtureScope,
 };
 pub use incremental::IncrementalTester;
 pub use lastfailed::{load_lastfailed, save_lastfailed};

@@ -108,22 +108,24 @@ impl WorkerResult {
             self.stderr.unwrap_or_default(),
         );
 
+        // Extract error message before consuming self.error in the outcome match.
+        let error_msg = self
+            .error
+            .as_deref()
+            .unwrap_or("Unknown worker error")
+            .to_string();
+
         let outcome = match self.outcome.as_deref() {
             Some("Passed") => TestOutcome::Passed,
             Some("Failed") => TestOutcome::Failed,
             Some("Skipped") => TestOutcome::Skipped {
-                reason: self.reason.clone(),
+                reason: self.reason,
             },
             Some("XFailed") => TestOutcome::XFailed {
-                reason: self.reason.clone(),
+                reason: self.reason,
             },
             Some("XPassed") => TestOutcome::XPassed,
-            _ => TestOutcome::Error {
-                message: self
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "Unknown worker error".into()),
-            },
+            _ => TestOutcome::Error { message: error_msg },
         };
 
         TestResult {
@@ -482,33 +484,47 @@ fn execute_on_worker(
     };
 
     // Write test to worker stdin
-    if let Some(ref mut stdin) = worker.child.stdin {
-        if let Err(e) = writeln!(stdin, "{}", json_input) {
+    let stdin = match worker.child.stdin.as_mut() {
+        Some(s) => s,
+        None => {
             return TestResult {
                 test_id: test.id.clone(),
                 outcome: TestOutcome::Error {
-                    message: format!("Failed to write to worker stdin: {e}"),
+                    message: "Worker stdin unavailable (pipe closed)".into(),
                 },
                 duration: start.elapsed(),
                 output: String::new(),
-                error: Some(e.to_string()),
+                error: Some("Worker stdin pipe is closed".into()),
                 stdout: String::new(),
                 stderr: String::new(),
             };
         }
-        if let Err(e) = stdin.flush() {
-            return TestResult {
-                test_id: test.id.clone(),
-                outcome: TestOutcome::Error {
-                    message: format!("Failed to flush worker stdin: {e}"),
-                },
-                duration: start.elapsed(),
-                output: String::new(),
-                error: Some(e.to_string()),
-                stdout: String::new(),
-                stderr: String::new(),
-            };
-        }
+    };
+    if let Err(e) = writeln!(stdin, "{}", json_input) {
+        return TestResult {
+            test_id: test.id.clone(),
+            outcome: TestOutcome::Error {
+                message: format!("Failed to write to worker stdin: {e}"),
+            },
+            duration: start.elapsed(),
+            output: String::new(),
+            error: Some(e.to_string()),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+    }
+    if let Err(e) = stdin.flush() {
+        return TestResult {
+            test_id: test.id.clone(),
+            outcome: TestOutcome::Error {
+                message: format!("Failed to flush worker stdin: {e}"),
+            },
+            duration: start.elapsed(),
+            output: String::new(),
+            error: Some(e.to_string()),
+            stdout: String::new(),
+            stderr: String::new(),
+        };
     }
 
     // Read exactly one result line from the persistent BufReader.
