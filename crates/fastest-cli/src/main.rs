@@ -34,7 +34,6 @@ use crate::progress::create_spinner;
 )]
 struct Cli {
     /// Test path(s) to discover
-    #[arg(default_value = ".")]
     paths: Vec<String>,
 
     #[command(subcommand)]
@@ -116,9 +115,25 @@ struct Cli {
     #[arg(long = "ff")]
     failed_first: bool,
 
+    /// Show extra test summary info: (f)ailed, (E)rror, (s)kipped, (x)failed, (X)passed, (p)assed
+    #[arg(short = 'r', long = "report")]
+    report: Option<String>,
+
     /// Alias for discover subcommand
     #[arg(long = "collect-only", visible_alias = "co")]
     collect_only: bool,
+
+    /// Ignore paths during collection
+    #[arg(long = "ignore", action = clap::ArgAction::Append)]
+    ignore_paths: Vec<String>,
+
+    /// Ignore paths matching glob pattern
+    #[arg(long = "ignore-glob", action = clap::ArgAction::Append)]
+    ignore_glob: Vec<String>,
+
+    /// Deselect specific test IDs
+    #[arg(long = "deselect", action = clap::ArgAction::Append)]
+    deselect: Vec<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -126,7 +141,6 @@ enum Commands {
     /// List discovered tests without running them
     Discover {
         /// Test path(s) to discover
-        #[arg(default_value = ".")]
         paths: Vec<String>,
 
         /// Output format: pretty, json, count
@@ -204,7 +218,15 @@ fn main() -> ExitCode {
 
 fn run_discover(paths: &[String], output_format: &str) -> anyhow::Result<()> {
     let config = Config::load()?;
-    let search_paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let search_paths: Vec<PathBuf> = if paths.is_empty() {
+        if !config.testpaths.is_empty() {
+            config.testpaths.clone()
+        } else {
+            vec![PathBuf::from(".")]
+        }
+    } else {
+        paths.iter().map(PathBuf::from).collect()
+    };
 
     let tests = discover_tests(&search_paths, &config)?;
     let tests = expand_parametrized_tests(tests)?;
@@ -297,7 +319,15 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     plugins.initialize_all()?;
 
     // 3. Discover tests
-    let search_paths: Vec<PathBuf> = cli.paths.iter().map(PathBuf::from).collect();
+    let search_paths: Vec<PathBuf> = if cli.paths.is_empty() {
+        if !config.testpaths.is_empty() {
+            config.testpaths.clone()
+        } else {
+            vec![PathBuf::from(".")]
+        }
+    } else {
+        cli.paths.iter().map(PathBuf::from).collect()
+    };
     let tests = discover_tests(&search_paths, &config)?;
 
     // 4. Expand parametrized tests
@@ -335,6 +365,42 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // 6. Filter by keyword
     let tests = if let Some(ref expr) = cli.keyword {
         filter_by_keyword(&tests, expr)
+    } else {
+        tests
+    };
+
+    // 6b. Filter by --ignore, --ignore-glob, --deselect
+    let tests = if !cli.ignore_paths.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let test_path = t.path.to_string_lossy();
+                !cli.ignore_paths
+                    .iter()
+                    .any(|p| test_path.starts_with(p.as_str()))
+            })
+            .collect()
+    } else {
+        tests
+    };
+    let tests = if !cli.ignore_glob.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let test_path = t.path.to_string_lossy();
+                !cli.ignore_glob
+                    .iter()
+                    .any(|pattern| glob_match::glob_match(pattern, test_path.as_ref()))
+            })
+            .collect()
+    } else {
+        tests
+    };
+    let tests = if !cli.deselect.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| !cli.deselect.contains(&t.id))
+            .collect()
     } else {
         tests
     };
@@ -476,6 +542,11 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let duration = start.elapsed();
     print_summary(&results, duration);
 
+    // Print report summary if -r flag is set
+    if let Some(ref report_chars) = cli.report {
+        output::print_report_summary(&results, report_chars);
+    }
+
     // Show slowest tests if --durations is set
     if let Some(n) = cli.durations {
         if n > 0 {
@@ -526,6 +597,10 @@ struct WatchConfig {
     quiet: bool,
     last_failed: bool,
     failed_first: bool,
+    report: Option<String>,
+    ignore_paths: Vec<String>,
+    ignore_glob: Vec<String>,
+    deselect: Vec<String>,
 }
 
 impl WatchConfig {
@@ -546,6 +621,10 @@ impl WatchConfig {
             quiet: cli.quiet,
             last_failed: cli.last_failed,
             failed_first: cli.failed_first,
+            report: cli.report.clone(),
+            ignore_paths: cli.ignore_paths.clone(),
+            ignore_glob: cli.ignore_glob.clone(),
+            deselect: cli.deselect.clone(),
         }
     }
 }
@@ -595,7 +674,15 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     };
     plugins.initialize_all()?;
 
-    let search_paths: Vec<PathBuf> = cfg.paths.iter().map(PathBuf::from).collect();
+    let search_paths: Vec<PathBuf> = if cfg.paths.is_empty() {
+        if !config.testpaths.is_empty() {
+            config.testpaths.clone()
+        } else {
+            vec![PathBuf::from(".")]
+        }
+    } else {
+        cfg.paths.iter().map(PathBuf::from).collect()
+    };
     let tests = discover_tests(&search_paths, &config)?;
     let tests = expand_parametrized_tests(tests)?;
 
@@ -628,6 +715,42 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     };
     let tests = if let Some(ref expr) = cfg.keyword {
         filter_by_keyword(&tests, expr)
+    } else {
+        tests
+    };
+
+    // Filter by --ignore, --ignore-glob, --deselect
+    let tests = if !cfg.ignore_paths.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let test_path = t.path.to_string_lossy();
+                !cfg.ignore_paths
+                    .iter()
+                    .any(|p| test_path.starts_with(p.as_str()))
+            })
+            .collect()
+    } else {
+        tests
+    };
+    let tests = if !cfg.ignore_glob.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let test_path = t.path.to_string_lossy();
+                !cfg.ignore_glob
+                    .iter()
+                    .any(|pattern| glob_match::glob_match(pattern, test_path.as_ref()))
+            })
+            .collect()
+    } else {
+        tests
+    };
+    let tests = if !cfg.deselect.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| !cfg.deselect.contains(&t.id))
+            .collect()
     } else {
         tests
     };
@@ -736,6 +859,12 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     let duration = start.elapsed();
     print_summary(&results, duration);
+
+    // Print report summary if -r flag is set
+    if let Some(ref report_chars) = cfg.report {
+        output::print_report_summary(&results, report_chars);
+    }
+
     plugins.shutdown_all()?;
     Ok(())
 }

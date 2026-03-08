@@ -92,10 +92,26 @@ try:
 except ImportError:
     sys.modules['pytest'] = _PytestShim()
 
+_fixture_scope_cache = {'session': {}, 'module': {}, 'class': {}}
+_current_module_path = None
+_current_class_name = None
+
 
 def run_test(test_item):
     """Execute a single test item and return the result as a dict."""
+    global _current_module_path, _current_class_name
     start = time.time()
+
+    # Detect scope boundary transitions for fixture caching
+    new_module = test_item.get("path", "")
+    new_class = test_item.get("class_name")
+    if new_module != _current_module_path:
+        _fixture_scope_cache['module'].clear()
+        _fixture_scope_cache['class'].clear()
+        _current_module_path = new_module
+    if new_class != _current_class_name:
+        _fixture_scope_cache['class'].clear()
+        _current_class_name = new_class
 
     # Check for skip/skipif markers before execution
     markers = test_item.get("markers") or []
@@ -195,6 +211,41 @@ def run_test(test_item):
                         sys.stdout, sys.stderr = _old_stdout_fix, _old_stderr_fix
                 fixture_kwargs["capsys"] = _Capsys()
                 fixture_cleanups.append(lambda: fixture_kwargs["capsys"]._restore())
+            elif dep == "capfd":
+                class _CapturedFdOutput:
+                    def __init__(self): self.out = ''; self.err = ''
+                class _Capfd:
+                    def __init__(self_inner):
+                        self_inner._old_stdout_fd = os.dup(1)
+                        self_inner._old_stderr_fd = os.dup(2)
+                        self_inner._stdout_tmp = tempfile.TemporaryFile(mode='w+b')
+                        self_inner._stderr_tmp = tempfile.TemporaryFile(mode='w+b')
+                        os.dup2(self_inner._stdout_tmp.fileno(), 1)
+                        os.dup2(self_inner._stderr_tmp.fileno(), 2)
+                    def readouterr(self_inner):
+                        sys.stdout.flush()
+                        sys.stderr.flush()
+                        try:
+                            os.fsync(1)
+                            os.fsync(2)
+                        except OSError:
+                            pass
+                        self_inner._stdout_tmp.seek(0)
+                        self_inner._stderr_tmp.seek(0)
+                        out = self_inner._stdout_tmp.read().decode('utf-8', errors='replace')
+                        err = self_inner._stderr_tmp.read().decode('utf-8', errors='replace')
+                        self_inner._stdout_tmp.seek(0); self_inner._stdout_tmp.truncate()
+                        self_inner._stderr_tmp.seek(0); self_inner._stderr_tmp.truncate()
+                        r = _CapturedFdOutput(); r.out = out; r.err = err; return r
+                    def _restore(self_inner):
+                        os.dup2(self_inner._old_stdout_fd, 1)
+                        os.dup2(self_inner._old_stderr_fd, 2)
+                        os.close(self_inner._old_stdout_fd)
+                        os.close(self_inner._old_stderr_fd)
+                        self_inner._stdout_tmp.close()
+                        self_inner._stderr_tmp.close()
+                fixture_kwargs["capfd"] = _Capfd()
+                fixture_cleanups.append(lambda: fixture_kwargs["capfd"]._restore())
             elif dep == "monkeypatch":
                 class _MonkeyPatch:
                     def __init__(self_inner):
@@ -333,6 +384,15 @@ def run_test(test_item):
                 fixture_kwargs["request"] = _FixtureRequest()
                 fixture_cleanups.append(lambda: fixture_kwargs["request"]._run_finalizers())
             else:
+                # Check fixture scope cache before executing
+                _scope_cache_hit = False
+                for _sc_scope in ('session', 'module', 'class'):
+                    if dep in _fixture_scope_cache.get(_sc_scope, {}):
+                        fixture_kwargs[dep] = _fixture_scope_cache[_sc_scope][dep]
+                        _scope_cache_hit = True
+                        break
+                if _scope_cache_hit:
+                    continue
                 # Try loading from conftest.py files (load entire hierarchy)
                 conftest_paths = []
                 conftest_dir = test_dir
@@ -359,6 +419,12 @@ def run_test(test_item):
                     _pt.fixture = _orig_fix
                     if hasattr(cmod, dep):
                         fixture_func = getattr(cmod, dep)
+                        # Determine fixture scope
+                        fix_scope = getattr(fixture_func, '_fastest_scope', 'function') if fixture_func else 'function'
+                        # Check scope cache
+                        if fix_scope in ('session', 'module', 'class') and dep in _fixture_scope_cache.get(fix_scope, {}):
+                            fixture_kwargs[dep] = _fixture_scope_cache[fix_scope][dep]
+                            break
                         # Pass already-resolved fixtures as kwargs to support dependencies
                         import inspect as _insp
                         _sig = _insp.signature(fixture_func)
@@ -376,6 +442,9 @@ def run_test(test_item):
                                 fixture_kwargs[dep] = None
                         else:
                             fixture_kwargs[dep] = result
+                        # Store in scope cache if scoped
+                        if fix_scope in ('session', 'module', 'class'):
+                            _fixture_scope_cache[fix_scope][dep] = fixture_kwargs[dep]
                         break  # Found the fixture, stop searching conftest files
 
         # Call setup_module if present and not already called for this module
@@ -388,8 +457,9 @@ def run_test(test_item):
         try:
             if test_item.get("class_name"):
                 cls = getattr(mod, test_item["class_name"])
-                if hasattr(cls, "setup_class"):
+                if hasattr(cls, "setup_class") and not getattr(cls, '_fastest_setup_class_done', False):
                     cls.setup_class()
+                    cls._fastest_setup_class_done = True
                 instance = cls()
                 try:
                     if hasattr(instance, "setup_method"):
@@ -407,16 +477,25 @@ def run_test(test_item):
                 finally:
                     if hasattr(instance, "teardown_method"):
                         instance.teardown_method()
+                    if hasattr(cls, "teardown_class") and not getattr(cls, '_fastest_teardown_class_done', False):
+                        cls.teardown_class()
+                        cls._fastest_teardown_class_done = True
             else:
                 func = getattr(mod, test_item["function_name"])
-                call_kwargs = dict(fixture_kwargs)
-                params = test_item.get("parameters")
-                if params and params.get("values"):
-                    call_kwargs.update(params["values"])
-                if call_kwargs:
-                    result = func(**call_kwargs)
-                else:
-                    result = func()
+                if hasattr(mod, 'setup_function'):
+                    mod.setup_function(func)
+                try:
+                    call_kwargs = dict(fixture_kwargs)
+                    params = test_item.get("parameters")
+                    if params and params.get("values"):
+                        call_kwargs.update(params["values"])
+                    if call_kwargs:
+                        result = func(**call_kwargs)
+                    else:
+                        result = func()
+                finally:
+                    if hasattr(mod, 'teardown_function'):
+                        mod.teardown_function(func)
         finally:
             for cleanup in fixture_cleanups:
                 try:

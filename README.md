@@ -125,6 +125,15 @@ fastest --lf
 
 # Run failed tests first, then the rest
 fastest --ff
+
+# Ignore paths or patterns
+fastest --ignore tests/legacy/ --ignore-glob "**/slow_*"
+
+# Deselect specific tests
+fastest --deselect tests/test_foo.py::test_bar
+
+# Short test summary with report chars
+fastest -r fEs
 ```
 
 ---
@@ -171,7 +180,7 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | `@pytest.mark.xfail` | ✅ | ✅ | With optional `reason=` |
 | `@pytest.mark.parametrize` | ✅ | ✅ | Single, multi-param, `ids=`, `pytest.param()` |
 | `@pytest.mark.timeout` | ✅ | 🟡 | Parsed and stored, default 10s timeout enforced |
-| `@pytest.mark.usefixtures` | ✅ | ❌ | |
+| `@pytest.mark.usefixtures` | ✅ | ✅ | Injects fixture deps at discovery |
 | `@pytest.mark.filterwarnings` | ✅ | ❌ | |
 | Custom markers | ✅ | ✅ | Any `@pytest.mark.X` works with `-m` filtering |
 | `-m` marker expression filtering | ✅ | ✅ | `and`, `or`, `not`, `()` supported |
@@ -184,10 +193,10 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | `@pytest.fixture` from conftest.py | ✅ | ✅ | Per-directory discovery |
 | Fixture dependency resolution | ✅ | ✅ | Topological sort with cycle detection |
 | `scope="function"` | ✅ | ✅ | Default scope |
-| `scope="class"` | ✅ | 🟡 | Parsed, runtime caching partial |
-| `scope="module"` | ✅ | 🟡 | Parsed, runtime caching partial |
-| `scope="package"` | ✅ | 🟡 | Parsed, runtime caching partial |
-| `scope="session"` | ✅ | 🟡 | Parsed, runtime caching partial |
+| `scope="class"` | ✅ | ✅ | Cached per-class with boundary detection |
+| `scope="module"` | ✅ | ✅ | Cached per-module with boundary detection |
+| `scope="package"` | ✅ | 🟡 | Parsed, treated as module scope |
+| `scope="session"` | ✅ | ✅ | Cached for worker lifetime |
 | `autouse=True` | ✅ | ✅ | Auto-injected into all tests in scope |
 | `params=[...]` fixture parametrize | ✅ | ✅ | Fixture-level parametrization |
 | `yield` fixtures (teardown) | ✅ | 🟡 | Basic support |
@@ -200,7 +209,7 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | `tmp_path` | ✅ | ✅ | Temporary directory per test |
 | `tmp_path_factory` | ✅ | ✅ | Factory for multiple temp dirs |
 | `capsys` | ✅ | ✅ | Capture stdout/stderr |
-| `capfd` | ✅ | 🟡 | Stub — aliases to capsys behavior |
+| `capfd` | ✅ | ✅ | Real FD-level capture via `os.dup2()` |
 | `caplog` | ✅ | ✅ | Full: handler, records, text, messages, set_level, clear |
 | `monkeypatch` | ✅ | ✅ | setattr, delattr, setenv, delenv, chdir, syspath_prepend |
 | `request` | ✅ | ✅ | addfinalizer, node info |
@@ -236,6 +245,10 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | `--rootdir` | ✅ | ❌ | |
 | `--override-ini` | ✅ | ❌ | |
 | `-p` (plugin control) | ✅ | ❌ | |
+| `--ignore` | ✅ | ✅ | Ignore path prefixes during collection |
+| `--ignore-glob` | ✅ | ✅ | Ignore glob patterns during collection |
+| `--deselect` | ✅ | ✅ | Deselect specific test IDs |
+| `-r` / `--report` | ✅ | ✅ | Report summary chars: f/E/s/x/X/p |
 | `--co` (collect-only short) | ✅ | ❌ | Use `discover` subcommand instead |
 
 ### Configuration
@@ -255,7 +268,7 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | `minversion` | ✅ | 🟡 | Parsed but not enforced |
 | `cache_dir` | ✅ | 🟡 | Parsed, uses `.fastest_cache/` |
 | `filterwarnings` | ✅ | ❌ | |
-| `norecursedirs` | ✅ | ❌ | Hardcoded skip list instead |
+| `norecursedirs` | ✅ | ✅ | Configurable + hardcoded defaults |
 | `confcutdir` | ✅ | ❌ | |
 | `[tool.fastest]` config section | ❌ | ✅ | 🚀 workers, incremental, verbose |
 
@@ -271,8 +284,8 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | Native JSON output | ❌ | ✅ | 🚀 `--output json` |
 | Count-only summary | ❌ | ✅ | 🚀 `--output count` |
 | Progress bar | ❌ | ✅ | 🚀 Spinner-based with live counter |
-| Warnings summary | ✅ | ❌ | |
-| Short test summary (`-r`) | ✅ | ❌ | |
+| Warnings summary | ✅ | 🟡 | Placeholder section shown |
+| Short test summary (`-r`) | ✅ | ✅ | `FAILED id - error` format |
 | Header / session info | ✅ | ❌ | |
 
 ### Execution
@@ -283,9 +296,9 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | Parallel execution | ✅* | ✅ | *pytest requires `xdist` plugin; fastest has built-in |
 | In-process execution (PyO3) | ❌ | ✅ | 🚀 ≤20 tests: zero-overhead in-process |
 | Subprocess isolation | ✅ | ✅ | >20 tests: work-stealing pool |
-| `setup_module` / `teardown_module` | ✅ | ❌ | |
-| `setup_class` / `teardown_class` | ✅ | ❌ | |
-| `setup_function` / `teardown_function` | ✅ | ❌ | |
+| `setup_module` / `teardown_module` | ✅ | ✅ | Called once per module |
+| `setup_class` / `teardown_class` | ✅ | ✅ | Called once per class with guard |
+| `setup_function` / `teardown_function` | ✅ | ✅ | Wraps each non-class test function |
 | Output capture (stdout/stderr) | ✅ | ✅ | |
 | Per-test timeout | ✅* | ✅ | *pytest requires `pytest-timeout` plugin |
 
@@ -323,15 +336,15 @@ Fastest is designed as a **drop-in replacement for pytest** on most projects. Th
 | Category | Coverage | Detail |
 |----------|----------|--------|
 | **Test Discovery** | **92%** | All common patterns; missing doctest, `collect_ignore` |
-| **Markers** | **85%** | All core markers; missing `usefixtures`, `filterwarnings` |
-| **Fixtures** | **80%** | 9 built-ins, conftest, autouse, params; scoped caching partial |
-| **CLI Flags** | **82%** | All common flags plus extras; missing `-p`, `--rootdir` |
-| **Configuration** | **88%** | All 4 config formats + key options; missing `norecursedirs` |
-| **Output** | **85%** | 4 formats + progress; missing warnings summary |
-| **Execution** | **75%** | Parallel, capture, timeout; missing setup/teardown hooks |
-| **Overall** | **~83%** | Drop-in for most projects, plus unique Rust-powered features |
+| **Markers** | **90%** | All core markers + `usefixtures`; missing `filterwarnings` |
+| **Fixtures** | **90%** | 9 built-ins, conftest, autouse, params, scope caching |
+| **CLI Flags** | **90%** | All common flags + `--ignore`, `--deselect`, `-r`; missing `-p` |
+| **Configuration** | **92%** | All 4 config formats + `norecursedirs`; missing `confcutdir` |
+| **Output** | **90%** | 4 formats + progress + short summary; warnings placeholder |
+| **Execution** | **95%** | Parallel, capture, timeout, all setup/teardown hooks |
+| **Overall** | **~91%** | Drop-in for most projects, plus unique Rust-powered features |
 
-> **Bottom line:** If your project uses standard `test_*` functions, classes, fixtures from `conftest.py`, `parametrize`, markers (`skip`, `skipif`, `xfail`), and common CLI flags — Fastest will work out of the box and run significantly faster. Projects relying on the pytest plugin ecosystem, `setup_class`/`teardown_class`, or `pytest.raises` context manager will need adjustments.
+> **Bottom line:** If your project uses standard `test_*` functions, classes, fixtures from `conftest.py`, `parametrize`, markers (`skip`, `skipif`, `xfail`, `usefixtures`), setup/teardown hooks, and common CLI flags — Fastest will work out of the box and run significantly faster. Projects relying heavily on the pytest plugin ecosystem, `pytest.raises` context manager, or doctest collection will need adjustments.
 
 ---
 

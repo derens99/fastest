@@ -139,6 +139,28 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
         }
     }
 
+    // Short test summary info
+    if !failures.is_empty() && !quiet {
+        out.push_str(&format!("\n{}\n", "= SHORT TEST SUMMARY INFO ="));
+        for result in &failures {
+            let error_summary = result
+                .error
+                .as_deref()
+                .and_then(|e| e.lines().last())
+                .unwrap_or("(no details)");
+            let prefix = match &result.outcome {
+                TestOutcome::Error { .. } => "ERROR",
+                _ => "FAILED",
+            };
+            out.push_str(&format!(
+                "{} {} - {}\n",
+                prefix.red().bold(),
+                result.test_id,
+                error_summary
+            ));
+        }
+    }
+
     out
 }
 
@@ -297,6 +319,13 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
         "=".repeat(60).green().to_string()
     };
 
+    // TODO: Warnings summary — collect and display pytest-style warnings here
+    // before the final decorated result line. Example:
+    //   eprintln!("{}", "= warnings summary =".yellow());
+    //   for warning in &collected_warnings {
+    //       eprintln!("  {}", warning);
+    //   }
+
     eprintln!("{}", decoration);
     eprintln!(
         "{} {} in {:.2}s",
@@ -305,6 +334,85 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
         duration.as_secs_f64()
     );
     eprintln!("{}", decoration);
+}
+
+/// Print a report summary filtered by the given report characters.
+///
+/// Each character selects a category of test results:
+/// - `f`/`F`: failed tests
+/// - `E`: errors
+/// - `s`/`S`: skipped tests
+/// - `x`: xfailed tests
+/// - `X`: xpassed tests
+/// - `p`/`P`: passed tests
+pub fn print_report_summary(results: &[TestResult], report_chars: &str) {
+    for ch in report_chars.chars() {
+        let (label, matches): (&str, Vec<&TestResult>) = match ch {
+            'f' | 'F' => (
+                "FAILED",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::Failed))
+                    .collect(),
+            ),
+            'E' => (
+                "ERRORS",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::Error { .. }))
+                    .collect(),
+            ),
+            's' | 'S' => (
+                "SKIPPED",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::Skipped { .. }))
+                    .collect(),
+            ),
+            'x' => (
+                "XFAILED",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::XFailed { .. }))
+                    .collect(),
+            ),
+            'X' => (
+                "XPASSED",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::XPassed))
+                    .collect(),
+            ),
+            'p' | 'P' => (
+                "PASSED",
+                results
+                    .iter()
+                    .filter(|r| matches!(r.outcome, TestOutcome::Passed))
+                    .collect(),
+            ),
+            _ => continue,
+        };
+        if !matches.is_empty() {
+            eprintln!("{} {}:", label, matches.len());
+            for r in &matches {
+                let detail = r
+                    .error
+                    .as_deref()
+                    .or(match &r.outcome {
+                        TestOutcome::Skipped { reason } => reason.as_deref(),
+                        TestOutcome::XFailed { reason } => reason.as_deref(),
+                        _ => None,
+                    })
+                    .unwrap_or("");
+                let short = detail.lines().last().unwrap_or(detail);
+                if short.is_empty() {
+                    eprintln!("  {}", r.test_id);
+                } else {
+                    eprintln!("  {} - {}", r.test_id, short);
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

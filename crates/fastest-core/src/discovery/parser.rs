@@ -189,9 +189,22 @@ fn build_test_item_from_function(
 ) -> TestItem {
     let line_number = line_index.line_number(range.start());
 
-    let fixture_deps = extract_fixture_deps(args, class_name.is_some());
+    let mut fixture_deps = extract_fixture_deps(args, class_name.is_some());
     let decorators = extract_decorators(decorator_list);
     let markers = extract_markers_from_decorators(decorator_list);
+
+    // @pytest.mark.usefixtures support: extract string args and add to fixture_deps
+    for marker in &markers {
+        if marker.name == "usefixtures" {
+            for arg in &marker.args {
+                if let Some(fixture_name) = arg.as_str() {
+                    if !fixture_deps.contains(&fixture_name.to_string()) {
+                        fixture_deps.push(fixture_name.to_string());
+                    }
+                }
+            }
+        }
+    }
 
     let id = if let Some(cls) = class_name {
         format!("{}::{}::{}", path_str, cls, func_name)

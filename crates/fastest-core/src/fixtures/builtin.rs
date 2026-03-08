@@ -64,15 +64,43 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20       sys.stderr = self._old_stderr\n\
              capsys = _Capsys()"
             .to_string(),
-        "capfd" => "import io, sys\n\
-             class _CapturedFd:\n\
+        "capfd" => "import io, sys, os, tempfile\n\
+             class _CapturedFdOutput:\n\
              \x20   def __init__(self):\n\
              \x20       self.out = ''\n\
              \x20       self.err = ''\n\
              class _Capfd:\n\
+             \x20   def __init__(self):\n\
+             \x20       self._old_stdout_fd = os.dup(1)\n\
+             \x20       self._old_stderr_fd = os.dup(2)\n\
+             \x20       self._stdout_tmp = tempfile.TemporaryFile(mode='w+b')\n\
+             \x20       self._stderr_tmp = tempfile.TemporaryFile(mode='w+b')\n\
+             \x20       os.dup2(self._stdout_tmp.fileno(), 1)\n\
+             \x20       os.dup2(self._stderr_tmp.fileno(), 2)\n\
              \x20   def readouterr(self):\n\
-             \x20       result = _CapturedFd()\n\
+             \x20       sys.stdout.flush()\n\
+             \x20       sys.stderr.flush()\n\
+             \x20       os.fsync(1)\n\
+             \x20       os.fsync(2)\n\
+             \x20       self._stdout_tmp.seek(0)\n\
+             \x20       self._stderr_tmp.seek(0)\n\
+             \x20       out = self._stdout_tmp.read().decode('utf-8', errors='replace')\n\
+             \x20       err = self._stderr_tmp.read().decode('utf-8', errors='replace')\n\
+             \x20       self._stdout_tmp.seek(0)\n\
+             \x20       self._stdout_tmp.truncate()\n\
+             \x20       self._stderr_tmp.seek(0)\n\
+             \x20       self._stderr_tmp.truncate()\n\
+             \x20       result = _CapturedFdOutput()\n\
+             \x20       result.out = out\n\
+             \x20       result.err = err\n\
              \x20       return result\n\
+             \x20   def _restore(self):\n\
+             \x20       os.dup2(self._old_stdout_fd, 1)\n\
+             \x20       os.dup2(self._old_stderr_fd, 2)\n\
+             \x20       os.close(self._old_stdout_fd)\n\
+             \x20       os.close(self._old_stderr_fd)\n\
+             \x20       self._stdout_tmp.close()\n\
+             \x20       self._stderr_tmp.close()\n\
              capfd = _Capfd()"
             .to_string(),
         "monkeypatch" => "class _MonkeyPatch:\n\
