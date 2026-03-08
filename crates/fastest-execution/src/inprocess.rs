@@ -365,7 +365,7 @@ pub fn build_test_code(test: &TestItem) -> String {
     let mut conftest_fixture_names: Vec<String> = Vec::new();
 
     for dep in &test.fixture_deps {
-        if dep == "self" || dep == "request" || param_names.contains(dep.as_str()) {
+        if dep == "self" || param_names.contains(dep.as_str()) {
             continue;
         }
         if let Some(code) = generate_builtin_code(dep) {
@@ -375,6 +375,10 @@ pub fn build_test_code(test: &TestItem) -> String {
                 fixture_cleanup_parts.push("monkeypatch.undo()".to_string());
             } else if dep == "capsys" {
                 fixture_cleanup_parts.push("capsys._restore()".to_string());
+            } else if dep == "caplog" {
+                fixture_cleanup_parts.push("caplog._restore()".to_string());
+            } else if dep == "request" {
+                fixture_cleanup_parts.push("request._run_finalizers()".to_string());
             }
         } else {
             conftest_fixture_names.push(dep.clone());

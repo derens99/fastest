@@ -5,6 +5,7 @@ pub mod discovery;
 pub mod error;
 pub mod fixtures;
 pub mod incremental;
+pub mod lastfailed;
 pub mod markers;
 pub mod model;
 pub mod parametrize;
@@ -19,6 +20,7 @@ pub use fixtures::{
     FixtureCache, FixtureScope,
 };
 pub use incremental::IncrementalTester;
+pub use lastfailed::{load_lastfailed, save_lastfailed};
 pub use markers::{classify_marker, filter_by_keyword, filter_by_markers, BuiltinMarker};
 pub use model::{TestItem, TestOutcome, TestResult};
 pub use parametrize::expand_parametrized_tests;

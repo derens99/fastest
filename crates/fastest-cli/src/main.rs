@@ -14,8 +14,8 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use fastest_core::{
-    discover_tests, expand_parametrized_tests, filter_by_keyword, filter_by_markers, Config,
-    HookArgs, IncrementalTester, PluginManager, TestWatcher,
+    discover_conftest_fixtures, discover_tests, expand_parametrized_tests, filter_by_keyword,
+    filter_by_markers, Config, HookArgs, IncrementalTester, PluginManager, TestWatcher,
 };
 use fastest_execution::HybridExecutor;
 
@@ -26,7 +26,7 @@ use crate::progress::create_spinner;
 // CLI argument parsing
 // ---------------------------------------------------------------------------
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(
     name = "fastest",
     version,
@@ -108,12 +108,20 @@ struct Cli {
     #[arg(short = 'q', long = "quiet")]
     quiet: bool,
 
+    /// Re-run only tests that failed in the last run
+    #[arg(long = "lf")]
+    last_failed: bool,
+
+    /// Run previously failed tests first, then the rest
+    #[arg(long = "ff")]
+    failed_first: bool,
+
     /// Alias for discover subcommand
     #[arg(long = "collect-only")]
     collect_only: bool,
 }
 
-#[derive(Subcommand, Debug)]
+#[derive(Subcommand, Debug, Clone)]
 enum Commands {
     /// List discovered tests without running them
     Discover {
@@ -229,6 +237,44 @@ fn run_discover(paths: &[String], output_format: &str) -> anyhow::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// addopts support
+// ---------------------------------------------------------------------------
+
+/// Parse the `addopts` string from config and apply recognised flags to the CLI
+/// state. CLI args that were explicitly set by the user already take precedence
+/// because clap will have populated them before this function runs; `apply_addopts`
+/// only fills in values that are still at their defaults.
+fn apply_addopts(cli: &mut Cli, addopts: &str) {
+    if addopts.is_empty() {
+        return;
+    }
+    // Simple split on whitespace, apply known flags
+    for token in addopts.split_whitespace() {
+        match token {
+            "-v" | "--verbose" => cli.verbose = true,
+            "-q" | "--quiet" => cli.quiet = true,
+            "-x" | "--exitfirst" => cli.exitfirst = true,
+            "-s" => cli.no_capture = true,
+            _ => {
+                if let Some(val) = token.strip_prefix("--tb=") {
+                    cli.traceback = val.to_string();
+                } else if let Some(val) = token.strip_prefix("--maxfail=") {
+                    if let Ok(n) = val.parse::<usize>() {
+                        cli.maxfail = Some(n);
+                    }
+                } else if let Some(val) = token.strip_prefix("-k") {
+                    if !val.is_empty() {
+                        cli.keyword = Some(val.to_string());
+                    }
+                } else if let Some(val) = token.strip_prefix("--color=") {
+                    cli.color = val.to_string();
+                }
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Test execution pipeline
 // ---------------------------------------------------------------------------
 
@@ -237,6 +283,10 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
     // 1. Load config
     let config = Config::load()?;
+
+    // Apply addopts from config to a mutable copy of CLI args
+    let mut cli = cli.clone();
+    apply_addopts(&mut cli, &config.addopts);
 
     // 2. Plugin manager
     let mut plugins = if cli.no_plugins {
@@ -252,6 +302,28 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
     // 4. Expand parametrized tests
     let tests = expand_parametrized_tests(tests)?;
+
+    // 4b. Inject autouse fixtures into test fixture_deps
+    let mut tests = tests;
+    {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
+            let autouse_names: Vec<String> = conftest_fixtures
+                .values()
+                .filter(|f| f.autouse)
+                .map(|f| f.name.clone())
+                .collect();
+            if !autouse_names.is_empty() {
+                for test in &mut tests {
+                    for name in &autouse_names {
+                        if !test.fixture_deps.contains(name) {
+                            test.fixture_deps.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // 5. Filter by markers
     let tests = if let Some(ref expr) = cli.marker {
@@ -281,6 +353,34 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
             );
         }
         tester.filter_unchanged(tests)?
+    } else {
+        tests
+    };
+
+    // 8b. Last-failed / failed-first filtering
+    let tests = if cli.last_failed || cli.failed_first {
+        let cwd = std::env::current_dir()?;
+        let last_failed = fastest_core::load_lastfailed(&cwd);
+        if cli.last_failed {
+            // Only run tests that failed last time
+            tests
+                .into_iter()
+                .filter(|t| last_failed.contains(&t.id))
+                .collect()
+        } else {
+            // failed-first: put previously-failed tests first, then the rest
+            let mut failed: Vec<fastest_core::TestItem> = Vec::new();
+            let mut rest: Vec<fastest_core::TestItem> = Vec::new();
+            for t in tests {
+                if last_failed.contains(&t.id) {
+                    failed.push(t);
+                } else {
+                    rest.push(t);
+                }
+            }
+            failed.extend(rest);
+            failed
+        }
     } else {
         tests
     };
@@ -331,6 +431,22 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     } else {
         executor.execute(&tests)
     };
+
+    // 9b. Save last-failed cache
+    {
+        let cwd = std::env::current_dir()?;
+        let failed_ids: std::collections::HashSet<String> = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.outcome,
+                    fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+                )
+            })
+            .map(|r| r.test_id.clone())
+            .collect();
+        fastest_core::save_lastfailed(&cwd, &failed_ids);
+    }
 
     // 10. Plugin hook: runtest_logreport
     let _ = plugins.call_hook("runtest_logreport", &HookArgs::new());
@@ -408,6 +524,8 @@ struct WatchConfig {
     maxfail: Option<usize>,
     traceback: String,
     quiet: bool,
+    last_failed: bool,
+    failed_first: bool,
 }
 
 impl WatchConfig {
@@ -426,6 +544,8 @@ impl WatchConfig {
             maxfail: cli.maxfail,
             traceback: cli.traceback.clone(),
             quiet: cli.quiet,
+            last_failed: cli.last_failed,
+            failed_first: cli.failed_first,
         }
     }
 }
@@ -479,6 +599,28 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     let tests = discover_tests(&search_paths, &config)?;
     let tests = expand_parametrized_tests(tests)?;
 
+    // Inject autouse fixtures into test fixture_deps
+    let mut tests = tests;
+    {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
+            let autouse_names: Vec<String> = conftest_fixtures
+                .values()
+                .filter(|f| f.autouse)
+                .map(|f| f.name.clone())
+                .collect();
+            if !autouse_names.is_empty() {
+                for test in &mut tests {
+                    for name in &autouse_names {
+                        if !test.fixture_deps.contains(name) {
+                            test.fixture_deps.push(name.clone());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let tests = if let Some(ref expr) = cfg.marker {
         filter_by_markers(&tests, expr)
     } else {
@@ -495,6 +637,32 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         let cwd = std::env::current_dir()?;
         let tester = IncrementalTester::new(&cwd)?;
         tester.filter_unchanged(tests)?
+    } else {
+        tests
+    };
+
+    // Last-failed / failed-first filtering
+    let tests = if cfg.last_failed || cfg.failed_first {
+        let cwd = std::env::current_dir()?;
+        let last_failed = fastest_core::load_lastfailed(&cwd);
+        if cfg.last_failed {
+            tests
+                .into_iter()
+                .filter(|t| last_failed.contains(&t.id))
+                .collect()
+        } else {
+            let mut failed: Vec<fastest_core::TestItem> = Vec::new();
+            let mut rest: Vec<fastest_core::TestItem> = Vec::new();
+            for t in tests {
+                if last_failed.contains(&t.id) {
+                    failed.push(t);
+                } else {
+                    rest.push(t);
+                }
+            }
+            failed.extend(rest);
+            failed
+        }
     } else {
         tests
     };
@@ -536,6 +704,22 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     } else {
         executor.execute(&tests)
     };
+
+    // Save last-failed cache
+    {
+        let cwd = std::env::current_dir()?;
+        let failed_ids: std::collections::HashSet<String> = results
+            .iter()
+            .filter(|r| {
+                matches!(
+                    r.outcome,
+                    fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+                )
+            })
+            .map(|r| r.test_id.clone())
+            .collect();
+        fastest_core::save_lastfailed(&cwd, &failed_ids);
+    }
 
     let output_format =
         OutputFormat::from_str_with_junit(Some(&cfg.output_format), cfg.junit_xml.clone());

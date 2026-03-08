@@ -255,14 +255,45 @@ fn parse_parametrize_call(call: &ast::ExprCall) -> Option<ParametrizeSpec> {
     let values_expr = call.args.get(1)?;
     let value_sets = parse_param_values(values_expr, names.len())?;
 
-    // Optional `ids=` keyword argument
-    let ids = parse_ids_kwarg(call);
+    // Optional `ids=` keyword argument, or extract from pytest.param() id= kwargs
+    let ids = parse_ids_kwarg(call).or_else(|| extract_ids_from_pytest_params(values_expr));
 
     Some(ParametrizeSpec {
         names,
         value_sets,
         ids,
     })
+}
+
+/// Extract IDs from `pytest.param(..., id="name")` calls within the values list.
+/// Returns Some only if at least one param has an explicit id.
+fn extract_ids_from_pytest_params(values_expr: &Expr) -> Option<Vec<String>> {
+    let elements = match values_expr {
+        Expr::List(list) => &list.elts,
+        Expr::Tuple(tuple) => &tuple.elts,
+        _ => return None,
+    };
+
+    let mut ids = Vec::new();
+    let mut has_any_id = false;
+
+    for (i, elem) in elements.iter().enumerate() {
+        if let Some(param) = try_parse_pytest_param(elem) {
+            if let Some(id) = param.id {
+                ids.push(id);
+                has_any_id = true;
+                continue;
+            }
+        }
+        // No explicit id — generate a fallback
+        ids.push(format!("{}", i));
+    }
+
+    if has_any_id {
+        Some(ids)
+    } else {
+        None
+    }
 }
 
 /// Parse parameter names from the first argument of `@pytest.mark.parametrize`.
@@ -279,9 +310,51 @@ fn parse_param_names(expr: &Expr) -> Option<Vec<String>> {
     None
 }
 
+/// A parsed `pytest.param(...)` call, with extracted values, optional id, and marks.
+struct PytestParam {
+    values: Vec<serde_json::Value>,
+    id: Option<String>,
+}
+
+/// Check if an expression is a `pytest.param(...)` call and extract its contents.
+fn try_parse_pytest_param(expr: &Expr) -> Option<PytestParam> {
+    if let Expr::Call(call) = expr {
+        // Check for pytest.param(...)
+        let is_pytest_param = match call.func.as_ref() {
+            Expr::Attribute(attr) => {
+                attr.attr.as_str() == "param"
+                    && matches!(attr.value.as_ref(), Expr::Name(n) if n.id.as_str() == "pytest")
+            }
+            _ => false,
+        };
+        if !is_pytest_param {
+            return None;
+        }
+        // Extract positional args as values
+        let values: Vec<serde_json::Value> = call.args.iter().map(expr_to_json).collect();
+        // Extract id= keyword
+        let id = call.keywords.iter().find_map(|kw| {
+            if let Some(ref arg) = kw.arg {
+                if arg.as_str() == "id" {
+                    if let Expr::Constant(c) = &kw.value {
+                        if let Constant::Str(s) = &c.value {
+                            return Some(s.clone());
+                        }
+                    }
+                }
+            }
+            None
+        });
+        Some(PytestParam { values, id })
+    } else {
+        None
+    }
+}
+
 /// Parse parameter values from the second argument of `@pytest.mark.parametrize`.
 /// For a single parameter: `[1, 2, 3]` -> `[[1], [2], [3]]`
 /// For multiple parameters: `[(1,2,3), (4,5,9)]` -> `[[1,2,3], [4,5,9]]`
+/// Also handles `pytest.param(val, id="name")` objects.
 fn parse_param_values(expr: &Expr, num_names: usize) -> Option<Vec<Vec<serde_json::Value>>> {
     let elements = match expr {
         Expr::List(list) => &list.elts,
@@ -292,6 +365,20 @@ fn parse_param_values(expr: &Expr, num_names: usize) -> Option<Vec<Vec<serde_jso
     let mut result = Vec::new();
 
     for elem in elements {
+        // Check for pytest.param(...) first
+        if let Some(param) = try_parse_pytest_param(elem) {
+            if num_names == 1 {
+                if let Some(val) = param.values.first() {
+                    result.push(vec![val.clone()]);
+                } else {
+                    result.push(vec![serde_json::Value::Null]);
+                }
+            } else {
+                result.push(param.values);
+            }
+            continue;
+        }
+
         if num_names == 1 {
             // Single parameter: each element is a single value
             result.push(vec![expr_to_json(elem)]);
@@ -688,6 +775,60 @@ def test_greet(name):
         assert_eq!(result.len(), 2);
         assert_eq!(result[0].name, "test_greet[alice]");
         assert_eq!(result[1].name, "test_greet[bob]");
+    }
+
+    #[test]
+    fn test_expand_pytest_param() {
+        let source = r#"
+import pytest
+
+@pytest.mark.parametrize("x", [
+    pytest.param(1, id="one"),
+    pytest.param(2, id="two"),
+    3,
+])
+def test_vals(x):
+    assert x > 0
+"#;
+        let path = PathBuf::from("tests/test_param.py");
+        let test = make_test_item("test_vals", vec!["pytest.mark.parametrize"], &path);
+
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].name, "test_vals[one]");
+        assert_eq!(result[1].name, "test_vals[two]");
+        // Third item has no pytest.param id, gets index fallback
+        assert_eq!(result[2].name, "test_vals[2]");
+
+        let params = result[0].parameters.as_ref().unwrap();
+        assert_eq!(params.values.get("x"), Some(&serde_json::json!(1)));
+    }
+
+    #[test]
+    fn test_expand_pytest_param_multi() {
+        let source = r#"
+import pytest
+
+@pytest.mark.parametrize("x,y", [
+    pytest.param(1, 2, id="case1"),
+    pytest.param(3, 4, id="case2"),
+])
+def test_add(x, y):
+    assert x + y > 0
+"#;
+        let path = PathBuf::from("tests/test_param_multi.py");
+        let test = make_test_item("test_add", vec!["pytest.mark.parametrize"], &path);
+
+        let result = expand_parametrized_tests_from_source(vec![test], source, &path).unwrap();
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].name, "test_add[case1]");
+        assert_eq!(result[1].name, "test_add[case2]");
+
+        let params = result[0].parameters.as_ref().unwrap();
+        assert_eq!(params.values.get("x"), Some(&serde_json::json!(1)));
+        assert_eq!(params.values.get("y"), Some(&serde_json::json!(2)));
     }
 
     #[test]
