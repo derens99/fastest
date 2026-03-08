@@ -61,9 +61,7 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20   def _restore(self):\n\
              \x20       sys.stdout = self._old_stdout\n\
              \x20       sys.stderr = self._old_stderr\n\
-             capsys = _Capsys()\n\
-             import atexit as _atexit\n\
-             _atexit.register(capsys._restore)"
+             capsys = _Capsys()"
             .to_string(),
         "capfd" => "import io, sys\n\
              class _CapturedFd:\n\
