@@ -32,8 +32,8 @@ toml = "0.8"
 topological-sort = "0.2"
 
 # Incremental testing
-git2 = { version = "0.18", features = ["vendored-openssl"] }
-lru = "0.12"
+git2 = { version = "0.20", features = ["vendored-openssl"] }
+lru = "0.16"
 
 # File watching
 notify = "6.0"
