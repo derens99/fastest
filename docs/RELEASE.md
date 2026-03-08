@@ -1,137 +1,52 @@
 # Release Process
 
-This document outlines the release process for Fastest.
+Fastest uses [semantic-release](https://github.com/semantic-release/semantic-release) for fully automated versioning and publishing. **No manual version bumping or tagging is required.**
 
-## Pre-release Checklist
+## How It Works
 
-- [ ] All tests passing on main branch
-- [ ] CHANGELOG.md updated with new features/fixes
-- [ ] Documentation updated
-- [ ] Version bumped in all Cargo.toml files
-- [ ] Performance benchmarks run and compared
+1. **Commit to `main`** using [Conventional Commits](https://www.conventionalcommits.org/):
+   - `feat:` → minor version bump (e.g., 2.3.0 → 2.4.0)
+   - `fix:` → patch version bump (e.g., 2.3.0 → 2.3.1)
+   - `feat!:` or `BREAKING CHANGE:` → major version bump
+   - `docs:`, `chore:`, `ci:` → no release
 
-## Version Bumping
+2. **CI runs** (`ci.yml`) — fmt, clippy, tests on Linux/macOS/Windows.
 
-Update version in the following files:
-- `Cargo.toml` (workspace version)
-- `crates/fastest-core/Cargo.toml`
-- `crates/fastest-cli/Cargo.toml`
-- `crates/fastest-python/Cargo.toml` (if exists)
+3. **Release workflow** (`semantic-release.yml`) triggers automatically after CI passes on `main`:
+   - Determines the next version from commit messages
+   - Updates `CHANGELOG.md` and `Cargo.toml` workspace version
+   - Creates a Git tag and GitHub Release
+   - Builds binaries for 5 targets (x86_64/aarch64 Linux, x86_64/aarch64 macOS, x86_64 Windows)
+   - Publishes Python wheels to PyPI
+
+## Supported Targets
+
+| Target                        | OS      | Arch    |
+|-------------------------------|---------|---------|
+| `x86_64-unknown-linux-gnu`    | Linux   | x86_64  |
+| `aarch64-unknown-linux-gnu`   | Linux   | aarch64 |
+| `x86_64-apple-darwin`         | macOS   | x86_64  |
+| `aarch64-apple-darwin`        | macOS   | aarch64 |
+| `x86_64-pc-windows-msvc`     | Windows | x86_64  |
+
+## Manual Release (Emergency)
+
+If you need to trigger a release manually:
 
 ```bash
-# Example: bump to version 0.2.0
-sed -i '' 's/version = ".*"/version = "0.2.0"/' Cargo.toml
-sed -i '' 's/version.workspace = true/version = "0.2.0"/' crates/*/Cargo.toml
+# Via GitHub Actions UI → semantic-release.yml → "Run workflow"
 ```
 
-## Release Steps
+## Rollback
 
-1. **Create Release Branch**
-   ```bash
-   git checkout -b release/v0.2.0
-   ```
+If a release has issues:
 
-2. **Update CHANGELOG.md**
-   - Add release date
-   - Organize changes by category (Added, Changed, Fixed, etc.)
-   - Add comparison link at bottom
+1. Revert the commit on `main`
+2. Push — semantic-release will create a new patch release with the fix
+3. If a PyPI version needs yanking, do so manually
 
-3. **Commit Changes**
-   ```bash
-   git add -A
-   git commit -m "chore: prepare v0.2.0 release"
-   ```
+## Version Files
 
-4. **Create PR and Merge**
-   - Create PR from release branch to main
-   - Ensure all CI checks pass
-   - Get approval and merge
-
-5. **Tag Release**
-   ```bash
-   git checkout main
-   git pull origin main
-   git tag -a v0.2.0 -m "Release v0.2.0"
-   git push origin v0.2.0
-   ```
-
-6. **Monitor Release Workflow**
-   - Check GitHub Actions for release workflow
-   - Ensure all artifacts are built
-   - Verify crates.io publication
-   - Check Docker Hub for new images
-
-## Post-release Tasks
-
-- [ ] Verify installation methods work:
-  - [ ] Cargo install
-  - [ ] Binary downloads
-  - [ ] Docker image
-  - [ ] Homebrew (after formula updates)
-- [ ] Update documentation site
-- [ ] Announce release:
-  - [ ] GitHub Release notes
-  - [ ] Twitter/Social media
-  - [ ] Blog post (for major releases)
-- [ ] Update fastest.dev website (if applicable)
-
-## Platform-specific Releases
-
-### Crates.io
-
-The release workflow automatically publishes to crates.io. Ensure:
-- API token is set in GitHub secrets
-- Dependencies are published first (fastest-core before fastest-cli)
-
-### Docker Hub
-
-Docker images are automatically built and pushed with tags:
-- `latest` - always points to newest release
-- `0.2.0` - specific version tag
-
-### Homebrew
-
-The workflow creates a PR to the homebrew tap. Manual steps:
-1. Review the automated PR
-2. Test installation: `brew install --build-from-source ./Formula/fastest.rb`
-3. Merge PR
-
-## Rollback Procedure
-
-If issues are found after release:
-
-1. **Delete the problematic release tag**
-   ```bash
-   git tag -d v0.2.0
-   git push origin :refs/tags/v0.2.0
-   ```
-
-2. **Yank from crates.io** (if published)
-   ```bash
-   cargo yank --vers 0.2.0 fastest-cli
-   cargo yank --vers 0.2.0 fastest-core
-   ```
-
-3. **Fix issues and re-release**
-   - Use a new patch version (e.g., v0.2.1)
-   - Never reuse version numbers
-
-## Security Releases
-
-For security fixes:
-
-1. Follow responsible disclosure practices
-2. Prepare fix in private
-3. Release with clear security advisory
-4. Backport to supported versions if needed
-
-## Version Support Policy
-
-- Latest minor version: Full support
-- Previous minor version: Security fixes only
-- Older versions: No support
-
-Example:
-- v0.3.x - Full support
-- v0.2.x - Security fixes only
-- v0.1.x - No support 
+- **`Cargo.toml`** (workspace) — single source of truth for the Rust version
+- **`.github/version.json`** — tracks the latest release for semantic-release
+- **`CHANGELOG.md`** — auto-generated by semantic-release (do not edit manually)

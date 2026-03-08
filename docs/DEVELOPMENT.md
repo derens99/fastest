@@ -4,8 +4,8 @@ This guide helps you set up and contribute to the Fastest project.
 
 ## Prerequisites
 
-- Rust 1.75 or later
-- Python 3.8 or later
+- Rust stable toolchain (install via [rustup](https://rustup.rs/))
+- Python 3.9 or later
 - Git
 
 ## Setting Up Development Environment
@@ -13,68 +13,47 @@ This guide helps you set up and contribute to the Fastest project.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/fastest.git
+git clone https://github.com/derens99/fastest.git
 cd fastest
 ```
 
-### 2. Install Rust and Development Tools
+### 2. Install Rust Tools
 
 ```bash
 # Install Rust (if not already installed)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Install all development tools (rustfmt, clippy, etc.)
-./scripts/install-dev-tools.sh
-
-# Enable Git hooks for automatic validation
-./scripts/setup-hooks.sh
-```
-
-### 3. Quick Start
-
-```bash
-# Install rustup if you haven't already
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Add required components
 rustup component add rustfmt clippy
 ```
 
-### 3. Install Development Tools
+### 3. Build and Test
 
 ```bash
-# Install cargo-watch for auto-recompilation
-cargo install cargo-watch
+# Debug build
+cargo build --workspace
 
-# Install cargo-tarpaulin for coverage
-cargo install cargo-tarpaulin
+# Release build (with LTO)
+cargo build --release --workspace
 
-# Install cargo-audit for security checks
-cargo install cargo-audit
+# Run all tests
+cargo test --workspace
 
-# Install cargo-criterion for benchmarks
-cargo install cargo-criterion
+# Run clippy lints
+cargo clippy --workspace --all-targets -- -D warnings
+
+# Check formatting
+cargo fmt --all -- --check
 ```
 
-### 4. Set Up Python Environment
+### 4. Set Up Python Environment (Optional)
+
+Only needed for running benchmarks or Python-based integration tests:
 
 ```bash
-# Create virtual environment
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install Python dependencies
-pip install -r requirements-dev.txt
-```
-
-### 5. Pre-commit Hooks
-
-```bash
-# Install pre-commit
-pip install pre-commit
-
-# Install hooks
-pre-commit install
+pip install pytest  # For comparison benchmarks
 ```
 
 ## Project Structure
@@ -82,23 +61,40 @@ pre-commit install
 ```
 fastest/
 ├── crates/
-│   ├── fastest-core/        # Core functionality
+│   ├── fastest-core/       # Discovery, parsing, config, markers, fixtures, plugins
 │   │   ├── src/
-│   │   │   ├── lib.rs      # Library root
-│   │   │   ├── discovery.rs # Test discovery
-│   │   │   ├── executor/   # Test execution
-│   │   │   ├── parser/     # Python parsing
-│   │   │   └── ...
-│   │   └── tests/          # Unit tests
-│   ├── fastest-cli/        # CLI application
+│   │   │   ├── lib.rs      # Public API and re-exports
+│   │   │   ├── config.rs   # Multi-format config loading
+│   │   │   ├── model.rs    # TestItem, TestResult, TestOutcome
+│   │   │   ├── discovery/  # AST-based test discovery (rustpython-parser)
+│   │   │   ├── fixtures/   # Fixture system (conftest, scoping, builtins)
+│   │   │   ├── markers.rs  # Marker system and expression parser
+│   │   │   ├── parametrize.rs  # @pytest.mark.parametrize expansion
+│   │   │   ├── plugins/    # Plugin trait and manager
+│   │   │   ├── incremental/ # Git-based change detection
+│   │   │   └── watch.rs    # File watcher
+│   │   └── Cargo.toml
+│   ├── fastest-execution/  # Hybrid executor (PyO3 in-process + subprocess pool)
 │   │   ├── src/
-│   │   │   └── main.rs     # CLI entry point
-│   │   └── tests/          # CLI tests
-│   └── fastest-python/     # Python bindings (optional)
-├── tests/                  # Integration tests
-├── benchmarks/            # Performance benchmarks
-├── docs/                  # Documentation
-└── examples/              # Example usage
+│   │   │   ├── executor.rs    # HybridExecutor strategy selection
+│   │   │   ├── inprocess.rs   # PyO3 in-process execution
+│   │   │   ├── subprocess.rs  # Subprocess pool with crossbeam work-stealing
+│   │   │   ├── worker_harness.py  # Python-side test runner
+│   │   │   └── timeout.rs    # Timeout configuration
+│   │   └── Cargo.toml
+│   └── fastest-cli/        # CLI interface (clap) and output formatting
+│       ├── src/
+│       │   ├── main.rs     # CLI entry point and test pipeline
+│       │   ├── output.rs   # Pretty, JSON, count, JUnit XML formatters
+│       │   └── progress.rs # Spinner/progress bar
+│       └── Cargo.toml
+├── tests/                  # Integration tests and test fixtures
+│   ├── checks/             # Python test files used to validate fastest
+│   └── integration/        # Python integration test scripts
+├── testing_files/          # Additional Python test fixtures
+├── benchmarks/             # Performance benchmarks (fastest vs pytest)
+├── .github/workflows/      # CI and semantic-release
+└── scripts/                # Build and release helper scripts
 ```
 
 ## Development Workflow
@@ -113,230 +109,63 @@ git checkout -b feature/my-new-feature
 
 Follow the coding standards:
 - Run `cargo fmt` before committing
-- Ensure `cargo clippy` passes
+- Ensure `cargo clippy` passes with zero warnings
 - Add tests for new functionality
-- Update documentation
+- Use conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 
 ### 3. Run Tests
 
 ```bash
 # Run all tests
-cargo test
+cargo test --workspace
 
 # Run with output
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Run specific test
 cargo test test_name
-
-# Run integration tests
-cargo test --test '*'
 ```
 
-### 4. Check Code Quality
-
-```bash
-# Format code
-cargo fmt
-
-# Run linter
-cargo clippy -- -D warnings
-
-# Check for security issues
-cargo audit
-
-# Run coverage
-cargo tarpaulin --out Html
-```
-
-### 5. Test with Python
+### 4. Test with Python Files
 
 ```bash
 # Build release binary
 cargo build --release
 
 # Test with example Python files
-./target/release/fastest examples/
+./target/release/fastest tests/checks/
 
-# Test with coverage
-./target/release/fastest tests/ --cov
+# Compare with pytest
+pytest tests/checks/ -v
 ```
 
 ## Debugging
 
 ### Rust Debugging
 
-1. **Using println! debugging**:
-   ```rust
-   eprintln!("Debug: variable = {:?}", variable);
-   ```
-
-2. **Using env_logger**:
-   ```bash
-   RUST_LOG=debug cargo run
-   ```
-
-3. **Using debugger (VS Code)**:
-   - Install CodeLLDB extension
-   - Use provided launch.json configuration
+```rust
+// Use eprintln! for debug output (goes to stderr)
+eprintln!("Debug: variable = {:?}", variable);
+```
 
 ### Python Test Debugging
 
-1. **Verbose mode**:
-   ```bash
-   ./target/release/fastest tests/ -v
-   ```
-
-2. **Check generated Python code**:
-   ```bash
-   # After running with -v, check:
-   cat /tmp/fastest_debug.py
-   ```
-
-## Adding New Features
-
-### 1. Core Features
-
-Add to `crates/fastest-core/src/`:
-
-```rust
-// new_feature.rs
-pub struct NewFeature {
-    // Implementation
-}
-
-impl NewFeature {
-    pub fn new() -> Self {
-        // Constructor
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_new_feature() {
-        // Test implementation
-    }
-}
-```
-
-Don't forget to export from `lib.rs`:
-
-```rust
-pub mod new_feature;
-pub use new_feature::NewFeature;
-```
-
-### 2. CLI Features
-
-Add new command or flag in `crates/fastest-cli/src/main.rs`:
-
-```rust
-#[derive(Parser)]
-struct Cli {
-    /// New feature flag
-    #[arg(long)]
-    new_feature: bool,
-}
-```
-
-### 3. Parser Features
-
-For new Python parsing features, modify:
-- `crates/fastest-core/src/parser/ast.rs` for AST parsing
-- `crates/fastest-core/src/parser/regex.rs` for regex parsing
-
-## Performance Optimization
-
-### 1. Profiling
-
 ```bash
-# CPU profiling with flamegraph
-cargo install flamegraph
-cargo flamegraph --bin fastest -- tests/
+# Verbose mode shows each test's status
+./target/release/fastest tests/ -v
 
-# Memory profiling with heaptrack
-heaptrack ./target/release/fastest tests/
-heaptrack --analyze heaptrack.fastest.*.gz
+# Show full tracebacks
+./target/release/fastest tests/ --tb=long
 ```
 
-### 2. Benchmarking
+## CI/CD
 
-Create benchmarks in `benchmarks/`:
-
-```python
-# bench_feature.py
-import time
-import subprocess
-
-def benchmark():
-    start = time.perf_counter()
-    subprocess.run(["./target/release/fastest", "tests/"])
-    return time.perf_counter() - start
-```
-
-## Common Tasks
-
-### Update Dependencies
-
-```bash
-# Check outdated dependencies
-cargo outdated
-
-# Update dependencies
-cargo update
-
-# Update Cargo.toml versions
-cargo upgrade
-```
-
-### Run CI Locally
-
-```bash
-# Install act
-brew install act  # macOS
-
-# Run CI
-act -j test
-```
-
-### Generate Documentation
-
-```bash
-# Generate and open docs
-cargo doc --open
-
-# Generate docs with private items
-cargo doc --document-private-items
-```
-
-## Troubleshooting
-
-### Build Issues
-
-1. **Linking errors**: Ensure you have required system libraries
-2. **Python not found**: Check PYTHON_CMD detection in utils/python.rs
-3. **Cache issues**: Clear with `cargo clean`
-
-### Test Issues
-
-1. **Flaky tests**: Run with `--test-threads=1`
-2. **Discovery cache**: Clear with `rm -rf ~/Library/Caches/fastest`
-3. **Python path**: Set VIRTUAL_ENV or use explicit Python path
-
-## Contributing Guidelines
-
-1. **Code Style**: Follow Rust conventions and run `cargo fmt`
-2. **Documentation**: Update relevant docs and add inline comments
-3. **Tests**: Add tests for new features (aim for 80%+ coverage)
-4. **Commits**: Use conventional commits (feat:, fix:, docs:, etc.)
-5. **PR Description**: Clearly describe changes and link issues
+- **CI** (`ci.yml`): Runs on every push — fmt, clippy, test (Linux/macOS/Windows), release build
+- **Release** (`semantic-release.yml`): Triggered after CI passes on `main` — conventional commits drive versioning, binaries uploaded for 5 targets, wheels published to PyPI
 
 ## Resources
 
 - [Rust Book](https://doc.rust-lang.org/book/)
-- [PyO3 Guide](https://pyo3.rs/) (for Python bindings)
-- [Tree-sitter Docs](https://tree-sitter.github.io/tree-sitter/)
-- [Rayon Docs](https://docs.rs/rayon/) (for parallelism) 
+- [PyO3 Guide](https://pyo3.rs/) (for Python integration)
+- [Rayon Docs](https://docs.rs/rayon/) (for parallelism)
+- [Clap Docs](https://docs.rs/clap/) (for CLI)

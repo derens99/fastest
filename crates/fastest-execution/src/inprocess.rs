@@ -611,6 +611,15 @@ if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
 \x20               import re\n\
 \x20               if not re.search(s.match, str(ev)): raise AssertionError(f'{ev!r} does not match {s.match!r}')\n\
 \x20           return True\n\
+\x20   class _PytestApprox:\n\
+\x20       def __init__(s, expected, rel=None, abs_tol=None):\n\
+\x20           s.expected = expected; s.abs_tol = abs_tol if abs_tol is not None else 1e-6\n\
+\x20       def __eq__(s, actual):\n\
+\x20           try: return builtins.abs(actual - s.expected) <= s.abs_tol\n\
+\x20           except (TypeError, ValueError): return False\n\
+\x20       def __ne__(s, actual): return not s.__eq__(actual)\n\
+\x20       def __repr__(s): return f'approx({s.expected})'\n\
+\x20   import builtins\n\
 \x20   class _PytestShim:\n\
 \x20       class _M:\n\
 \x20           def __getattr__(s, n):\n\
@@ -618,7 +627,7 @@ if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
 \x20               return d\n\
 \x20       mark = _M()\n\
 \x20       def raises(s, exc, *a, match=None, **kw): return _PytestRaisesCtx(exc, match=match)\n\
-\x20       def approx(s, exp, rel=None, abs=None): return exp\n\
+\x20       def approx(s, exp, rel=None, abs=None): return _PytestApprox(exp, rel=rel, abs_tol=abs)\n\
 \x20       def fixture(s, f=None, **kw): return f if f else (lambda fn: fn)\n\
 \x20       def param(s, *v, id=None, marks=()): return v if len(v)!=1 else v[0]\n\
 \x20       def skip(s, reason=''): raise Exception(f'SKIPPED: {reason}')\n\

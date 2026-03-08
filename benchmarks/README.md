@@ -1,84 +1,38 @@
 # Fastest Benchmarks
 
-This directory contains performance benchmarks comparing `fastest` with `pytest` and other test runners.
+This directory contains performance benchmarks comparing `fastest` with `pytest`.
 
 ## Quick Start
 
 ```bash
-# Main comprehensive benchmark (recommended)
-python benchmarks/main_benchmark.py
+# Build fastest in release mode first
+cargo build --release
 
-# Quick demo benchmark
-python benchmarks/quick_benchmark_demo.py
+# Run the unified benchmark suite
+python benchmarks/unified_comprehensive_benchmark.py
 
-# Simple benchmark
-python benchmarks/simple_benchmark.py
+# Run benchmarks via the runner script
+python benchmarks/run_benchmarks.py
 
-# Class-based testing benchmarks
-python benchmarks/benchmark_class_based.py       # Comprehensive class-based testing
-python benchmarks/benchmark_class_fixtures.py   # Class fixture performance
-python benchmarks/benchmark_class_inheritance.py # Inheritance patterns
+# Generate graphs from results
+python benchmarks/generate_graphs.py
 ```
 
 ## Benchmark Scripts
 
-### Core Benchmarks
+- **`unified_comprehensive_benchmark.py`** — Comprehensive benchmark suite comparing fastest vs pytest across multiple test suite sizes. This is the primary benchmark.
 
-- **`main_benchmark.py`** - Comprehensive benchmark suite comparing fastest vs pytest across multiple test suite sizes. This is the primary benchmark that validates performance claims.
+- **`run_benchmarks.py`** — Runner script for executing benchmarks with standard options.
 
-- **`simple_benchmark.py`** - Basic performance comparison focused on test discovery and execution speed.
+- **`generate_graphs.py`** — Generates comparison graphs from benchmark results in `results/`.
 
-- **`quick_benchmark_demo.py`** - Lightweight benchmark for quick demonstrations and CI.
+## Results
 
-### Specialized Benchmarks
+Benchmark output is stored in `results/`:
+- `results.json` — Raw benchmark data
+- `*.png` — Generated comparison graphs
 
-- **`bench_discovery.py`** - Focused test discovery performance analysis.
-
-- **`benchmark_cache.py`** - Tests caching mechanisms and incremental test runs.
-
-- **`benchmark_parsers.py`** - Compares different parsing strategies and their performance impact.
-
-- **`benchmark_scale.py`** - Tests performance scaling from small to large test suites.
-
-- **`validate_performance_claims.py`** - Validates specific performance claims made in documentation.
-
-### Class-Based Testing Benchmarks
-
-- **`benchmark_class_based.py`** - Comprehensive benchmark for class-based test execution, fixture sharing, and lifecycle management. Tests class instance management, setup/teardown methods, and performance comparison with function-based tests.
-
-- **`benchmark_class_fixtures.py`** - Focused benchmark for class fixture performance and correctness. Tests fixture creation efficiency, sharing behavior, @classmethod fixtures, and memory optimization.
-
-- **`benchmark_class_inheritance.py`** - Specialized benchmark for class inheritance patterns. Tests simple inheritance, multiple inheritance, abstract base classes, deep inheritance chains, and Method Resolution Order (MRO) complexity.
-
-### Utility Scripts
-
-- **`generate_scale_tests.py`** - Generates test suites of various sizes for benchmarking.
-
-## Benchmark Results
-
-Current benchmark results are documented in:
-
-- **`BENCHMARK_RESULTS.md`** - Latest comprehensive performance comparison
-- **`latest_benchmark_results.json`** - Raw JSON results from latest run
-
-## Performance Summary
-
-Based on latest benchmarks:
-
-### Test Discovery
-- **10-20 tests**: 11-16x faster than pytest
-- **50-100 tests**: 12-29x faster than pytest  
-- **500+ tests**: 19-141x faster than pytest
-
-### Test Execution
-Performance varies by execution strategy:
-- **InProcess** (≤20 tests): 2-3x faster than pytest
-- **WarmWorkers** (21-100 tests): Similar to pytest
-- **FullParallel** (>100 tests): 1.5-3x faster than pytest
-
-## Running Benchmarks
-
-### Prerequisites
+## Prerequisites
 
 1. Build fastest in release mode:
    ```bash
@@ -90,26 +44,9 @@ Performance varies by execution strategy:
    pip install pytest
    ```
 
-### Interpreting Results
+## Tips for Consistent Results
 
-- **Discovery times** measure how long it takes to find and parse tests
-- **Execution times** measure actual test running including setup/teardown
-- **Speedup factors** show how many times faster fastest is compared to pytest
-
-### Benchmark Environment
-
-For consistent results:
-- Run on a dedicated machine or during low activity
 - Use release builds (`cargo build --release`)
-- Run multiple iterations (benchmarks do this automatically)
-- Avoid running other intensive processes during benchmarking
-
-## Contributing
-
-When adding new benchmarks:
-
-1. Follow the naming convention: `benchmark_<feature>.py`
-2. Include comprehensive error handling
-3. Support multiple runs for statistical significance
-4. Document what the benchmark measures
-5. Update this README with the new benchmark description
+- Run on a quiet machine with minimal background activity
+- Run multiple iterations (the benchmarks do this automatically)
+- Compare results across multiple runs before drawing conclusions

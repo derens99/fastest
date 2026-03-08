@@ -1,5 +1,8 @@
 import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib
 
+# Cache the builtin abs() to avoid issues when __builtins__ is a module vs dict
+builtins_abs = abs
+
 # Provide a minimal pytest compatibility shim so tests using pytest.raises/pytest.mark etc. work
 class _PytestRaisesContext:
     """Context manager for pytest.raises."""
@@ -41,7 +44,12 @@ class _PytestApprox:
         self.rel = rel
         self.abs_tol = abs if abs is not None else 1e-6
     def __eq__(self, actual):
-        return __builtins__['abs'](actual - self.expected) <= self.abs_tol if isinstance(self.abs_tol, (int, float)) else False
+        try:
+            return builtins_abs(actual - self.expected) <= self.abs_tol if isinstance(self.abs_tol, (int, float)) else False
+        except (TypeError, ValueError):
+            return False
+    def __ne__(self, actual):
+        return not self.__eq__(actual)
     def __repr__(self):
         return f"approx({self.expected})"
 
