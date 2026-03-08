@@ -114,6 +114,15 @@ impl InProcessExecutor {
                 );
             }
 
+            // Snapshot sys.path, sys.modules, os.environ for isolation
+            let snapshot_isolation = c_str!(
+                "import os\n\
+                 __fastest_saved_path = sys.path[:]\n\
+                 __fastest_saved_modules = set(sys.modules.keys())\n\
+                 __fastest_saved_env = dict(os.environ)"
+            );
+            let _ = py.run(snapshot_isolation, None, None);
+
             // Build CString for the dynamic test code
             let code_cstring = match CString::new(code.as_bytes()) {
                 Ok(cs) => cs,
@@ -133,6 +142,17 @@ impl InProcessExecutor {
 
             // Restore stdout/stderr and collect captured output
             let _ = py.run(restore_capture, None, None);
+
+            // Restore sys.path, sys.modules, os.environ for isolation
+            let restore_isolation = c_str!(
+                "sys.path[:] = __fastest_saved_path\n\
+                 for __fastest_mn in list(sys.modules.keys()):\n\
+                 \x20   if __fastest_mn not in __fastest_saved_modules:\n\
+                 \x20       del sys.modules[__fastest_mn]\n\
+                 os.environ.clear()\n\
+                 os.environ.update(__fastest_saved_env)"
+            );
+            let _ = py.run(restore_isolation, None, None);
 
             let captured = extract_captured_output(py);
 

@@ -5,7 +5,9 @@
 //! fair work distribution across workers.
 
 use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crossbeam_deque::{Injector, Steal};
@@ -18,6 +20,13 @@ use crate::timeout::TimeoutConfig;
 
 /// The embedded Python worker harness script.
 const WORKER_HARNESS: &str = include_str!("worker_harness.py");
+
+/// Protocol prefix: lines from the worker harness that start with this are JSON results.
+/// Other stdout lines are captured test output.
+const RESULT_PREFIX: &str = "FASTEST_RESULT:";
+
+/// Maximum number of times a worker can be restarted after crashing.
+const MAX_WORKER_RESTARTS: usize = 3;
 
 /// JSON payload sent to a worker process.
 #[derive(Debug, Serialize)]
@@ -267,6 +276,7 @@ impl SubprocessPool {
     ///
     /// Tests are distributed across workers using a work-stealing injector queue.
     /// Each worker is a persistent Python process running the worker harness.
+    /// Tests are sorted by (path, class_name) to improve setup/teardown lifecycle.
     pub fn execute(&self, tests: &[TestItem]) -> Vec<TestResult> {
         if tests.is_empty() {
             return Vec::new();
@@ -293,9 +303,19 @@ impl SubprocessPool {
             }
         };
 
-        // Set up the work-stealing injector
+        // Sort tests by (path, class_name) for better setup/teardown grouping.
+        // This ensures that tests from the same class are processed consecutively
+        // by the same worker (when possible), enabling correct teardown_class timing.
+        let mut indexed_tests: Vec<(usize, &TestItem)> = tests.iter().enumerate().collect();
+        indexed_tests.sort_by(|a, b| {
+            let key_a = (&a.1.path, &a.1.class_name);
+            let key_b = (&b.1.path, &b.1.class_name);
+            key_a.cmp(&key_b)
+        });
+
+        // Set up the work-stealing injector (sorted order)
         let injector = Injector::new();
-        for (idx, test) in tests.iter().enumerate() {
+        for (idx, test) in indexed_tests {
             injector.push((idx, test.clone()));
         }
 
@@ -303,7 +323,6 @@ impl SubprocessPool {
         let mut results: Vec<Option<TestResult>> = vec![None; tests.len()];
 
         // Spawn workers and process tests
-        // We use a simple approach: each thread takes from the injector
         let results_lock = parking_lot::Mutex::new(&mut results);
 
         crossbeam::scope(|scope| {
@@ -315,24 +334,71 @@ impl SubprocessPool {
                 let timeout = &self.timeout_config;
 
                 scope.spawn(move |_| {
-                    // Spawn a persistent worker process
-                    let mut worker =
-                        match PersistentWorker::spawn(python_path, &harness_path.to_string_lossy())
+                    let harness_str = harness_path.to_string_lossy();
+                    let mut worker = match PersistentWorker::spawn(python_path, &harness_str) {
+                        Ok(w) => w,
+                        Err(e) => {
+                            // Drain remaining work and mark as errors
+                            loop {
+                                match injector.steal() {
+                                    Steal::Success((idx, test)) => {
+                                        let result = TestResult {
+                                            test_id: test.id.clone(),
+                                            outcome: TestOutcome::Error {
+                                                message: format!("Worker spawn failed: {e}"),
+                                            },
+                                            duration: Duration::ZERO,
+                                            output: String::new(),
+                                            error: Some(e.to_string()),
+                                            stdout: String::new(),
+                                            stderr: String::new(),
+                                        };
+                                        let mut guard = results_lock.lock();
+                                        guard[idx] = Some(result);
+                                    }
+                                    Steal::Empty => break,
+                                    Steal::Retry => continue,
+                                }
+                            }
+                            return;
+                        }
+                    };
+
+                    let mut restart_count = 0;
+                    loop {
+                        let (idx, test) = match injector.steal() {
+                            Steal::Success(item) => item,
+                            Steal::Empty => break,
+                            Steal::Retry => continue,
+                        };
+
+                        let result = execute_on_worker(&mut worker, &test, timeout);
+                        let worker_died = !worker.is_alive();
+
                         {
-                            Ok(w) => w,
-                            Err(e) => {
-                                // Drain remaining work and mark as errors
+                            let mut guard = results_lock.lock();
+                            guard[idx] = Some(result);
+                        }
+
+                        // If the worker died (crash or timeout kill), try to restart it
+                        if worker_died {
+                            restart_count += 1;
+                            if restart_count > MAX_WORKER_RESTARTS {
+                                // Too many restarts — drain remaining and mark as errors
                                 loop {
                                     match injector.steal() {
                                         Steal::Success((idx, test)) => {
                                             let result = TestResult {
                                                 test_id: test.id.clone(),
                                                 outcome: TestOutcome::Error {
-                                                    message: format!("Worker spawn failed: {e}"),
+                                                    message: format!(
+                                                        "Worker crashed {} times, giving up",
+                                                        MAX_WORKER_RESTARTS
+                                                    ),
                                                 },
                                                 duration: Duration::ZERO,
                                                 output: String::new(),
-                                                error: Some(e.to_string()),
+                                                error: Some("Max worker restarts exceeded".into()),
                                                 stdout: String::new(),
                                                 stderr: String::new(),
                                             };
@@ -345,22 +411,40 @@ impl SubprocessPool {
                                 }
                                 return;
                             }
-                        };
-
-                    loop {
-                        let (idx, test) = match injector.steal() {
-                            Steal::Success(item) => item,
-                            Steal::Empty => break,
-                            Steal::Retry => continue,
-                        };
-
-                        let result = execute_on_worker(&mut worker, &test, timeout);
-
-                        let mut guard = results_lock.lock();
-                        guard[idx] = Some(result);
+                            match PersistentWorker::spawn(python_path, &harness_str) {
+                                Ok(w) => worker = w,
+                                Err(e) => {
+                                    // Can't restart — drain remaining
+                                    loop {
+                                        match injector.steal() {
+                                            Steal::Success((idx, test)) => {
+                                                let result = TestResult {
+                                                    test_id: test.id.clone(),
+                                                    outcome: TestOutcome::Error {
+                                                        message: format!(
+                                                            "Worker restart failed: {e}"
+                                                        ),
+                                                    },
+                                                    duration: Duration::ZERO,
+                                                    output: String::new(),
+                                                    error: Some(e.to_string()),
+                                                    stdout: String::new(),
+                                                    stderr: String::new(),
+                                                };
+                                                let mut guard = results_lock.lock();
+                                                guard[idx] = Some(result);
+                                            }
+                                            Steal::Empty => break,
+                                            Steal::Retry => continue,
+                                        }
+                                    }
+                                    return;
+                                }
+                            }
+                        }
                     }
 
-                    // Signal worker to exit
+                    // Signal worker to exit gracefully
                     worker.shutdown();
                 });
             }
@@ -407,33 +491,104 @@ fn write_harness_to_temp() -> Result<std::path::PathBuf, std::io::Error> {
     Ok(path)
 }
 
-/// A persistent Python worker process with a buffered stdout reader.
-///
-/// Wrapping the `BufReader` alongside the `Child` ensures the internal read
-/// buffer is preserved across calls, preventing data loss when the reader
-/// buffers ahead past one result line.
+/// A persistent Python worker process with channel-based stdout reading
+/// and background stderr capture.
 struct PersistentWorker {
     child: Child,
-    reader: BufReader<ChildStdout>,
+    /// Receives lines from the stdout reader thread.
+    result_rx: crossbeam::channel::Receiver<String>,
+    /// Shared buffer holding the last 8KB of stderr output.
+    stderr_buffer: Arc<parking_lot::Mutex<String>>,
+    /// Set to false when the stdout reader thread detects EOF (worker exited).
+    alive: Arc<AtomicBool>,
 }
 
 impl PersistentWorker {
-    /// Spawn a new persistent worker.  Stderr is discarded to avoid deadlocks
-    /// when the worker writes enough to fill the OS pipe buffer.
+    /// Spawn a new persistent worker with background stdout/stderr reader threads.
     fn spawn(python_path: &str, harness_path: &str) -> Result<Self, std::io::Error> {
         let mut child = Command::new(python_path)
             .arg(harness_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null()) // prevent deadlock from full stderr pipe
+            .stderr(Stdio::piped())
             .spawn()?;
 
         let stdout = child.stdout.take().expect("stdout was piped");
-        let reader = BufReader::new(stdout);
-        Ok(Self { child, reader })
+        let stderr = child.stderr.take().expect("stderr was piped");
+
+        // Channel for stdout lines
+        let (tx, rx) = crossbeam::channel::unbounded();
+        let alive = Arc::new(AtomicBool::new(true));
+        let alive_clone = alive.clone();
+
+        // Background thread: read stdout lines and send over channel
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break, // EOF — worker exited
+                    Ok(_) => {
+                        if tx.send(line.trim_end().to_string()).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+            alive_clone.store(false, Ordering::SeqCst);
+        });
+
+        // Background thread: drain stderr into a bounded buffer
+        let stderr_buffer = Arc::new(parking_lot::Mutex::new(String::new()));
+        let buf_clone = stderr_buffer.clone();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line) {
+                    Ok(0) => break,
+                    Ok(_) => {
+                        let mut buf = buf_clone.lock();
+                        buf.push_str(&line);
+                        // Keep only the last 8KB of stderr
+                        if buf.len() > 8192 {
+                            let drain_to = buf.len() - 4096;
+                            buf.drain(..drain_to);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        Ok(Self {
+            child,
+            result_rx: rx,
+            stderr_buffer,
+            alive,
+        })
     }
 
-    /// Signal the worker to exit and wait for process to finish.
+    /// Returns true if the worker process is still running.
+    fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::SeqCst)
+    }
+
+    /// Returns the last captured stderr output (up to ~8KB).
+    fn last_stderr(&self) -> String {
+        self.stderr_buffer.lock().clone()
+    }
+
+    /// Forcefully kill the worker process.
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
+    /// Signal the worker to exit gracefully and wait for process to finish.
     fn shutdown(&mut self) {
         if let Some(ref mut stdin) = self.child.stdin {
             let _ = writeln!(stdin, "EXIT");
@@ -443,6 +598,10 @@ impl PersistentWorker {
 }
 
 /// Send a test to a worker process and read back the result.
+///
+/// Uses channel-based reading with `recv_timeout` for proper timeout enforcement.
+/// Non-result stdout lines (from `print()` in tests) are captured separately.
+/// On timeout, the worker process is killed.
 fn execute_on_worker(
     worker: &mut PersistentWorker,
     test: &TestItem,
@@ -527,73 +686,106 @@ fn execute_on_worker(
         };
     }
 
-    // Read exactly one result line from the persistent BufReader.
-    // The BufReader is stored alongside the worker so its internal buffer
-    // is preserved across calls — no data is lost between invocations.
+    // Read result from channel with timeout.
+    // Non-result lines (test stdout) are captured separately.
+    let mut captured_stdout = String::new();
     loop {
-        let mut line = String::new();
-        match worker.reader.read_line(&mut line) {
-            Ok(0) => {
-                // EOF — worker process has exited
-                break;
-            }
-            Ok(_) => {
-                let line = line.trim().to_string();
+        let remaining = timeout.per_test.saturating_sub(start.elapsed());
+        if remaining.is_zero() {
+            // Timeout expired — kill the worker
+            let stderr = worker.last_stderr();
+            worker.kill();
+            return TestResult {
+                test_id: test.id.clone(),
+                outcome: TestOutcome::Error {
+                    message: format!("Test exceeded timeout of {:?}", timeout.per_test),
+                },
+                duration: start.elapsed(),
+                output: String::new(),
+                error: Some(format!("Timeout after {:?}", timeout.per_test)),
+                stdout: captured_stdout,
+                stderr,
+            };
+        }
+
+        match worker.result_rx.recv_timeout(remaining) {
+            Ok(line) => {
                 if line.is_empty() {
                     continue;
                 }
-                match parse_worker_result(&line) {
-                    Ok(wr) => {
-                        let mut result = wr.into_test_result(&test.id);
-                        // Check timeout
-                        if timeout.is_expired(start.elapsed()) {
-                            result.outcome = TestOutcome::Error {
-                                message: format!("Test exceeded timeout of {:?}", timeout.per_test),
+                if let Some(json_str) = line.strip_prefix(RESULT_PREFIX) {
+                    // This is a result line from the worker harness
+                    match parse_worker_result(json_str) {
+                        Ok(wr) => {
+                            let mut result = wr.into_test_result(&test.id);
+                            // Merge captured stdout from non-result lines
+                            if !captured_stdout.is_empty() && result.stdout.is_empty() {
+                                result.stdout = captured_stdout;
+                            }
+                            return result;
+                        }
+                        Err(e) => {
+                            return TestResult {
+                                test_id: test.id.clone(),
+                                outcome: TestOutcome::Error {
+                                    message: format!("Failed to parse worker output: {e}"),
+                                },
+                                duration: start.elapsed(),
+                                output: line,
+                                error: Some(e.to_string()),
+                                stdout: captured_stdout,
+                                stderr: String::new(),
                             };
                         }
-                        return result;
                     }
-                    Err(e) => {
-                        return TestResult {
-                            test_id: test.id.clone(),
-                            outcome: TestOutcome::Error {
-                                message: format!("Failed to parse worker output: {e}"),
-                            },
-                            duration: start.elapsed(),
-                            output: line,
-                            error: Some(e.to_string()),
-                            stdout: String::new(),
-                            stderr: String::new(),
-                        };
+                } else {
+                    // Non-result line — capture as test stdout
+                    if !captured_stdout.is_empty() {
+                        captured_stdout.push('\n');
                     }
+                    captured_stdout.push_str(&line);
                 }
             }
-            Err(e) => {
+            Err(crossbeam::channel::RecvTimeoutError::Timeout) => {
+                // Timeout — kill the worker
+                let stderr = worker.last_stderr();
+                worker.kill();
                 return TestResult {
                     test_id: test.id.clone(),
                     outcome: TestOutcome::Error {
-                        message: format!("Failed to read worker output: {e}"),
+                        message: format!("Test exceeded timeout of {:?}", timeout.per_test),
                     },
                     duration: start.elapsed(),
                     output: String::new(),
-                    error: Some(e.to_string()),
-                    stdout: String::new(),
-                    stderr: String::new(),
+                    error: Some(format!("Timeout after {:?}", timeout.per_test)),
+                    stdout: captured_stdout,
+                    stderr,
+                };
+            }
+            Err(crossbeam::channel::RecvTimeoutError::Disconnected) => {
+                // Worker died — collect error info
+                let stderr = worker.last_stderr();
+                let exit_info = worker.child.try_wait().ok().flatten();
+                let msg = if let Some(status) = exit_info {
+                    format!("Worker process exited with {status}")
+                } else {
+                    "Worker process died unexpectedly".to_string()
+                };
+                return TestResult {
+                    test_id: test.id.clone(),
+                    outcome: TestOutcome::Error { message: msg },
+                    duration: start.elapsed(),
+                    output: String::new(),
+                    error: if stderr.is_empty() {
+                        Some("Worker process died".into())
+                    } else {
+                        Some(stderr.clone())
+                    },
+                    stdout: captured_stdout,
+                    stderr,
                 };
             }
         }
-    }
-
-    TestResult {
-        test_id: test.id.clone(),
-        outcome: TestOutcome::Error {
-            message: "No output received from worker".into(),
-        },
-        duration: start.elapsed(),
-        output: String::new(),
-        error: Some("Worker process produced no output".into()),
-        stdout: String::new(),
-        stderr: String::new(),
     }
 }
 
