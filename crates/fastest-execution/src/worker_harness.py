@@ -71,6 +71,16 @@ class _PytestShim:
         raise Exception(f"SKIPPED: {reason}")
     def fail(self, reason=""):
         raise AssertionError(reason)
+    def importorskip(self, modname, minversion=None, reason=None):
+        try:
+            mod = importlib.import_module(modname)
+            if minversion:
+                ver = getattr(mod, '__version__', '')
+                if ver < minversion:
+                    raise Exception(f"SKIPPED: {reason or f'{modname}>={minversion} required'}")
+            return mod
+        except ImportError:
+            raise Exception(f"SKIPPED: {reason or f'could not import {modname!r}'}")
 
 # Install the shim as 'pytest' if the real package isn't available
 try:
@@ -129,11 +139,13 @@ def run_test(test_item):
             xfail_marker = m
             break
     xfail_reason = None
+    xfail_strict = False
     if xfail_marker is not None:
         xfail_reason = xfail_marker.get("kwargs", {}).get("reason")
         if xfail_reason is None:
             args = xfail_marker.get("args", [])
             xfail_reason = args[0] if args else None
+        xfail_strict = bool(xfail_marker.get("kwargs", {}).get("strict", False))
 
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
@@ -223,9 +235,47 @@ def run_test(test_item):
                         self_inner._env_patches.append((key, old))
                         if key in os.environ: del os.environ[key]
                         elif raising: raise KeyError(key)
+                    def chdir(self_inner, path):
+                        old = os.getcwd()
+                        self_inner._patches.append(('__cwd__', '__cwd__', old))
+                        os.chdir(str(path))
+                    def syspath_prepend(self_inner, path):
+                        sys.path.insert(0, str(path))
+                        self_inner._patches.append(('__syspath__', str(path), None))
+                    def setitem(self_inner, mapping, key, value):
+                        old = mapping.get(key, self_inner._NOTSET)
+                        self_inner._patches.append(('__item__', (mapping, key), old))
+                        mapping[key] = value
+                    def delitem(self_inner, mapping, key, raising=True):
+                        old = mapping.get(key, self_inner._NOTSET)
+                        self_inner._patches.append(('__item__', (mapping, key), old))
+                        if key in mapping: del mapping[key]
+                        elif raising: raise KeyError(key)
+                    def context(self_inner):
+                        import contextlib
+                        @contextlib.contextmanager
+                        def _ctx():
+                            m = _MonkeyPatch()
+                            try:
+                                yield m
+                            finally:
+                                m.undo()
+                        return _ctx()
                     def undo(self_inner):
                         for target, name, old in reversed(self_inner._patches):
-                            setattr(target, name, old)
+                            if target == '__cwd__':
+                                os.chdir(old)
+                            elif target == '__syspath__':
+                                try: sys.path.remove(name)
+                                except ValueError: pass
+                            elif target == '__item__':
+                                mapping, key = name
+                                if old is self_inner._NOTSET:
+                                    mapping.pop(key, None)
+                                else:
+                                    mapping[key] = old
+                            else:
+                                setattr(target, name, old)
                         self_inner._patches.clear()
                         for key, old in reversed(self_inner._env_patches):
                             if old is None: os.environ.pop(key, None)
@@ -279,6 +329,11 @@ def run_test(test_item):
                             fixture_kwargs[dep] = result
                         break  # Found the fixture, stop searching conftest files
 
+        # Call setup_module if present and not already called for this module
+        if hasattr(mod, 'setup_module') and not getattr(mod, '_fastest_setup_done', False):
+            mod.setup_module()
+            mod._fastest_setup_done = True
+
         # Execute test
         result = None
         try:
@@ -324,6 +379,16 @@ def run_test(test_item):
             asyncio.run(result)
         # Test passed — check if xfail (passed when expected to fail = XPassed)
         if xfail_marker is not None:
+            if xfail_strict:
+                return {
+                    "test_id": test_item["id"],
+                    "outcome": "Failed",
+                    "duration_ms": int((time.time() - start) * 1000),
+                    "error": "test unexpectedly passed (strict xfail)",
+                    "stdout": stdout_capture.getvalue(),
+                    "stderr": stderr_capture.getvalue(),
+                    "reason": str(xfail_reason) if xfail_reason else None,
+                }
             return {
                 "test_id": test_item["id"],
                 "outcome": "XPassed",
@@ -343,6 +408,19 @@ def run_test(test_item):
             "reason": None,
         }
     except Exception as e:
+        # Check for runtime pytest.skip()
+        error_str = str(e)
+        if error_str.startswith("SKIPPED:") or "SKIPPED:" in traceback.format_exc():
+            reason = error_str.replace("SKIPPED:", "").strip() if "SKIPPED:" in error_str else None
+            return {
+                "test_id": test_item["id"],
+                "outcome": "Skipped",
+                "duration_ms": int((time.time() - start) * 1000),
+                "error": None,
+                "stdout": stdout_capture.getvalue(),
+                "stderr": stderr_capture.getvalue(),
+                "reason": reason,
+            }
         # Test failed — check if xfail (failed when expected to fail = XFailed)
         if xfail_marker is not None:
             return {

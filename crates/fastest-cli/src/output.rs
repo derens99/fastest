@@ -119,6 +119,26 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
         }
     }
 
+    // Collect failures for summary section
+    let failures: Vec<&TestResult> = results
+        .iter()
+        .filter(|r| matches!(r.outcome, TestOutcome::Failed | TestOutcome::Error { .. }))
+        .collect();
+
+    if !failures.is_empty() && !quiet {
+        out.push_str(&format!("\n{}\n", "=".repeat(60)));
+        out.push_str(&"FAILURES".red().bold().to_string());
+        out.push('\n');
+        out.push_str(&format!("{}\n", "=".repeat(60)));
+        for result in &failures {
+            out.push_str(&format!("___ {} ___\n", result.test_id));
+            if let Some(ref err) = result.error {
+                out.push_str(&format!("{}\n", err));
+            }
+            out.push('\n');
+        }
+    }
+
     out
 }
 
