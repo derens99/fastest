@@ -1,3 +1,10 @@
+## [2.3.1](https://github.com/derens99/fastest/compare/v2.3.0...v2.3.1) (2026-03-08)
+
+
+### Bug Fixes
+
+* phase 1 foundation fixes - infrastructure, bugs, docs, dependencies ([#36](https://github.com/derens99/fastest/issues/36)) ([9bbdd95](https://github.com/derens99/fastest/commit/9bbdd95ec772f8730d4975c7c9cd1eb91e557c91))
+
 # [2.3.0](https://github.com/derens99/fastest/compare/v2.2.0...v2.3.0) (2026-03-08)
 
 

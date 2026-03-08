@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "fastest-runner"
-version = "2.3.0"
+version = "2.3.1"
 description = "Blazing-fast Python test runner written in Rust"
 readme = "README.md"
 authors = [
