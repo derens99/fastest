@@ -7,6 +7,58 @@
 
 > **Beta Release** - Fastest v2 is a complete rewrite. Core discovery and execution work well, but some features are still being refined. Bug reports welcome!
 
+## Performance
+
+Fastest is built in Rust for speed. Here's how it compares to pytest on real benchmarks:
+
+### Test Discovery: Up to 33x Faster
+
+Fastest's Rust-based AST parser with parallel file scanning (via [rayon](https://github.com/rayon-rs/rayon)) collects tests dramatically faster than pytest's Python-based collection.
+
+<p align="center">
+  <img src="benchmarks/results/discovery_speed.png" alt="Test Discovery: Fastest vs pytest — up to 33x faster" width="900">
+</p>
+
+| Test Files | Tests | Fastest | pytest | Speedup |
+|-----------|-------|---------|--------|---------|
+| 10 files | 200 | 12ms | 388ms | **33x** |
+| 50 files | 1,000 | 16ms | 469ms | **29x** |
+| 100 files | 2,000 | 19ms | 583ms | **32x** |
+| 250 files | 5,000 | 31ms | 909ms | **30x** |
+| 500 files | 10,000 | 49ms | 1,605ms | **33x** |
+
+### Parallel Execution: Up to 5x Faster
+
+For test suites where individual tests do real work (~10ms+ each), Fastest's parallel subprocess pool significantly outperforms pytest's sequential execution. The speedup grows with suite size.
+
+<p align="center">
+  <img src="benchmarks/results/execution_speed.png" alt="Parallel Execution: Fastest vs pytest — up to 5x faster" width="900">
+</p>
+
+| Tests | Fastest | pytest | Speedup |
+|-------|---------|--------|---------|
+| 50 | 1.74s | 0.92s | 0.5x |
+| 100 | 1.76s | 1.47s | 0.8x |
+| 250 | 1.82s | 3.13s | **1.7x** |
+| 500 | 1.94s | 5.87s | **3.0x** |
+| 1,000 | 2.22s | 11.41s | **5.1x** |
+
+> **Note:** For small suites (<100 tests) with trivial test bodies, pytest's single-process model has less overhead. Fastest's parallel engine shines as test count and individual test duration grow — which is the typical profile of real-world projects.
+
+<details>
+<summary><strong>Reproduce these benchmarks</strong></summary>
+
+```bash
+cargo build --release
+python benchmarks/run_benchmarks.py
+python benchmarks/generate_graphs.py
+```
+
+Results are saved to `benchmarks/results/`. Benchmarks run each configuration 5 times (after 1 warmup run) and report the mean. Measured on Windows with Python 3.12 and Rust release build (LTO enabled).
+</details>
+
+---
+
 ## Quick Start
 
 ### Install with pip (recommended)
