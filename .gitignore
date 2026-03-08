@@ -58,6 +58,8 @@ venv.bak/
 # Project specific
 benchmark_tests/
 benchmark_v2/
+benchmarks/_tmp_bench/
+benchmarks/tmp_tests/
 fastest.*.so
 *.pyd
 django/
