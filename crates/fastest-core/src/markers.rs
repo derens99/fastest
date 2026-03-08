@@ -17,6 +17,7 @@ pub enum BuiltinMarker {
     },
     Xfail {
         reason: Option<String>,
+        strict: bool,
     },
     Parametrize,
     Timeout(f64),
@@ -49,7 +50,12 @@ pub fn classify_marker(marker: &Marker) -> BuiltinMarker {
         }
         "xfail" => {
             let reason = extract_reason(marker);
-            BuiltinMarker::Xfail { reason }
+            let strict = marker
+                .kwargs
+                .get("strict")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            BuiltinMarker::Xfail { reason, strict }
         }
         "parametrize" => BuiltinMarker::Parametrize,
         "timeout" => {
@@ -408,7 +414,8 @@ mod tests {
         assert_eq!(
             classified,
             BuiltinMarker::Xfail {
-                reason: Some("known bug".to_string())
+                reason: Some("known bug".to_string()),
+                strict: false,
             }
         );
     }

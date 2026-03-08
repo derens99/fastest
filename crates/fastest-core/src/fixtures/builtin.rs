@@ -118,10 +118,54 @@ pub fn generate_builtin_code(name: &str) -> Option<String> {
              \x20           del os.environ[key]\n\
              \x20       elif raising:\n\
              \x20           raise KeyError(key)\n\
-             \x20   def undo(self):\n\
+             \x20   def chdir(self, path):\n\
              \x20       import os\n\
+             \x20       old = os.getcwd()\n\
+             \x20       self._patches.append(('__cwd__', '__cwd__', old))\n\
+             \x20       os.chdir(str(path))\n\
+             \x20   def syspath_prepend(self, path):\n\
+             \x20       import sys\n\
+             \x20       sys.path.insert(0, str(path))\n\
+             \x20       self._patches.append(('__syspath__', str(path), None))\n\
+             \x20   def setitem(self, mapping, key, value):\n\
+             \x20       old = mapping.get(key, self._NOTSET)\n\
+             \x20       self._patches.append(('__item__', (mapping, key), old))\n\
+             \x20       mapping[key] = value\n\
+             \x20   def delitem(self, mapping, key, raising=True):\n\
+             \x20       old = mapping.get(key, self._NOTSET)\n\
+             \x20       self._patches.append(('__item__', (mapping, key), old))\n\
+             \x20       if key in mapping:\n\
+             \x20           del mapping[key]\n\
+             \x20       elif raising:\n\
+             \x20           raise KeyError(key)\n\
+             \x20   def context(self):\n\
+             \x20       import contextlib\n\
+             \x20       @contextlib.contextmanager\n\
+             \x20       def _ctx():\n\
+             \x20           m = _MonkeyPatch()\n\
+             \x20           try:\n\
+             \x20               yield m\n\
+             \x20           finally:\n\
+             \x20               m.undo()\n\
+             \x20       return _ctx()\n\
+             \x20   def undo(self):\n\
+             \x20       import os, sys\n\
              \x20       for target, name, old in reversed(self._patches):\n\
-             \x20           setattr(target, name, old)\n\
+             \x20           if target == '__cwd__':\n\
+             \x20               os.chdir(old)\n\
+             \x20           elif target == '__syspath__':\n\
+             \x20               try:\n\
+             \x20                   sys.path.remove(name)\n\
+             \x20               except ValueError:\n\
+             \x20                   pass\n\
+             \x20           elif target == '__item__':\n\
+             \x20               mapping, key = name\n\
+             \x20               if old is self._NOTSET:\n\
+             \x20                   mapping.pop(key, None)\n\
+             \x20               else:\n\
+             \x20                   mapping[key] = old\n\
+             \x20           else:\n\
+             \x20               setattr(target, name, old)\n\
              \x20       self._patches.clear()\n\
              \x20       for key, old in reversed(self._env_patches):\n\
              \x20           if old is None:\n\

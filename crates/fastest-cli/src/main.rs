@@ -117,7 +117,7 @@ struct Cli {
     failed_first: bool,
 
     /// Alias for discover subcommand
-    #[arg(long = "collect-only")]
+    #[arg(long = "collect-only", visible_alias = "co")]
     collect_only: bool,
 }
 

@@ -22,9 +22,18 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
     let line_index = LineIndex::new(source);
     let path_str = path.display().to_string();
     let mut items = Vec::new();
+    let mut module_markers: Vec<Marker> = Vec::new();
 
     for stmt in &stmts {
         match stmt {
+            Stmt::Assign(assign) => {
+                // Check for pytestmark = ... or pytestmark = [...]
+                if let Some(Expr::Name(name)) = assign.targets.first() {
+                    if name.id.as_str() == "pytestmark" {
+                        module_markers.extend(extract_pytestmark_value(&assign.value));
+                    }
+                }
+            }
             Stmt::FunctionDef(func_def) => {
                 let name = func_def.name.as_str();
                 if is_test_function_name(name) {
@@ -73,6 +82,17 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
                 }
             }
             _ => {}
+        }
+    }
+
+    // Apply module-level pytestmark markers to all discovered test items
+    if !module_markers.is_empty() {
+        for item in &mut items {
+            for marker in &module_markers {
+                if !item.markers.iter().any(|m| m.name == marker.name) {
+                    item.markers.push(marker.clone());
+                }
+            }
         }
     }
 
@@ -402,6 +422,63 @@ fn extract_decorator_name(expr: &Expr) -> Option<String> {
         }
         Expr::Call(call) => extract_decorator_name(&call.func),
         _ => None,
+    }
+}
+
+/// Extract markers from a pytestmark assignment value.
+fn extract_pytestmark_value(expr: &Expr) -> Vec<Marker> {
+    let mut markers = Vec::new();
+    match expr {
+        Expr::List(list) => {
+            for elt in &list.elts {
+                markers.extend(extract_pytestmark_single(elt));
+            }
+        }
+        Expr::Tuple(tuple) => {
+            for elt in &tuple.elts {
+                markers.extend(extract_pytestmark_single(elt));
+            }
+        }
+        _ => {
+            markers.extend(extract_pytestmark_single(expr));
+        }
+    }
+    markers
+}
+
+/// Extract a single marker from a pytestmark element expression.
+fn extract_pytestmark_single(expr: &Expr) -> Vec<Marker> {
+    // Handle pytest.mark.NAME or pytest.mark.NAME(...)
+    match expr {
+        Expr::Attribute(attr) => {
+            // pytest.mark.slow (no call)
+            if let Expr::Attribute(inner) = attr.value.as_ref() {
+                if inner.attr.as_str() == "mark" {
+                    return vec![Marker {
+                        name: attr.attr.to_string(),
+                        args: vec![],
+                        kwargs: HashMap::new(),
+                    }];
+                }
+            }
+            vec![]
+        }
+        Expr::Call(call) => {
+            // pytest.mark.slow(...) (with call)
+            if let Expr::Attribute(attr) = call.func.as_ref() {
+                if let Expr::Attribute(inner) = attr.value.as_ref() {
+                    if inner.attr.as_str() == "mark" {
+                        return vec![Marker {
+                            name: attr.attr.to_string(),
+                            args: vec![],
+                            kwargs: HashMap::new(),
+                        }];
+                    }
+                }
+            }
+            vec![]
+        }
+        _ => vec![],
     }
 }
 

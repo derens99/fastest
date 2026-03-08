@@ -163,7 +163,13 @@ impl InProcessExecutor {
                         || error_msg.contains("ImportError")
                         || error_msg.contains("SyntaxError")
                         || error_msg.contains("AttributeError: module");
-                    if is_collection_error {
+                    if error_msg.contains("SKIPPED:") {
+                        let reason = error_msg
+                            .split("SKIPPED:")
+                            .nth(1)
+                            .map(|s| s.trim().to_string());
+                        (TestOutcome::Skipped { reason }, captured, None)
+                    } else if is_collection_error {
                         (
                             TestOutcome::Error {
                                 message: error_msg.clone(),
@@ -191,18 +197,26 @@ impl InProcessExecutor {
         };
 
         // After execution, check for xfail markers and transform outcome
-        let xfail_reason = test.markers.iter().find_map(|m| {
-            if let BuiltinMarker::Xfail { reason } = classify_marker(m) {
-                Some(reason)
+        let xfail_info = test.markers.iter().find_map(|m| {
+            if let BuiltinMarker::Xfail { reason, strict } = classify_marker(m) {
+                Some((reason, strict))
             } else {
                 None
             }
         });
 
-        if let Some(reason) = xfail_reason {
+        if let Some((reason, strict)) = xfail_info {
             result.outcome = match result.outcome {
                 TestOutcome::Failed => TestOutcome::XFailed { reason },
-                TestOutcome::Passed => TestOutcome::XPassed,
+                TestOutcome::Passed => {
+                    if strict {
+                        // strict xfail: passing is a failure
+                        result.error = Some("test unexpectedly passed (strict xfail)".into());
+                        TestOutcome::Failed
+                    } else {
+                        TestOutcome::XPassed
+                    }
+                }
                 other => other,
             };
             // XFailed should not have error field (it's expected)
@@ -583,6 +597,14 @@ if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
 \x20       def param(s, *v, id=None, marks=()): return v if len(v)!=1 else v[0]\n\
 \x20       def skip(s, reason=''): raise Exception(f'SKIPPED: {reason}')\n\
 \x20       def fail(s, reason=''): raise AssertionError(reason)\n\
+\x20       def importorskip(s, modname, minversion=None, reason=None):\n\
+\x20           try:\n\
+\x20               mod = __import__(modname)\n\
+\x20               if minversion:\n\
+\x20                   ver = getattr(mod, '__version__', '')\n\
+\x20                   if ver < minversion: raise Exception(f'SKIPPED: {reason or modname+\">=\"+minversion+\" required\"}')\n\
+\x20               return mod\n\
+\x20           except ImportError: raise Exception(f'SKIPPED: {reason or \"could not import \"+repr(modname)}')\n\
 \x20   try:\n\
 \x20       import pytest\n\
 \x20       if not hasattr(pytest, 'raises'): pytest.raises = _PytestShim().raises\n\
@@ -596,8 +618,10 @@ if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
          \x20   sys.path.insert(0, __fastest_test_dir)\n\
          {parent_setup}\
          {pytest_shim}\
-         __fastest_mod = importlib.import_module('{module}')\n\
-         importlib.reload(__fastest_mod)\n\
+         import importlib.util as __fastest_ilu2\n\
+         __fastest_spec2 = __fastest_ilu2.spec_from_file_location('{module}', '{path}')\n\
+         __fastest_mod = __fastest_ilu2.module_from_spec(__fastest_spec2)\n\
+         __fastest_spec2.loader.exec_module(__fastest_mod)\n\
          {fixture_setup}\
          {call}",
         path = path_str,
@@ -637,7 +661,7 @@ mod tests {
 
         assert!(code.contains("import sys, importlib, os"));
         assert!(code.contains("test_math"));
-        assert!(code.contains("importlib.reload"));
+        assert!(code.contains("spec_from_file_location"));
         assert!(code.contains("getattr(__fastest_mod, 'test_add')()"));
         // Should NOT contain class instantiation or async handling
         assert!(!code.contains("__fastest_cls"));
