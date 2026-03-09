@@ -30,26 +30,12 @@ pub enum OutputFormat {
     Json,
     /// One-line summary: "N passed, N failed, N skipped".
     Count,
-    /// JUnit XML written to the given file path (legacy — now a side-channel).
-    #[allow(dead_code)]
-    JunitXml(String),
 }
 
 impl OutputFormat {
-    /// Parse an output format from CLI string.
+    /// Parse only the display format (Pretty, Json, Count).
     ///
-    /// Recognises "json", "pretty", "count". Anything else is treated as Pretty.
-    /// JUnit XML is now a side-channel — use `parse_display_format` for the display
-    /// format and write JUnit XML separately via `write_junit_xml`.
-    #[allow(dead_code)]
-    pub fn from_str_with_junit(s: Option<&str>, junit_path: Option<String>) -> Self {
-        if let Some(path) = junit_path {
-            return OutputFormat::JunitXml(path);
-        }
-        Self::parse_display_format(s)
-    }
-
-    /// Parse only the display format (Pretty, Json, Count) without JUnit XML.
+    /// JUnit XML is written as a side-channel via [`write_junit_xml`].
     pub fn parse_display_format(s: Option<&str>) -> Self {
         match s.map(|s| s.to_lowercase()).as_deref() {
             Some("json") => OutputFormat::Json,
@@ -71,7 +57,6 @@ pub fn format_results(
         OutputFormat::Pretty => format_pretty(results, verbose, tb, quiet),
         OutputFormat::Json => format_json(results),
         OutputFormat::Count => format_count(results),
-        OutputFormat::JunitXml(_) => format_pretty(results, verbose, tb, quiet),
     }
 }
 
@@ -219,7 +204,7 @@ fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -
             let error_summary = result
                 .error
                 .as_deref()
-                .and_then(|e| e.lines().last())
+                .and_then(|e| e.lines().rev().find(|l| !l.trim().is_empty()))
                 .unwrap_or("(no details)");
             let prefix = match &result.outcome {
                 TestOutcome::Error { .. } => "ERROR",
@@ -684,20 +669,20 @@ mod tests {
     #[test]
     fn test_output_format_parsing() {
         assert!(matches!(
-            OutputFormat::from_str_with_junit(Some("json"), None),
+            OutputFormat::parse_display_format(Some("json")),
             OutputFormat::Json
         ));
         assert!(matches!(
-            OutputFormat::from_str_with_junit(Some("count"), None),
+            OutputFormat::parse_display_format(Some("count")),
             OutputFormat::Count
         ));
         assert!(matches!(
-            OutputFormat::from_str_with_junit(Some("pretty"), None),
+            OutputFormat::parse_display_format(Some("pretty")),
             OutputFormat::Pretty
         ));
         assert!(matches!(
-            OutputFormat::from_str_with_junit(None, Some("report.xml".into())),
-            OutputFormat::JunitXml(_)
+            OutputFormat::parse_display_format(None),
+            OutputFormat::Pretty
         ));
     }
 

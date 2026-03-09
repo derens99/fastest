@@ -77,7 +77,10 @@ impl ConftestMap {
     /// fixtures from each conftest layer whose directory is an ancestor.
     /// Closer conftest files override more distant ones.
     pub fn resolve_for_test(&self, test_path: &Path) -> HashMap<String, Fixture> {
-        let test_dir = test_path.parent().unwrap_or(Path::new("."));
+        let test_dir = test_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
         let mut merged = HashMap::new();
 
         // layers are shallowest-first, so we iterate in order and deeper
@@ -161,8 +164,14 @@ fn collect_conftest_paths(root: &Path, norecursedirs: &[String]) -> Vec<PathBuf>
         }
     }
 
-    // Sort by path depth (component count) so shallow conftest files come first
-    conftest_paths.sort_by_key(|p| p.components().count());
+    // Sort by path depth (component count) so shallow conftest files come first.
+    // Use the path string as a secondary key for deterministic ordering of siblings.
+    conftest_paths.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then_with(|| a.cmp(b))
+    });
     conftest_paths
 }
 
@@ -433,10 +442,20 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
             body_contains_yield(&if_stmt.body) || body_contains_yield(&if_stmt.orelse)
         }
         Stmt::Try(try_stmt) => {
-            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body)
+                || body_contains_yield(&try_stmt.orelse)
+                || body_contains_yield(&try_stmt.finalbody)
+                || try_stmt.handlers.iter().any(|h| match h {
+                    ast::ExceptHandler::ExceptHandler(eh) => body_contains_yield(&eh.body),
+                })
         }
         Stmt::TryStar(try_stmt) => {
-            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body)
+                || body_contains_yield(&try_stmt.orelse)
+                || body_contains_yield(&try_stmt.finalbody)
+                || try_stmt.handlers.iter().any(|h| match h {
+                    ast::ExceptHandler::ExceptHandler(eh) => body_contains_yield(&eh.body),
+                })
         }
         Stmt::For(for_stmt) => body_contains_yield(&for_stmt.body),
         Stmt::While(while_stmt) => body_contains_yield(&while_stmt.body),
@@ -729,6 +748,103 @@ def shared():
         let b_fixtures = map.resolve_for_test(&b.join("test_b.py"));
         assert!(b_fixtures.contains_key("root_fix"));
         assert_eq!(b_fixtures["shared"].scope, FixtureScope::Session);
+    }
+
+    #[test]
+    fn test_resolve_for_test_at_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::write(
+            root.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture
+def root_fix():
+    return "root"
+"#,
+        )
+        .unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+
+        // A test file at the project root should see root fixtures
+        let fixtures = map.resolve_for_test(&root.join("test_bare.py"));
+        assert!(
+            fixtures.contains_key("root_fix"),
+            "test at root should resolve root fixtures"
+        );
+
+        // Also test bare filename resolve — empty parent gets mapped to "."
+        let bare = std::path::Path::new("test_bare.py");
+        let bare_dir = bare
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        assert_eq!(bare_dir, std::path::Path::new("."));
+    }
+
+    #[test]
+    fn test_autouse_for_test_sibling_isolation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // tests/a/conftest.py with autouse fixture
+        let a = root.join("tests").join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::write(
+            a.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture(autouse=True)
+def a_autouse():
+    pass
+"#,
+        )
+        .unwrap();
+
+        // tests/b/ has no conftest
+        let b = root.join("tests").join("b");
+        std::fs::create_dir_all(&b).unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+
+        // Test in tests/a should see a_autouse
+        let a_autouse = map.autouse_for_test(&a.join("test_a.py"));
+        assert!(a_autouse.contains(&"a_autouse".to_string()));
+
+        // Test in tests/b should NOT see a_autouse
+        let b_autouse = map.autouse_for_test(&b.join("test_b.py"));
+        assert!(
+            !b_autouse.contains(&"a_autouse".to_string()),
+            "sibling directory should not see a_autouse"
+        );
+    }
+
+    #[test]
+    fn test_yield_in_try_except_else() {
+        // Yield inside except handler
+        let source = r#"
+import pytest
+
+@pytest.fixture
+def fix_except():
+    try:
+        setup()
+    except Exception:
+        yield "fallback"
+    else:
+        yield "success"
+"#;
+        let path = PathBuf::from("conftest.py");
+        let fixtures = extract_fixtures_from_source(source, &path).unwrap();
+        let fixture = fixtures.get("fix_except").unwrap();
+        assert!(
+            fixture.is_yield,
+            "yield inside except handler should be detected"
+        );
     }
 
     #[test]

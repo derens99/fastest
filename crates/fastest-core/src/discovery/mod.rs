@@ -85,14 +85,32 @@ pub(crate) fn should_skip_dir(name: &str, extra_skip: &[String]) -> bool {
 /// Remove duplicate paths from a file list.
 ///
 /// If `testpaths = [".", "tests"]` produces overlapping results,
-/// this deduplicates by canonical path.
+/// this deduplicates by canonical path. On Windows, strips the UNC `\\?\`
+/// prefix that `canonicalize()` produces so that raw and canonical forms
+/// are compared consistently.
 fn dedup_paths(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
     let mut seen = std::collections::HashSet::new();
     paths.retain(|p| {
-        let key = p.canonicalize().unwrap_or_else(|_| p.clone());
+        let key = p
+            .canonicalize()
+            .map(normalize_canonical)
+            .unwrap_or_else(|_| p.clone());
         seen.insert(key)
     });
     paths
+}
+
+/// Strip the Windows UNC `\\?\` prefix from canonical paths so that
+/// raw paths and canonical paths are comparable in `HashSet`.
+fn normalize_canonical(p: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let s = p.to_string_lossy();
+        if let Some(stripped) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(stripped);
+        }
+    }
+    p
 }
 
 fn collect_test_files(

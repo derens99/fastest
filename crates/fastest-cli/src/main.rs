@@ -15,7 +15,8 @@ use colored::Colorize;
 
 use fastest_core::{
     discover_conftest_fixtures, discover_tests, expand_parametrized_tests, filter_by_keyword,
-    filter_by_markers, Config, HookArgs, IncrementalTester, PluginManager, TestWatcher,
+    filter_by_markers, Config, ConftestMap, HookArgs, IncrementalTester, PluginManager,
+    TestWatcher,
 };
 use fastest_execution::timeout::TimeoutConfig;
 use fastest_execution::HybridExecutor;
@@ -391,21 +392,23 @@ fn extract_file_line_from_id(test_id: &str) -> (&str, Option<usize>) {
 }
 
 /// Inject autouse fixtures from conftest.py files into test items.
+///
+/// Uses [`ConftestMap`] to resolve per-test autouse fixtures, respecting
+/// directory scoping so that sibling conftest autouse fixtures are isolated.
 fn inject_autouse_fixtures(tests: &mut [fastest_core::TestItem]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
-        let autouse_names: Vec<String> = conftest_fixtures
-            .values()
-            .filter(|f| f.autouse)
-            .map(|f| f.name.clone())
-            .collect();
-        if !autouse_names.is_empty() {
-            for test in tests.iter_mut() {
-                for name in &autouse_names {
-                    if !test.fixture_deps.contains(name) {
-                        test.fixture_deps.push(name.clone());
-                    }
-                }
+    let conftest_map = match ConftestMap::discover(&cwd) {
+        Ok(map) => map,
+        Err(_) => return,
+    };
+    if conftest_map.is_empty() {
+        return;
+    }
+    for test in tests.iter_mut() {
+        let autouse_names = conftest_map.autouse_for_test(&test.path);
+        for name in autouse_names {
+            if !test.fixture_deps.contains(&name) {
+                test.fixture_deps.push(name);
             }
         }
     }
@@ -750,13 +753,30 @@ fn apply_addopts(cli: &mut Cli, addopts: &str) {
                     }
                 } else if let Some(val) = token.strip_prefix("--color=") {
                     cli.color = val.to_string();
+                } else if token == "--timeout" {
+                    // --timeout N (space-separated)
+                    if let Some(val) = iter.next() {
+                        if let Ok(n) = val.parse::<u64>() {
+                            cli.timeout = Some(n);
+                        }
+                    }
                 } else if let Some(val) = token.strip_prefix("--timeout=") {
                     if let Ok(n) = val.parse::<u64>() {
                         cli.timeout = Some(n);
                     }
+                } else if token == "-j" || token == "--workers" {
+                    // -j N or --workers N (space-separated)
+                    if let Some(val) = iter.next() {
+                        if let Ok(n) = val.parse::<usize>() {
+                            cli.workers = Some(n);
+                        }
+                    }
                 } else if let Some(val) = token.strip_prefix("-j") {
-                    if let Ok(n) = val.parse::<usize>() {
-                        cli.workers = Some(n);
+                    // -j4 (no space)
+                    if !val.is_empty() {
+                        if let Ok(n) = val.parse::<usize>() {
+                            cli.workers = Some(n);
+                        }
                     }
                 } else if let Some(val) = token.strip_prefix("--workers=") {
                     if let Ok(n) = val.parse::<usize>() {
@@ -993,10 +1013,16 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
             .collect();
         fastest_core::save_lastfailed(&cwd, &failed_ids);
 
-        // Stepwise: save the test we stopped at, or clear if all passed
+        // Stepwise: save the first failed test in execution order, or clear if all passed
         if cli.stepwise {
-            if let Some(first_failed) = failed_ids.iter().next() {
-                fastest_core::save_stepwise(&cwd, first_failed);
+            let first_failed = results.iter().find(|r| {
+                matches!(
+                    r.outcome,
+                    fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+                )
+            });
+            if let Some(failed) = first_failed {
+                fastest_core::save_stepwise(&cwd, &failed.test_id);
             } else {
                 fastest_core::clear_stepwise(&cwd);
             }
@@ -1042,8 +1068,10 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
                     let msg = r
                         .error
                         .as_deref()
-                        .and_then(|e| e.lines().last())
-                        .unwrap_or("Test failed");
+                        .and_then(|e| e.lines().rev().find(|l| !l.trim().is_empty()))
+                        .unwrap_or("Test failed")
+                        // Sanitize :: which has special meaning in GitHub Actions annotations
+                        .replace("::", ": :");
                     if let Some(l) = line {
                         println!("::error file={},line={}::{}", file, l, msg);
                     } else {
@@ -1102,7 +1130,6 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
 /// Configuration snapshot for watch mode re-runs (captured from CLI args).
 #[derive(Clone)]
-#[allow(dead_code)]
 struct WatchConfig {
     paths: Vec<String>,
     keyword: Option<String>,
@@ -1128,7 +1155,11 @@ struct WatchConfig {
     durations: Option<usize>,
     durations_min: f64,
     no_progress: bool,
+    #[allow(dead_code)] // preserved for future subprocess capture control
     no_capture: bool,
+    rootdir: Option<String>,
+    no_header: bool,
+    github_actions: bool,
 }
 
 impl WatchConfig {
@@ -1159,24 +1190,39 @@ impl WatchConfig {
             durations_min: cli.durations_min,
             no_progress: cli.no_progress,
             no_capture: cli.no_capture,
+            rootdir: cli.rootdir.clone(),
+            no_header: cli.no_header,
+            github_actions: cli.github_actions,
         }
     }
 }
 
 fn run_watch(cli: &Cli) -> anyhow::Result<()> {
+    // Apply rootdir before anything else so config loading uses the right cwd
+    if let Some(ref rootdir) = cli.rootdir {
+        let root = PathBuf::from(rootdir);
+        if root.is_dir() {
+            std::env::set_current_dir(&root)?;
+        } else {
+            anyhow::bail!("--rootdir path does not exist: {}", rootdir);
+        }
+    }
+
+    // Load config and apply addopts to get the effective CLI state for WatchConfig
+    let config = Config::load()?;
+    let mut effective_cli = cli.clone();
+    apply_addopts(&mut effective_cli, &config.addopts);
+
     eprintln!("{} watching for changes...", "fastest".cyan().bold());
 
     let watcher = TestWatcher::new(WATCH_DEBOUNCE_MS);
-    let watch_paths: Vec<PathBuf> = if cli.paths.is_empty() {
-        vec![PathBuf::from(".")]
-    } else {
-        cli.paths.iter().map(PathBuf::from).collect()
-    };
+    // Strip :: node-ID suffixes from watch paths
+    let watch_paths = resolve_search_paths(&effective_cli.paths, &config);
 
     // Initial run
     let _ = run_tests(cli);
 
-    let watch_cfg = WatchConfig::from_cli(cli);
+    let watch_cfg = WatchConfig::from_cli(&effective_cli);
 
     watcher.watch_paths(&watch_paths, move |changed_paths| {
         eprintln!(
@@ -1199,6 +1245,15 @@ fn run_watch(cli: &Cli) -> anyhow::Result<()> {
 /// Execute a test cycle from a watch-mode re-run.
 fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     let start = Instant::now();
+
+    // Apply rootdir if set (idempotent — already set from initial run)
+    if let Some(ref rootdir) = cfg.rootdir {
+        let root = PathBuf::from(rootdir);
+        if root.is_dir() {
+            std::env::set_current_dir(&root)?;
+        }
+    }
+
     let config = Config::load()?;
 
     let mut plugins = if cfg.no_plugins {
@@ -1230,6 +1285,48 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         },
     )?;
 
+    // Apply node-ID filters from :: syntax in paths
+    let (class_filters, function_filters) = extract_node_filters(&cfg.paths);
+    let tests = if !class_filters.is_empty() || !function_filters.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let class_ok = class_filters.is_empty()
+                    || t.class_name
+                        .as_ref()
+                        .is_some_and(|c| class_filters.contains(c));
+                let func_ok =
+                    function_filters.is_empty() || function_filters.contains(&t.function_name);
+                if class_filters.is_empty() {
+                    func_ok
+                        || t.class_name
+                            .as_ref()
+                            .is_some_and(|c| function_filters.contains(c))
+                } else {
+                    class_ok && func_ok
+                }
+            })
+            .collect()
+    } else {
+        tests
+    };
+
+    // Stepwise mode: skip tests until the previously-failed test is found
+    let tests = if cfg.stepwise {
+        let cwd = std::env::current_dir()?;
+        if let Some(ref last_stop) = fastest_core::load_stepwise(&cwd) {
+            if let Some(idx) = tests.iter().position(|t| &t.id == last_stop) {
+                tests.into_iter().skip(idx).collect()
+            } else {
+                tests
+            }
+        } else {
+            tests
+        }
+    } else {
+        tests
+    };
+
     if tests.is_empty() {
         eprintln!("{}", "no tests collected".yellow());
         plugins.shutdown_all()?;
@@ -1237,13 +1334,15 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     }
 
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    print_header(&rootdir);
-    eprintln!(
-        "{} collecting {} test{}...",
-        "fastest".cyan().bold(),
-        tests.len(),
-        if tests.len() == 1 { "" } else { "s" }
-    );
+    if !cfg.no_header {
+        print_header(&rootdir);
+        eprintln!(
+            "{} collecting {} test{}...",
+            "fastest".cyan().bold(),
+            tests.len(),
+            if tests.len() == 1 { "" } else { "s" }
+        );
+    }
 
     let timeout_config =
         TimeoutConfig::with_duration(std::time::Duration::from_secs(cfg.timeout.unwrap_or(60)));
@@ -1313,10 +1412,16 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
             .collect();
         fastest_core::save_lastfailed(&cwd, &failed_ids);
 
-        // Stepwise: save the test we stopped at, or clear if all passed
+        // Stepwise: save the first failed test in execution order, or clear if all passed
         if cfg.stepwise {
-            if let Some(first_failed) = failed_ids.iter().next() {
-                fastest_core::save_stepwise(&cwd, first_failed);
+            let first_failed = results.iter().find(|r| {
+                matches!(
+                    r.outcome,
+                    fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. }
+                )
+            });
+            if let Some(failed) = first_failed {
+                fastest_core::save_stepwise(&cwd, &failed.test_id);
             } else {
                 fastest_core::clear_stepwise(&cwd);
             }
@@ -1343,7 +1448,32 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     }
 
     let duration = start.elapsed();
-    print_summary(&results, duration);
+    if !cfg.no_header {
+        print_summary(&results, duration);
+    }
+
+    // GitHub Actions annotations
+    if cfg.github_actions {
+        for r in &results {
+            match &r.outcome {
+                fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. } => {
+                    let (file, line) = extract_file_line_from_id(&r.test_id);
+                    let msg = r
+                        .error
+                        .as_deref()
+                        .and_then(|e| e.lines().rev().find(|l| !l.trim().is_empty()))
+                        .unwrap_or("Test failed")
+                        .replace("::", ": :");
+                    if let Some(l) = line {
+                        println!("::error file={},line={}::{}", file, l, msg);
+                    } else {
+                        println!("::error file={}::{}", file, msg);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 
     // Print report summary if -r flag is set
     if let Some(ref report_chars) = cfg.report {
@@ -1372,4 +1502,118 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     plugins.shutdown_all()?;
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_shlex_split_basic() {
+        assert_eq!(shlex_split("-v -x"), vec!["-v", "-x"]);
+    }
+
+    #[test]
+    fn test_shlex_split_quoted() {
+        assert_eq!(
+            shlex_split(r#"-k "test_add or test_sub" -v"#),
+            vec!["-k", "test_add or test_sub", "-v"]
+        );
+    }
+
+    #[test]
+    fn test_shlex_split_single_quotes() {
+        assert_eq!(
+            shlex_split("-k 'hello world' -x"),
+            vec!["-k", "hello world", "-x"]
+        );
+    }
+
+    #[test]
+    fn test_shlex_split_empty() {
+        let result: Vec<String> = shlex_split("");
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_shlex_split_extra_whitespace() {
+        assert_eq!(shlex_split("  -v   -x  "), vec!["-v", "-x"]);
+    }
+
+    #[test]
+    fn test_apply_addopts_workers_space_separated() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(&mut cli, "-j 4");
+        assert_eq!(cli.workers, Some(4));
+    }
+
+    #[test]
+    fn test_apply_addopts_workers_equals() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(&mut cli, "--workers=8");
+        assert_eq!(cli.workers, Some(8));
+    }
+
+    #[test]
+    fn test_apply_addopts_workers_name_space() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(&mut cli, "--workers 12");
+        assert_eq!(cli.workers, Some(12));
+    }
+
+    #[test]
+    fn test_apply_addopts_timeout_space() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(&mut cli, "--timeout 120");
+        assert_eq!(cli.timeout, Some(120));
+    }
+
+    #[test]
+    fn test_apply_addopts_timeout_equals() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(&mut cli, "--timeout=90");
+        assert_eq!(cli.timeout, Some(90));
+    }
+
+    #[test]
+    fn test_apply_addopts_combined() {
+        let mut cli = Cli::parse_from(["fastest", "."]);
+        apply_addopts(
+            &mut cli,
+            "-v --tb=short -j 4 --timeout=120 --github-actions",
+        );
+        assert!(cli.verbose);
+        assert_eq!(cli.traceback, "short");
+        assert_eq!(cli.workers, Some(4));
+        assert_eq!(cli.timeout, Some(120));
+        assert!(cli.github_actions);
+    }
+
+    #[test]
+    fn test_parse_node_id_plain() {
+        let node = parse_node_id("tests/test_math.py");
+        assert_eq!(node.path, PathBuf::from("tests/test_math.py"));
+        assert!(node.class_filter.is_none());
+        assert!(node.function_filter.is_none());
+    }
+
+    #[test]
+    fn test_parse_node_id_function() {
+        let node = parse_node_id("tests/test_math.py::test_add");
+        assert_eq!(node.path, PathBuf::from("tests/test_math.py"));
+        assert!(node.class_filter.is_none());
+        assert_eq!(node.function_filter, Some("test_add".to_string()));
+    }
+
+    #[test]
+    fn test_parse_node_id_class_function() {
+        let node = parse_node_id("tests/test_math.py::TestCalc::test_add");
+        assert_eq!(node.path, PathBuf::from("tests/test_math.py"));
+        assert_eq!(node.class_filter, Some("TestCalc".to_string()));
+        assert_eq!(node.function_filter, Some("test_add".to_string()));
+    }
 }

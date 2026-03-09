@@ -18,12 +18,15 @@ pub fn load_lastfailed(root: &Path) -> HashSet<String> {
 }
 
 /// Save the set of failed test IDs to the cache file.
+///
+/// Uses atomic write (write to tmp then rename) to avoid corrupted
+/// files if the process is killed mid-write.
 pub fn save_lastfailed(root: &Path, failed: &HashSet<String>) {
     let cache_dir = root.join(CACHE_DIR);
     let _ = fs::create_dir_all(&cache_dir);
     let path = cache_dir.join(LASTFAILED_FILE);
     if let Ok(json) = serde_json::to_string_pretty(failed) {
-        let _ = fs::write(&path, json);
+        atomic_write(&path, json.as_bytes());
     }
 }
 
@@ -45,7 +48,24 @@ pub fn save_stepwise(root: &Path, test_id: &str) {
     let cache_dir = root.join(CACHE_DIR);
     let _ = fs::create_dir_all(&cache_dir);
     let path = cache_dir.join(STEPWISE_FILE);
-    let _ = fs::write(&path, test_id);
+    atomic_write(&path, test_id.as_bytes());
+}
+
+/// Write data atomically: write to a `.tmp` sibling then rename.
+///
+/// If the rename fails (e.g. cross-device), falls back to a direct write.
+fn atomic_write(path: &Path, data: &[u8]) {
+    let tmp = path.with_extension("tmp");
+    if fs::write(&tmp, data).is_ok() {
+        if fs::rename(&tmp, path).is_err() {
+            // rename failed (rare), fall back to direct write
+            let _ = fs::write(path, data);
+            let _ = fs::remove_file(&tmp);
+        }
+    } else {
+        // tmp write failed, fall back to direct write
+        let _ = fs::write(path, data);
+    }
 }
 
 /// Clear the stepwise marker (called when all tests pass).

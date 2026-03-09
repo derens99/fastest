@@ -14,7 +14,9 @@ use std::path::Path;
 /// Parse a Python test file and return all discovered test items.
 ///
 /// Uses the default `test_*` / `Test*` naming conventions.
-pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
+/// Prefer [`parse_test_file_with_config`] when a [`Config`] is available.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
     parse_test_file_with_config(source, path, None)
 }
 
@@ -473,14 +475,25 @@ fn extract_pytestmark_single(expr: &Expr) -> Vec<Marker> {
             vec![]
         }
         Expr::Call(call) => {
-            // pytest.mark.slow(...) (with call)
+            // pytest.mark.slow(...) (with call) — preserve args and kwargs
             if let Expr::Attribute(attr) = call.func.as_ref() {
                 if let Expr::Attribute(inner) = attr.value.as_ref() {
                     if inner.attr.as_str() == "mark" {
+                        let args: Vec<serde_json::Value> =
+                            call.args.iter().map(ast_expr_to_json).collect();
+                        let mut kwargs = HashMap::new();
+                        for kw in &call.keywords {
+                            if let Some(ref arg_name) = kw.arg {
+                                kwargs.insert(
+                                    arg_name.as_str().to_string(),
+                                    ast_expr_to_json(&kw.value),
+                                );
+                            }
+                        }
                         return vec![Marker {
                             name: attr.attr.to_string(),
-                            args: vec![],
-                            kwargs: HashMap::new(),
+                            args,
+                            kwargs,
                         }];
                     }
                 }
@@ -754,5 +767,64 @@ class TestOuter:
             .find(|i| i.function_name == "test_nested")
             .unwrap();
         assert_eq!(nested.class_name, Some("TestOuter::TestInner".to_string()));
+    }
+
+    #[test]
+    fn test_pytestmark_with_args_kwargs() {
+        let source = r#"
+import pytest
+
+pytestmark = pytest.mark.skipif(True, reason="not ready")
+
+def test_skipped():
+    pass
+"#;
+        let path = PathBuf::from("tests/test_mark.py");
+        let items = parse_test_file(source, &path).unwrap();
+        assert_eq!(items.len(), 1);
+        let marker = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "skipif")
+            .expect("skipif marker should be present");
+        // args should contain the condition
+        assert!(!marker.args.is_empty(), "skipif should have positional arg");
+        // kwargs should contain reason
+        assert!(
+            marker.kwargs.contains_key("reason"),
+            "skipif should have reason kwarg"
+        );
+    }
+
+    #[test]
+    fn test_pytestmark_list_preserves_args() {
+        let source = r#"
+import pytest
+
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.timeout(30),
+]
+
+def test_multi_mark():
+    pass
+"#;
+        let path = PathBuf::from("tests/test_multi_mark.py");
+        let items = parse_test_file(source, &path).unwrap();
+        assert_eq!(items.len(), 1);
+        let slow = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "slow")
+            .expect("slow marker should be present");
+        assert!(slow.args.is_empty());
+
+        let timeout = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "timeout")
+            .expect("timeout marker should be present");
+        assert_eq!(timeout.args.len(), 1);
+        assert_eq!(timeout.args[0], serde_json::json!(30));
     }
 }
