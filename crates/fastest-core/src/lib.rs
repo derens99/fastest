@@ -17,10 +17,12 @@ pub use discovery::discover_tests;
 pub use error::{Error, Result};
 pub use fixtures::{
     discover_conftest_fixtures, discover_conftest_fixtures_with_config, generate_builtin_code,
-    is_builtin, resolve_fixture_order, Fixture, FixtureCache, FixtureScope,
+    is_builtin, resolve_fixture_order, ConftestMap, Fixture, FixtureCache, FixtureScope,
 };
 pub use incremental::IncrementalTester;
-pub use lastfailed::{load_lastfailed, save_lastfailed};
+pub use lastfailed::{
+    clear_stepwise, load_lastfailed, load_stepwise, save_lastfailed, save_stepwise,
+};
 pub use markers::{classify_marker, filter_by_keyword, filter_by_markers, BuiltinMarker};
 pub use model::{TestItem, TestOutcome, TestResult};
 pub use parametrize::expand_parametrized_tests;

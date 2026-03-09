@@ -149,6 +149,30 @@ struct Cli {
     /// Deselect specific test IDs
     #[arg(long = "deselect", action = clap::ArgAction::Append)]
     deselect: Vec<String>,
+
+    /// Stepwise: stop on first failure, next run starts from that test
+    #[arg(long = "stepwise", visible_alias = "sw")]
+    stepwise: bool,
+
+    /// Override rootdir detection
+    #[arg(long = "rootdir")]
+    rootdir: Option<String>,
+
+    /// Show only N slowest durations (used with --durations)
+    #[arg(long = "durations-min", default_value = "0.005")]
+    durations_min: f64,
+
+    /// Emit GitHub Actions annotations for test failures
+    #[arg(long = "github-actions")]
+    github_actions: bool,
+
+    /// Suppress the header line
+    #[arg(long = "no-header")]
+    no_header: bool,
+
+    /// Generate shell completions and exit (bash, zsh, fish, powershell)
+    #[arg(long = "completions")]
+    completions: Option<String>,
 }
 
 #[derive(Subcommand, Debug, Clone)]
@@ -170,6 +194,29 @@ enum Commands {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+
+    // Handle --completions: generate shell completion script and exit
+    if let Some(ref shell_name) = cli.completions {
+        use clap::CommandFactory;
+        use clap_complete::{generate, Shell};
+        let shell = match shell_name.to_lowercase().as_str() {
+            "bash" => Shell::Bash,
+            "zsh" => Shell::Zsh,
+            "fish" => Shell::Fish,
+            "powershell" | "ps" => Shell::PowerShell,
+            _ => {
+                eprintln!(
+                    "{}: unknown shell '{}'. Supported: bash, zsh, fish, powershell",
+                    "error".red().bold(),
+                    shell_name
+                );
+                return ExitCode::FAILURE;
+            }
+        };
+        let mut cmd = Cli::command();
+        generate(shell, &mut cmd, "fastest", &mut std::io::stdout());
+        return ExitCode::SUCCESS;
+    }
 
     // Handle color setting
     match cli.color.as_str() {
@@ -330,6 +377,19 @@ fn extract_node_filters(paths: &[String]) -> (Vec<String>, Vec<String>) {
     (class_filters, function_filters)
 }
 
+/// Extract file path and optional line number from a test ID.
+///
+/// Test IDs are like `tests/test_math.py::TestCalc::test_add`. We extract
+/// the file portion (`tests/test_math.py`) and return `None` for line since
+/// we don't have line info in the test ID format.
+fn extract_file_line_from_id(test_id: &str) -> (&str, Option<usize>) {
+    if let Some(idx) = test_id.find("::") {
+        (&test_id[..idx], None)
+    } else {
+        (test_id, None)
+    }
+}
+
 /// Inject autouse fixtures from conftest.py files into test items.
 fn inject_autouse_fixtures(tests: &mut [fastest_core::TestItem]) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -349,6 +409,125 @@ fn inject_autouse_fixtures(tests: &mut [fastest_core::TestItem]) {
             }
         }
     }
+}
+
+/// Common filter options shared between `run_tests` and `run_watch_cycle`.
+struct FilterOpts<'a> {
+    keyword: Option<&'a str>,
+    marker: Option<&'a str>,
+    ignore_paths: &'a [String],
+    ignore_glob: &'a [String],
+    deselect: &'a [String],
+    incremental: bool,
+    last_failed: bool,
+    failed_first: bool,
+}
+
+/// Apply the full filter pipeline to a list of discovered tests.
+///
+/// Applies in order: markers → keyword → ignore → ignore-glob → deselect →
+/// incremental → last-failed/failed-first.
+fn apply_filters(
+    tests: Vec<fastest_core::TestItem>,
+    opts: &FilterOpts,
+) -> anyhow::Result<Vec<fastest_core::TestItem>> {
+    // Marker filter
+    let tests = if let Some(expr) = opts.marker {
+        filter_by_markers(&tests, expr)
+    } else {
+        tests
+    };
+
+    // Keyword filter
+    let tests = if let Some(expr) = opts.keyword {
+        filter_by_keyword(&tests, expr)
+    } else {
+        tests
+    };
+
+    // --ignore (path prefix)
+    let tests = if !opts.ignore_paths.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                !opts
+                    .ignore_paths
+                    .iter()
+                    .any(|p| t.path.starts_with(std::path::Path::new(p)))
+            })
+            .collect()
+    } else {
+        tests
+    };
+
+    // --ignore-glob
+    let tests = if !opts.ignore_glob.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let test_path = t.path.to_string_lossy();
+                !opts
+                    .ignore_glob
+                    .iter()
+                    .any(|pattern| glob_match::glob_match(pattern, test_path.as_ref()))
+            })
+            .collect()
+    } else {
+        tests
+    };
+
+    // --deselect
+    let tests = if !opts.deselect.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| !opts.deselect.contains(&t.id))
+            .collect()
+    } else {
+        tests
+    };
+
+    // Incremental filtering
+    let tests = if opts.incremental {
+        let cwd = std::env::current_dir()?;
+        let tester = IncrementalTester::new(&cwd)?;
+        if !tester.is_git_repo() {
+            eprintln!(
+                "{}: --incremental requires a git repository; running all tests",
+                "warning".yellow().bold()
+            );
+        }
+        tester.filter_unchanged(tests)?
+    } else {
+        tests
+    };
+
+    // Last-failed / failed-first
+    let tests = if opts.last_failed || opts.failed_first {
+        let cwd = std::env::current_dir()?;
+        let last_failed = fastest_core::load_lastfailed(&cwd);
+        if opts.last_failed {
+            tests
+                .into_iter()
+                .filter(|t| last_failed.contains(&t.id))
+                .collect()
+        } else {
+            let mut failed: Vec<fastest_core::TestItem> = Vec::new();
+            let mut rest: Vec<fastest_core::TestItem> = Vec::new();
+            for t in tests {
+                if last_failed.contains(&t.id) {
+                    failed.push(t);
+                } else {
+                    rest.push(t);
+                }
+            }
+            failed.extend(rest);
+            failed
+        }
+    } else {
+        tests
+    };
+
+    Ok(tests)
 }
 
 // ---------------------------------------------------------------------------
@@ -532,13 +711,22 @@ fn apply_addopts(cli: &mut Cli, addopts: &str) {
     if addopts.is_empty() {
         return;
     }
-    // Simple split on whitespace, apply known flags
-    for token in addopts.split_whitespace() {
+    // Split respecting shell quoting (handles quoted strings properly)
+    let tokens = shlex_split(addopts);
+    let mut iter = tokens.iter().peekable();
+    while let Some(token) = iter.next() {
+        let token = token.as_str();
         match token {
             "-v" | "--verbose" => cli.verbose = true,
             "-q" | "--quiet" => cli.quiet = true,
             "-x" | "--exitfirst" => cli.exitfirst = true,
             "-s" => cli.no_capture = true,
+            "--lf" => cli.last_failed = true,
+            "--ff" => cli.failed_first = true,
+            "--no-progress" => cli.no_progress = true,
+            "--no-header" => cli.no_header = true,
+            "--stepwise" | "--sw" => cli.stepwise = true,
+            "--github-actions" => cli.github_actions = true,
             _ => {
                 if let Some(val) = token.strip_prefix("--tb=") {
                     cli.traceback = val.to_string();
@@ -546,16 +734,70 @@ fn apply_addopts(cli: &mut Cli, addopts: &str) {
                     if let Ok(n) = val.parse::<usize>() {
                         cli.maxfail = Some(n);
                     }
+                } else if token == "-k" {
+                    // -k "expression" (space-separated)
+                    if let Some(val) = iter.next() {
+                        cli.keyword = Some(val.clone());
+                    }
                 } else if let Some(val) = token.strip_prefix("-k") {
+                    // -k"expression" (no space)
                     if !val.is_empty() {
                         cli.keyword = Some(val.to_string());
                     }
+                } else if token == "-m" {
+                    if let Some(val) = iter.next() {
+                        cli.marker = Some(val.clone());
+                    }
                 } else if let Some(val) = token.strip_prefix("--color=") {
                     cli.color = val.to_string();
+                } else if let Some(val) = token.strip_prefix("--timeout=") {
+                    if let Ok(n) = val.parse::<u64>() {
+                        cli.timeout = Some(n);
+                    }
+                } else if let Some(val) = token.strip_prefix("-j") {
+                    if let Ok(n) = val.parse::<usize>() {
+                        cli.workers = Some(n);
+                    }
+                } else if let Some(val) = token.strip_prefix("--workers=") {
+                    if let Ok(n) = val.parse::<usize>() {
+                        cli.workers = Some(n);
+                    }
                 }
             }
         }
     }
+}
+
+/// Simple shlex-style splitting that handles single and double quotes.
+fn shlex_split(s: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let chars = s.chars();
+    let mut in_single = false;
+    let mut in_double = false;
+
+    for ch in chars {
+        match ch {
+            '\'' if !in_double => {
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                in_double = !in_double;
+            }
+            ' ' | '\t' if !in_single && !in_double => {
+                if !current.is_empty() {
+                    tokens.push(std::mem::take(&mut current));
+                }
+            }
+            _ => {
+                current.push(ch);
+            }
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens
 }
 
 // ---------------------------------------------------------------------------
@@ -564,6 +806,16 @@ fn apply_addopts(cli: &mut Cli, addopts: &str) {
 
 fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     let start = Instant::now();
+
+    // 0. Apply --rootdir override: change cwd so config loading and relative paths work
+    if let Some(ref rootdir) = cli.rootdir {
+        let root = PathBuf::from(rootdir);
+        if root.is_dir() {
+            std::env::set_current_dir(&root)?;
+        } else {
+            anyhow::bail!("--rootdir path does not exist: {}", rootdir);
+        }
+    }
 
     // 1. Load config
     let config = Config::load()?;
@@ -590,100 +842,21 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // 4b. Inject autouse fixtures into test fixture_deps
     inject_autouse_fixtures(&mut tests);
 
-    // 5. Filter by markers
-    let tests = if let Some(ref expr) = cli.marker {
-        filter_by_markers(&tests, expr)
-    } else {
-        tests
-    };
-
-    // 6. Filter by keyword
-    let tests = if let Some(ref expr) = cli.keyword {
-        filter_by_keyword(&tests, expr)
-    } else {
-        tests
-    };
-
-    // 6b. Filter by --ignore, --ignore-glob, --deselect
-    let tests = if !cli.ignore_paths.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| {
-                !cli.ignore_paths
-                    .iter()
-                    .any(|p| t.path.starts_with(std::path::Path::new(p)))
-            })
-            .collect()
-    } else {
-        tests
-    };
-    let tests = if !cli.ignore_glob.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| {
-                let test_path = t.path.to_string_lossy();
-                !cli.ignore_glob
-                    .iter()
-                    .any(|pattern| glob_match::glob_match(pattern, test_path.as_ref()))
-            })
-            .collect()
-    } else {
-        tests
-    };
-    let tests = if !cli.deselect.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| !cli.deselect.contains(&t.id))
-            .collect()
-    } else {
-        tests
-    };
-
-    // 7. Plugin hook: collection_modifyitems
+    // 5-8b. Apply unified filter pipeline
     let _ = plugins.call_hook("collection_modifyitems", &HookArgs::new());
-
-    // 8. Incremental filtering
-    let tests = if cli.incremental {
-        let cwd = std::env::current_dir()?;
-        let tester = IncrementalTester::new(&cwd)?;
-        if !tester.is_git_repo() {
-            eprintln!(
-                "{}: --incremental requires a git repository; running all tests",
-                "warning".yellow().bold()
-            );
-        }
-        tester.filter_unchanged(tests)?
-    } else {
-        tests
-    };
-
-    // 8b. Last-failed / failed-first filtering
-    let tests = if cli.last_failed || cli.failed_first {
-        let cwd = std::env::current_dir()?;
-        let last_failed = fastest_core::load_lastfailed(&cwd);
-        if cli.last_failed {
-            // Only run tests that failed last time
-            tests
-                .into_iter()
-                .filter(|t| last_failed.contains(&t.id))
-                .collect()
-        } else {
-            // failed-first: put previously-failed tests first, then the rest
-            let mut failed: Vec<fastest_core::TestItem> = Vec::new();
-            let mut rest: Vec<fastest_core::TestItem> = Vec::new();
-            for t in tests {
-                if last_failed.contains(&t.id) {
-                    failed.push(t);
-                } else {
-                    rest.push(t);
-                }
-            }
-            failed.extend(rest);
-            failed
-        }
-    } else {
-        tests
-    };
+    let tests = apply_filters(
+        tests,
+        &FilterOpts {
+            keyword: cli.keyword.as_deref(),
+            marker: cli.marker.as_deref(),
+            ignore_paths: &cli.ignore_paths,
+            ignore_glob: &cli.ignore_glob,
+            deselect: &cli.deselect,
+            incremental: cli.incremental,
+            last_failed: cli.last_failed,
+            failed_first: cli.failed_first,
+        },
+    )?;
 
     // 8c. Apply node-ID filters from :: syntax in paths
     let (class_filters, function_filters) = extract_node_filters(&cli.paths);
@@ -712,6 +885,23 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         tests
     };
 
+    // 8d. Stepwise mode: skip tests until the previously-failed test is found
+    let tests = if cli.stepwise {
+        let cwd = std::env::current_dir()?;
+        if let Some(ref last_stop) = fastest_core::load_stepwise(&cwd) {
+            // Find the index of the previously-failed test and resume from there
+            if let Some(idx) = tests.iter().position(|t| &t.id == last_stop) {
+                tests.into_iter().skip(idx).collect()
+            } else {
+                tests // test not found, run all
+            }
+        } else {
+            tests // no stepwise state, run all
+        }
+    } else {
+        tests
+    };
+
     if tests.is_empty() {
         eprintln!("{}", "no tests collected".yellow());
         plugins.shutdown_all()?;
@@ -720,20 +910,27 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
     // Print header
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    print_header(&rootdir);
-    eprintln!(
-        "{} collecting {} test{}...",
-        "fastest".cyan().bold(),
-        tests.len(),
-        if tests.len() == 1 { "" } else { "s" }
-    );
+    if !cli.no_header {
+        print_header(&rootdir);
+        eprintln!(
+            "{} collecting {} test{}...",
+            "fastest".cyan().bold(),
+            tests.len(),
+            if tests.len() == 1 { "" } else { "s" }
+        );
+    }
 
     // 9. Execute tests
     let timeout_config =
         TimeoutConfig::with_duration(std::time::Duration::from_secs(cli.timeout.unwrap_or(60)));
     let executor = HybridExecutor::with_config(cli.workers, timeout_config);
 
-    let max_failures = if cli.exitfirst { Some(1) } else { cli.maxfail };
+    // Stepwise implies exitfirst (stop on first failure)
+    let max_failures = if cli.exitfirst || cli.stepwise {
+        Some(1)
+    } else {
+        cli.maxfail
+    };
 
     let results = if let Some(max_fail) = max_failures {
         // Run tests one at a time, stop after max_fail failures.
@@ -795,18 +992,26 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
             .map(|r| r.test_id.clone())
             .collect();
         fastest_core::save_lastfailed(&cwd, &failed_ids);
+
+        // Stepwise: save the test we stopped at, or clear if all passed
+        if cli.stepwise {
+            if let Some(first_failed) = failed_ids.iter().next() {
+                fastest_core::save_stepwise(&cwd, first_failed);
+            } else {
+                fastest_core::clear_stepwise(&cwd);
+            }
+        }
     }
 
     // 10. Plugin hook: runtest_logreport
     let _ = plugins.call_hook("runtest_logreport", &HookArgs::new());
 
     // 11. Format and print output
-    let output_format =
-        OutputFormat::from_str_with_junit(Some(&cli.output_format), cli.junit_xml.clone());
-
+    // Display format and JUnit XML are now independent: --output json --junit-xml report.xml works
+    let display_format = OutputFormat::parse_display_format(Some(&cli.output_format));
     let formatted = format_results(
         &results,
-        &output_format,
+        &display_format,
         cli.verbose,
         &cli.traceback,
         cli.quiet,
@@ -815,15 +1020,40 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         println!("{}", formatted);
     }
 
-    // Write JUnit XML if requested
-    if let OutputFormat::JunitXml(ref path) = output_format {
-        write_junit_xml(&results, path)?;
-        eprintln!("JUnit XML report written to {}", path);
+    // Write JUnit XML as a side-channel if requested
+    if let Some(ref junit_path) = cli.junit_xml {
+        write_junit_xml(&results, junit_path)?;
+        eprintln!("JUnit XML report written to {}", junit_path);
     }
 
     // Print summary
     let duration = start.elapsed();
-    print_summary(&results, duration);
+    if !cli.no_header {
+        print_summary(&results, duration);
+    }
+
+    // GitHub Actions annotations: ::error file=...::message
+    if cli.github_actions {
+        for r in &results {
+            match &r.outcome {
+                fastest_core::TestOutcome::Failed | fastest_core::TestOutcome::Error { .. } => {
+                    // Try to extract file and line from test ID
+                    let (file, line) = extract_file_line_from_id(&r.test_id);
+                    let msg = r
+                        .error
+                        .as_deref()
+                        .and_then(|e| e.lines().last())
+                        .unwrap_or("Test failed");
+                    if let Some(l) = line {
+                        println!("::error file={},line={}::{}", file, l, msg);
+                    } else {
+                        println!("::error file={}::{}", file, msg);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 
     // Print report summary if -r flag is set
     if let Some(ref report_chars) = cli.report {
@@ -835,10 +1065,18 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         if n > 0 {
             let mut sorted: Vec<_> = results.iter().collect();
             sorted.sort_by(|a, b| b.duration.cmp(&a.duration));
+            // Apply --durations-min threshold: filter out tests below the threshold
+            let threshold = cli.durations_min;
+            let sorted: Vec<_> = sorted
+                .into_iter()
+                .filter(|r| r.duration.as_secs_f64() >= threshold)
+                .collect();
             let count = n.min(sorted.len());
-            eprintln!("\n{}", format!("slowest {} durations", count).bold());
-            for r in sorted.iter().take(count) {
-                eprintln!("  {:.3}s {}", r.duration.as_secs_f64(), r.test_id);
+            if count > 0 {
+                eprintln!("\n{}", format!("slowest {} durations", count).bold());
+                for r in sorted.iter().take(count) {
+                    eprintln!("  {:.3}s {}", r.duration.as_secs_f64(), r.test_id);
+                }
             }
         }
     }
@@ -864,6 +1102,7 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
 /// Configuration snapshot for watch mode re-runs (captured from CLI args).
 #[derive(Clone)]
+#[allow(dead_code)]
 struct WatchConfig {
     paths: Vec<String>,
     keyword: Option<String>,
@@ -885,6 +1124,11 @@ struct WatchConfig {
     ignore_paths: Vec<String>,
     ignore_glob: Vec<String>,
     deselect: Vec<String>,
+    stepwise: bool,
+    durations: Option<usize>,
+    durations_min: f64,
+    no_progress: bool,
+    no_capture: bool,
 }
 
 impl WatchConfig {
@@ -910,6 +1154,11 @@ impl WatchConfig {
             ignore_paths: cli.ignore_paths.clone(),
             ignore_glob: cli.ignore_glob.clone(),
             deselect: cli.deselect.clone(),
+            stepwise: cli.stepwise,
+            durations: cli.durations,
+            durations_min: cli.durations_min,
+            no_progress: cli.no_progress,
+            no_capture: cli.no_capture,
         }
     }
 }
@@ -966,86 +1215,20 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     // Inject autouse fixtures into test fixture_deps
     inject_autouse_fixtures(&mut tests);
 
-    let tests = if let Some(ref expr) = cfg.marker {
-        filter_by_markers(&tests, expr)
-    } else {
-        tests
-    };
-    let tests = if let Some(ref expr) = cfg.keyword {
-        filter_by_keyword(&tests, expr)
-    } else {
-        tests
-    };
-
-    // Filter by --ignore, --ignore-glob, --deselect
-    let tests = if !cfg.ignore_paths.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| {
-                !cfg.ignore_paths
-                    .iter()
-                    .any(|p| t.path.starts_with(std::path::Path::new(p)))
-            })
-            .collect()
-    } else {
-        tests
-    };
-    let tests = if !cfg.ignore_glob.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| {
-                let test_path = t.path.to_string_lossy();
-                !cfg.ignore_glob
-                    .iter()
-                    .any(|pattern| glob_match::glob_match(pattern, test_path.as_ref()))
-            })
-            .collect()
-    } else {
-        tests
-    };
-    let tests = if !cfg.deselect.is_empty() {
-        tests
-            .into_iter()
-            .filter(|t| !cfg.deselect.contains(&t.id))
-            .collect()
-    } else {
-        tests
-    };
-
-    // Incremental filtering
-    let tests = if cfg.incremental {
-        let cwd = std::env::current_dir()?;
-        let tester = IncrementalTester::new(&cwd)?;
-        tester.filter_unchanged(tests)?
-    } else {
-        tests
-    };
-
-    // Last-failed / failed-first filtering
-    let tests = if cfg.last_failed || cfg.failed_first {
-        let cwd = std::env::current_dir()?;
-        let last_failed = fastest_core::load_lastfailed(&cwd);
-        if cfg.last_failed {
-            tests
-                .into_iter()
-                .filter(|t| last_failed.contains(&t.id))
-                .collect()
-        } else {
-            let mut failed: Vec<fastest_core::TestItem> = Vec::new();
-            let mut rest: Vec<fastest_core::TestItem> = Vec::new();
-            for t in tests {
-                if last_failed.contains(&t.id) {
-                    failed.push(t);
-                } else {
-                    rest.push(t);
-                }
-            }
-            failed.extend(rest);
-            failed
-        }
-    } else {
-        tests
-    };
+    // Apply unified filter pipeline
+    let tests = apply_filters(
+        tests,
+        &FilterOpts {
+            keyword: cfg.keyword.as_deref(),
+            marker: cfg.marker.as_deref(),
+            ignore_paths: &cfg.ignore_paths,
+            ignore_glob: &cfg.ignore_glob,
+            deselect: &cfg.deselect,
+            incremental: cfg.incremental,
+            last_failed: cfg.last_failed,
+            failed_first: cfg.failed_first,
+        },
+    )?;
 
     if tests.is_empty() {
         eprintln!("{}", "no tests collected".yellow());
@@ -1066,7 +1249,11 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         TimeoutConfig::with_duration(std::time::Duration::from_secs(cfg.timeout.unwrap_or(60)));
     let executor = HybridExecutor::with_config(cfg.workers, timeout_config);
 
-    let max_failures = if cfg.exitfirst { Some(1) } else { cfg.maxfail };
+    let max_failures = if cfg.exitfirst || cfg.stepwise {
+        Some(1)
+    } else {
+        cfg.maxfail
+    };
 
     let results = if let Some(max_fail) = max_failures {
         let inprocess = executor.inprocess();
@@ -1094,7 +1281,7 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
             }
         }
         results
-    } else {
+    } else if !cfg.no_progress {
         let pb = create_progress_bar(tests.len());
         let verbose = cfg.verbose;
         executor.execute_streaming(&tests, &move |result| {
@@ -1103,6 +1290,12 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
                 pb.println(format_result_line(result, true));
             }
         })
+    } else if cfg.verbose {
+        executor.execute_streaming(&tests, &|result| {
+            eprintln!("{}", format_result_line(result, true));
+        })
+    } else {
+        executor.execute(&tests)
     };
 
     // Save last-failed cache
@@ -1119,13 +1312,21 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
             .map(|r| r.test_id.clone())
             .collect();
         fastest_core::save_lastfailed(&cwd, &failed_ids);
+
+        // Stepwise: save the test we stopped at, or clear if all passed
+        if cfg.stepwise {
+            if let Some(first_failed) = failed_ids.iter().next() {
+                fastest_core::save_stepwise(&cwd, first_failed);
+            } else {
+                fastest_core::clear_stepwise(&cwd);
+            }
+        }
     }
 
-    let output_format =
-        OutputFormat::from_str_with_junit(Some(&cfg.output_format), cfg.junit_xml.clone());
+    let display_format = OutputFormat::parse_display_format(Some(&cfg.output_format));
     let formatted = format_results(
         &results,
-        &output_format,
+        &display_format,
         cfg.verbose,
         &cfg.traceback,
         cfg.quiet,
@@ -1134,12 +1335,39 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         println!("{}", formatted);
     }
 
+    // Write JUnit XML as a side-channel if requested
+    if let Some(ref junit_path) = cfg.junit_xml {
+        if let Err(e) = write_junit_xml(&results, junit_path) {
+            eprintln!("Failed to write JUnit XML: {}", e);
+        }
+    }
+
     let duration = start.elapsed();
     print_summary(&results, duration);
 
     // Print report summary if -r flag is set
     if let Some(ref report_chars) = cfg.report {
         output::print_report_summary(&results, report_chars);
+    }
+
+    // Show slowest durations if requested
+    if let Some(n) = cfg.durations {
+        if n > 0 {
+            let mut sorted: Vec<_> = results.iter().collect();
+            sorted.sort_by(|a, b| b.duration.cmp(&a.duration));
+            let threshold = cfg.durations_min;
+            let sorted: Vec<_> = sorted
+                .into_iter()
+                .filter(|r| r.duration.as_secs_f64() >= threshold)
+                .collect();
+            let count = n.min(sorted.len());
+            if count > 0 {
+                eprintln!("\n{}", format!("slowest {} durations", count).bold());
+                for r in sorted.iter().take(count) {
+                    eprintln!("  {:.3}s {}", r.duration.as_secs_f64(), r.test_id);
+                }
+            }
+        }
     }
 
     plugins.shutdown_all()?;

@@ -23,11 +23,14 @@ use walkdir::WalkDir;
 pub fn discover_tests(paths: &[PathBuf], config: &Config) -> Result<Vec<TestItem>> {
     let test_files = collect_test_files(paths, config, &config.norecursedirs);
 
+    // Deduplicate overlapping paths (e.g. testpaths = [".", "tests"])
+    let test_files = dedup_paths(test_files);
+
     let results: Vec<Result<Vec<TestItem>>> = test_files
         .par_iter()
         .map(|path| {
             let content = fs::read_to_string(path)?;
-            parser::parse_test_file(&content, path)
+            parser::parse_test_file_with_config(&content, path, Some(config))
         })
         .collect();
 
@@ -77,6 +80,19 @@ pub(crate) fn should_skip_dir(name: &str, extra_skip: &[String]) -> bool {
     SKIP_DIRS.contains(&name)
         || name.ends_with(".egg-info")
         || extra_skip.iter().any(|d| name == d.as_str())
+}
+
+/// Remove duplicate paths from a file list.
+///
+/// If `testpaths = [".", "tests"]` produces overlapping results,
+/// this deduplicates by canonical path.
+fn dedup_paths(mut paths: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = std::collections::HashSet::new();
+    paths.retain(|p| {
+        let key = p.canonicalize().unwrap_or_else(|_| p.clone());
+        seen.insert(key)
+    });
+    paths
 }
 
 fn collect_test_files(

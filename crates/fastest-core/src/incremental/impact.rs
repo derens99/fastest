@@ -16,6 +16,7 @@ const CONFIG_FILES: &[&str] = &[
     "tox.ini",
     "setup.py",
     "requirements.txt",
+    "conftest.py",
 ];
 
 /// Given a list of tests and a set of changed file paths, return only the tests
@@ -54,12 +55,18 @@ pub fn find_affected_tests(tests: &[TestItem], changed_files: &HashSet<PathBuf>)
 }
 
 /// Check whether two paths refer to the same file, tolerating relative vs absolute
-/// differences.  Returns true if one path ends with the other's components.
+/// differences.  Tries canonical comparison first, then falls back to suffix matching.
 fn paths_match(a: &std::path::Path, b: &std::path::Path) -> bool {
     if a == b {
         return true;
     }
-    // Check if one is a suffix of the other
+    // Try canonical comparison for accurate matching
+    if let (Ok(ca), Ok(cb)) = (a.canonicalize(), b.canonicalize()) {
+        if ca == cb {
+            return true;
+        }
+    }
+    // Fallback: check if one is a suffix of the other
     a.ends_with(b) || b.ends_with(a)
 }
 

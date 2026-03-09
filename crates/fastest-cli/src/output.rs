@@ -30,7 +30,8 @@ pub enum OutputFormat {
     Json,
     /// One-line summary: "N passed, N failed, N skipped".
     Count,
-    /// JUnit XML written to the given file path.
+    /// JUnit XML written to the given file path (legacy — now a side-channel).
+    #[allow(dead_code)]
     JunitXml(String),
 }
 
@@ -38,10 +39,18 @@ impl OutputFormat {
     /// Parse an output format from CLI string.
     ///
     /// Recognises "json", "pretty", "count". Anything else is treated as Pretty.
+    /// JUnit XML is now a side-channel — use `parse_display_format` for the display
+    /// format and write JUnit XML separately via `write_junit_xml`.
+    #[allow(dead_code)]
     pub fn from_str_with_junit(s: Option<&str>, junit_path: Option<String>) -> Self {
         if let Some(path) = junit_path {
             return OutputFormat::JunitXml(path);
         }
+        Self::parse_display_format(s)
+    }
+
+    /// Parse only the display format (Pretty, Json, Count) without JUnit XML.
+    pub fn parse_display_format(s: Option<&str>) -> Self {
         match s.map(|s| s.to_lowercase()).as_deref() {
             Some("json") => OutputFormat::Json,
             Some("count") => OutputFormat::Count,

@@ -3,6 +3,7 @@
 //! Uses `rustpython-parser` to parse Python source into an AST, then extracts
 //! test functions and test classes into [`TestItem`] instances.
 
+use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::model::{Marker, TestItem};
 use rustpython_parser::ast::{self, Expr, Ranged, Stmt};
@@ -12,10 +13,20 @@ use std::path::Path;
 
 /// Parse a Python test file and return all discovered test items.
 ///
-/// This function parses the given source code using the rustpython AST parser
-/// and extracts top-level `def test_*()` functions and `class Test*` classes
-/// with their nested `def test_*()` methods.
+/// Uses the default `test_*` / `Test*` naming conventions.
 pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
+    parse_test_file_with_config(source, path, None)
+}
+
+/// Parse a Python test file with optional config for custom naming conventions.
+///
+/// When `config` is `Some`, respects `python_functions` and `python_classes`
+/// patterns. When `None`, uses the default `test_*` / `Test*` conventions.
+pub fn parse_test_file_with_config(
+    source: &str,
+    path: &Path,
+    config: Option<&Config>,
+) -> Result<Vec<TestItem>> {
     let stmts = ast::Suite::parse(source, &path.display().to_string())
         .map_err(|e| Error::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
 
@@ -36,7 +47,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::FunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -53,7 +64,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::AsyncFunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -70,7 +81,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::ClassDef(class_def) => {
                 let class_name = class_def.name.as_str();
-                if is_test_class_name(class_name) {
+                if is_test_class(class_name, config) {
                     extract_class_methods(
                         class_def,
                         &path_str,
@@ -78,6 +89,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
                         &line_index,
                         &mut items,
                         None,
+                        config,
                     );
                 }
             }
@@ -112,6 +124,7 @@ fn extract_class_methods(
     line_index: &LineIndex,
     items: &mut Vec<TestItem>,
     parent_class: Option<&str>,
+    config: Option<&Config>,
 ) {
     let own_name = class_def.name.as_str();
     let full_class_name = if let Some(parent) = parent_class {
@@ -124,7 +137,7 @@ fn extract_class_methods(
         match stmt {
             Stmt::FunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -141,7 +154,7 @@ fn extract_class_methods(
             }
             Stmt::AsyncFunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -158,7 +171,7 @@ fn extract_class_methods(
             }
             Stmt::ClassDef(nested_class_def) => {
                 let nested_name = nested_class_def.name.as_str();
-                if is_test_class_name(nested_name) {
+                if is_test_class(nested_name, config) {
                     extract_class_methods(
                         nested_class_def,
                         path_str,
@@ -166,6 +179,7 @@ fn extract_class_methods(
                         line_index,
                         items,
                         Some(&full_class_name),
+                        config,
                     );
                 }
             }
@@ -479,14 +493,24 @@ fn extract_pytestmark_single(expr: &Expr) -> Vec<Marker> {
 
 /// Check if a function name matches the test function naming convention.
 ///
-/// Matches `test_*` only, consistent with pytest's default `python_functions` pattern.
-fn is_test_function_name(name: &str) -> bool {
-    name.starts_with("test_")
+/// When config is provided, uses `python_functions` patterns. Otherwise
+/// matches `test_*` (pytest's default).
+fn is_test_function(name: &str, config: Option<&Config>) -> bool {
+    match config {
+        Some(cfg) => cfg.is_test_function(name),
+        None => name.starts_with("test_"),
+    }
 }
 
 /// Check if a class name matches the test class naming convention.
-fn is_test_class_name(name: &str) -> bool {
-    name.starts_with("Test")
+///
+/// When config is provided, uses `python_classes` patterns. Otherwise
+/// matches `Test*` (pytest's default).
+fn is_test_class(name: &str, config: Option<&Config>) -> bool {
+    match config {
+        Some(cfg) => cfg.is_test_class(name),
+        None => name.starts_with("Test"),
+    }
 }
 
 /// A simple line index that maps byte offsets to 1-based line numbers.
