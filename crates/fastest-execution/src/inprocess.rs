@@ -38,6 +38,22 @@ impl InProcessExecutor {
         tests.iter().map(|test| self.run_single(test)).collect()
     }
 
+    /// Execute tests with a callback invoked after each test completes.
+    pub fn execute_with_callback(
+        &self,
+        tests: &[TestItem],
+        on_result: impl Fn(&TestResult),
+    ) -> Vec<TestResult> {
+        tests
+            .iter()
+            .map(|test| {
+                let result = self.run_single(test);
+                on_result(&result);
+                result
+            })
+            .collect()
+    }
+
     /// Run a single test item using the embedded Python interpreter.
     fn run_single(&self, test: &TestItem) -> TestResult {
         // Check for skip/skipif markers BEFORE execution

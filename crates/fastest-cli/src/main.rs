@@ -20,8 +20,10 @@ use fastest_core::{
 use fastest_execution::timeout::TimeoutConfig;
 use fastest_execution::HybridExecutor;
 
-use crate::output::{format_results, print_summary, write_junit_xml, OutputFormat};
-use crate::progress::create_spinner;
+use crate::output::{
+    format_result_line, format_results, print_header, print_summary, write_junit_xml, OutputFormat,
+};
+use crate::progress::create_progress_bar;
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -128,6 +130,14 @@ struct Cli {
     #[arg(long = "collect-only", visible_alias = "co")]
     collect_only: bool,
 
+    /// Show registered markers and exit
+    #[arg(long = "markers")]
+    show_markers: bool,
+
+    /// Show available fixtures and exit
+    #[arg(long = "fixtures")]
+    show_fixtures: bool,
+
     /// Ignore paths during collection
     #[arg(long = "ignore", action = clap::ArgAction::Append)]
     ignore_paths: Vec<String>,
@@ -180,6 +190,28 @@ fn main() -> ExitCode {
             }
         },
         None => {
+            // Handle --markers
+            if cli.show_markers {
+                match run_show_markers() {
+                    Ok(_) => return ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("{}: {}", "error".red().bold(), e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+
+            // Handle --fixtures
+            if cli.show_fixtures {
+                match run_show_fixtures() {
+                    Ok(_) => return ExitCode::SUCCESS,
+                    Err(e) => {
+                        eprintln!("{}: {}", "error".red().bold(), e);
+                        return ExitCode::FAILURE;
+                    }
+                }
+            }
+
             if cli.collect_only {
                 match run_discover(&cli.paths, &cli.output_format) {
                     Ok(_) => return ExitCode::SUCCESS,
@@ -224,17 +256,78 @@ fn main() -> ExitCode {
 /// Debounce interval for watch mode (milliseconds).
 const WATCH_DEBOUNCE_MS: u64 = 300;
 
+/// A parsed node-ID like `tests/test_math.py::TestCalc::test_add`.
+struct NodeId {
+    /// The file/directory path portion.
+    path: PathBuf,
+    /// Optional class name filter (e.g., "TestCalc").
+    class_filter: Option<String>,
+    /// Optional function name filter (e.g., "test_add").
+    function_filter: Option<String>,
+}
+
+/// Parse a CLI path argument, splitting on `::` for node-ID syntax.
+///
+/// Examples:
+/// - `tests/` → path only
+/// - `tests/test_math.py::test_add` → path + function
+/// - `tests/test_math.py::TestCalc::test_add` → path + class + function
+fn parse_node_id(arg: &str) -> NodeId {
+    let parts: Vec<&str> = arg.splitn(2, "::").collect();
+    if parts.len() == 1 {
+        NodeId {
+            path: PathBuf::from(arg),
+            class_filter: None,
+            function_filter: None,
+        }
+    } else {
+        let path = PathBuf::from(parts[0]);
+        let selectors: Vec<&str> = parts[1].split("::").collect();
+        match selectors.len() {
+            1 => NodeId {
+                path,
+                class_filter: None,
+                function_filter: Some(selectors[0].to_string()),
+            },
+            _ => NodeId {
+                path,
+                class_filter: Some(selectors[0].to_string()),
+                function_filter: Some(selectors[selectors.len() - 1].to_string()),
+            },
+        }
+    }
+}
+
 /// Resolve the set of directories to search for tests.
 ///
 /// Priority: explicit CLI paths > `testpaths` from config > current directory.
 fn resolve_search_paths(paths: &[String], config: &Config) -> Vec<PathBuf> {
     if !paths.is_empty() {
-        paths.iter().map(PathBuf::from).collect()
+        // Strip :: node-ID suffixes — only use the path portion for discovery
+        paths.iter().map(|p| parse_node_id(p).path).collect()
     } else if !config.testpaths.is_empty() {
         config.testpaths.clone()
     } else {
         vec![PathBuf::from(".")]
     }
+}
+
+/// Extract node-ID filters from CLI path arguments.
+///
+/// Returns (class_filters, function_filters) from any `::` syntax in paths.
+fn extract_node_filters(paths: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut class_filters = Vec::new();
+    let mut function_filters = Vec::new();
+    for p in paths {
+        let node = parse_node_id(p);
+        if let Some(c) = node.class_filter {
+            class_filters.push(c);
+        }
+        if let Some(f) = node.function_filter {
+            function_filters.push(f);
+        }
+    }
+    (class_filters, function_filters)
 }
 
 /// Inject autouse fixtures from conftest.py files into test items.
@@ -277,19 +370,150 @@ fn run_discover(paths: &[String], output_format: &str) -> anyhow::Result<()> {
             println!("{} tests discovered", tests.len());
         }
         _ => {
-            // Pretty: list each test
+            // Tree view: group by module, then class
+            let mut current_module = String::new();
+            let mut current_class: Option<String> = None;
+
             for test in &tests {
-                let location = if let Some(line) = test.line_number {
-                    format!("{}:{}", test.path.display(), line)
+                let module = test.path.display().to_string();
+
+                // Print module header on change
+                if module != current_module {
+                    if !current_module.is_empty() {
+                        println!();
+                    }
+                    println!("{}", format!("<Module {}>", module).bold());
+                    current_module = module;
+                    current_class = None;
+                }
+
+                // Print class header on change
+                if test.class_name != current_class {
+                    if let Some(ref cls) = test.class_name {
+                        println!("  {}", format!("<Class {}>", cls).bold());
+                    }
+                    current_class = test.class_name.clone();
+                }
+
+                // Print test function
+                let indent = if test.class_name.is_some() {
+                    "    "
                 } else {
-                    test.path.display().to_string()
+                    "  "
                 };
-                println!("  {} {}", location.dimmed(), test.id);
+                println!(
+                    "{}{} {}",
+                    indent,
+                    "<Function".dimmed(),
+                    format!("{}>", test.function_name).dimmed()
+                );
             }
+
             println!(
                 "\n{}",
-                format!("{} tests discovered", tests.len()).green().bold()
+                format!("{} tests collected", tests.len()).green().bold()
             );
+        }
+    }
+
+    Ok(())
+}
+
+/// Show registered markers from config.
+fn run_show_markers() -> anyhow::Result<()> {
+    let config = Config::load()?;
+
+    println!("{}", "=== registered markers (from config) ===".bold());
+
+    // Built-in markers always available
+    let builtins = [
+        ("skip", "skip the test unconditionally"),
+        ("skipif", "skip the test if condition is true"),
+        ("xfail", "mark test as expected to fail"),
+        ("parametrize", "generate multiple test cases"),
+        ("timeout", "set per-test timeout in seconds"),
+        ("usefixtures", "use fixtures without argument injection"),
+    ];
+
+    for (name, desc) in &builtins {
+        println!("  @pytest.mark.{}: {}", name.cyan().bold(), desc);
+    }
+
+    // Custom markers from config
+    if !config.markers.is_empty() {
+        println!("\n{}", "--- custom markers ---".dimmed());
+        for marker in &config.markers {
+            // Markers in config are formatted as "name: description" or just "name"
+            let (name, desc) = if let Some(idx) = marker.find(':') {
+                (&marker[..idx], marker[idx + 1..].trim())
+            } else {
+                (marker.as_str(), "")
+            };
+            if desc.is_empty() {
+                println!("  @pytest.mark.{}", name.cyan().bold());
+            } else {
+                println!("  @pytest.mark.{}: {}", name.cyan().bold(), desc);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Show available fixtures with scope info.
+fn run_show_fixtures() -> anyhow::Result<()> {
+    println!("{}", "=== available fixtures ===".bold());
+
+    // Built-in fixtures
+    let builtins = [
+        (
+            "tmp_path",
+            "function",
+            "Temporary directory unique to the test invocation",
+        ),
+        (
+            "tmp_path_factory",
+            "session",
+            "Factory for creating temp directories",
+        ),
+        ("capsys", "function", "Capture stdout/stderr writes"),
+        ("capfd", "function", "Capture file descriptor 1/2 output"),
+        (
+            "monkeypatch",
+            "function",
+            "Modify objects, dicts, or environment vars",
+        ),
+        ("caplog", "function", "Capture log records"),
+        ("request", "function", "Information about the test request"),
+    ];
+
+    println!("{}", "--- builtin ---".dimmed());
+    for (name, scope, desc) in &builtins {
+        println!(
+            "  {} [{}]\n      {}",
+            name.cyan().bold(),
+            scope.yellow(),
+            desc
+        );
+    }
+
+    // Conftest fixtures
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Ok(conftest_fixtures) = discover_conftest_fixtures(&cwd) {
+        if !conftest_fixtures.is_empty() {
+            println!("\n{}", "--- from conftest.py ---".dimmed());
+            let mut fixtures: Vec<_> = conftest_fixtures.values().collect();
+            fixtures.sort_by_key(|f| &f.name);
+            for f in fixtures {
+                let autouse_tag = if f.autouse { " (autouse)" } else { "" };
+                println!(
+                    "  {} [{}]{}\n      defined in {}",
+                    f.name.cyan().bold(),
+                    format!("{}", f.scope).yellow(),
+                    autouse_tag.dimmed(),
+                    f.func_path.display().to_string().dimmed()
+                );
+            }
         }
     }
 
@@ -461,6 +685,33 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         tests
     };
 
+    // 8c. Apply node-ID filters from :: syntax in paths
+    let (class_filters, function_filters) = extract_node_filters(&cli.paths);
+    let tests = if !class_filters.is_empty() || !function_filters.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let class_ok = class_filters.is_empty()
+                    || t.class_name
+                        .as_ref()
+                        .is_some_and(|c| class_filters.contains(c));
+                let func_ok =
+                    function_filters.is_empty() || function_filters.contains(&t.function_name);
+                // If only function filters, match function name OR class name
+                if class_filters.is_empty() {
+                    func_ok
+                        || t.class_name
+                            .as_ref()
+                            .is_some_and(|c| function_filters.contains(c))
+                } else {
+                    class_ok && func_ok
+                }
+            })
+            .collect()
+    } else {
+        tests
+    };
+
     if tests.is_empty() {
         eprintln!("{}", "no tests collected".yellow());
         plugins.shutdown_all()?;
@@ -468,10 +719,11 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     }
 
     // Print header
+    let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    print_header(&rootdir);
     eprintln!(
-        "{} {} collecting {} test{}...",
+        "{} collecting {} test{}...",
         "fastest".cyan().bold(),
-        format!("v{}", fastest_core::VERSION).dimmed(),
         tests.len(),
         if tests.len() == 1 { "" } else { "s" }
     );
@@ -510,12 +762,21 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
             }
         }
         results
-    } else if !cli.no_progress && !cli.verbose {
-        // Run with spinner (execution is synchronous, results arrive in bulk)
-        let spinner = create_spinner(tests.len());
-        let results = executor.execute(&tests);
-        spinner.finish_and_clear();
-        results
+    } else if !cli.no_progress {
+        // Streaming execution with live progress bar
+        let pb = create_progress_bar(tests.len());
+        let verbose = cli.verbose;
+        executor.execute_streaming(&tests, &move |result| {
+            pb.inc(1);
+            if verbose {
+                pb.println(format_result_line(result, true));
+            }
+        })
+    } else if cli.verbose {
+        // Verbose without progress bar — stream results to stderr
+        executor.execute_streaming(&tests, &|result| {
+            eprintln!("{}", format_result_line(result, true));
+        })
     } else {
         executor.execute(&tests)
     };
@@ -792,10 +1053,11 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    print_header(&rootdir);
     eprintln!(
-        "{} {} collecting {} test{}...",
+        "{} collecting {} test{}...",
         "fastest".cyan().bold(),
-        format!("v{}", fastest_core::VERSION).dimmed(),
         tests.len(),
         if tests.len() == 1 { "" } else { "s" }
     );
@@ -833,7 +1095,14 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
         }
         results
     } else {
-        executor.execute(&tests)
+        let pb = create_progress_bar(tests.len());
+        let verbose = cfg.verbose;
+        executor.execute_streaming(&tests, &move |result| {
+            pb.inc(1);
+            if verbose {
+                pb.println(format_result_line(result, true));
+            }
+        })
     };
 
     // Save last-failed cache
