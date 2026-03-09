@@ -11,8 +11,15 @@ use std::time::Duration;
 use colored::Colorize;
 use fastest_core::{TestOutcome, TestResult};
 
-/// Width of separator lines in output (e.g. "=" repeated).
-const SEPARATOR_WIDTH: usize = 60;
+/// Default separator width when terminal size cannot be detected.
+const DEFAULT_WIDTH: usize = 80;
+
+/// Get the current terminal width, falling back to DEFAULT_WIDTH.
+fn term_width() -> usize {
+    terminal_size::terminal_size()
+        .map(|(w, _)| w.0 as usize)
+        .unwrap_or(DEFAULT_WIDTH)
+}
 
 /// Supported output formats.
 #[derive(Debug, Clone)]
@@ -65,87 +72,140 @@ pub fn format_results(
 /// followed by a summary line.
 fn format_pretty(results: &[TestResult], verbose: bool, tb: &str, quiet: bool) -> String {
     let mut out = String::new();
+    let width = term_width();
 
-    for result in results {
-        // In quiet mode, only show failures and errors
-        if quiet {
+    // In quiet mode with no failures, show pytest-style dot progress
+    if quiet {
+        let mut dots = String::new();
+        for result in results {
             match &result.outcome {
-                TestOutcome::Failed | TestOutcome::Error { .. } => {}
-                _ => continue,
+                TestOutcome::Passed => dots.push('.'),
+                TestOutcome::Failed => dots.push('F'),
+                TestOutcome::Skipped { .. } => dots.push('s'),
+                TestOutcome::XFailed { .. } => dots.push('x'),
+                TestOutcome::XPassed => dots.push('X'),
+                TestOutcome::Error { .. } => dots.push('E'),
             }
         }
-
-        let status = match &result.outcome {
-            TestOutcome::Passed => "PASSED".green().bold().to_string(),
-            TestOutcome::Failed => "FAILED".red().bold().to_string(),
-            TestOutcome::Skipped { .. } => "SKIPPED".yellow().bold().to_string(),
-            TestOutcome::XFailed { .. } => "XFAIL".yellow().to_string(),
-            TestOutcome::XPassed => "XPASS".yellow().bold().to_string(),
-            TestOutcome::Error { .. } => "ERROR".red().bold().to_string(),
-        };
-
-        let _ = write!(out, "{} {}", status, result.test_id);
-
-        if verbose {
-            let _ = write!(out, " ({:.3}s)", result.duration.as_secs_f64());
+        if !dots.is_empty() {
+            let _ = writeln!(out, "{}", dots);
         }
+    } else {
+        for result in results {
+            let status = match &result.outcome {
+                TestOutcome::Passed => "PASSED".green().bold().to_string(),
+                TestOutcome::Failed => "FAILED".red().bold().to_string(),
+                TestOutcome::Skipped { .. } => "SKIPPED".yellow().bold().to_string(),
+                TestOutcome::XFailed { .. } => "XFAIL".yellow().to_string(),
+                TestOutcome::XPassed => "XPASS".yellow().bold().to_string(),
+                TestOutcome::Error { .. } => "ERROR".red().bold().to_string(),
+            };
 
-        out.push('\n');
+            let _ = write!(out, "{} {}", status, result.test_id);
 
-        // Print failure details
-        if verbose {
-            if let Some(ref err) = result.error {
-                let _ = writeln!(out, "    {}", err.red());
+            if verbose {
+                let _ = write!(out, " ({:.3}s)", result.duration.as_secs_f64());
             }
-            if !result.stdout.is_empty() {
-                let _ = writeln!(out, "    --- stdout ---\n    {}", result.stdout);
-            }
-            if !result.stderr.is_empty() {
-                let _ = writeln!(out, "    --- stderr ---\n    {}", result.stderr);
-            }
-        } else if tb != "no" {
-            // In non-verbose mode, show error for failures based on --tb setting
-            match &result.outcome {
-                TestOutcome::Failed | TestOutcome::Error { .. } => {
-                    if let Some(ref err) = result.error {
-                        if tb == "short" {
-                            // Show only the last line of the traceback
-                            let last_line = err.lines().last().unwrap_or(err);
-                            let _ = writeln!(out, "    {}", last_line.red());
-                        } else {
-                            // "long" - show full traceback
-                            let _ = writeln!(out, "    {}", err.red());
+
+            out.push('\n');
+
+            // Print failure details
+            if verbose {
+                if let Some(ref err) = result.error {
+                    let _ = writeln!(out, "    {}", err.red());
+                }
+                if !result.stdout.is_empty() {
+                    let _ = writeln!(out, "    --- stdout ---\n    {}", result.stdout);
+                }
+                if !result.stderr.is_empty() {
+                    let _ = writeln!(out, "    --- stderr ---\n    {}", result.stderr);
+                }
+            } else if tb != "no" {
+                // In non-verbose mode, show error for failures based on --tb setting
+                match &result.outcome {
+                    TestOutcome::Failed | TestOutcome::Error { .. } => {
+                        if let Some(ref err) = result.error {
+                            match tb {
+                                "line" => {
+                                    // Single-line: just FAILED test_id - last error line
+                                    // (shown in the short summary instead)
+                                }
+                                "short" => {
+                                    // Show file:line reference + assertion line
+                                    let lines: Vec<&str> = err.lines().collect();
+                                    // Find the last file reference line and the assertion
+                                    let file_line = lines
+                                        .iter()
+                                        .rev()
+                                        .find(|l| l.contains("File \"") || l.contains(".py:"));
+                                    let assertion = lines.last();
+                                    if let Some(fl) = file_line {
+                                        let _ = writeln!(out, "    {}", fl.trim().red());
+                                    }
+                                    if let Some(a) = assertion {
+                                        if file_line.is_none_or(|fl| *a != *fl) {
+                                            let _ = writeln!(out, "    {}", a.trim().red());
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    // "long" - show full traceback
+                                    let _ = writeln!(out, "    {}", err.red());
+                                }
+                            }
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
             }
         }
     }
 
-    // Collect failures for summary section
+    // Collect failures for FAILURES section
     let failures: Vec<&TestResult> = results
         .iter()
         .filter(|r| matches!(r.outcome, TestOutcome::Failed | TestOutcome::Error { .. }))
         .collect();
 
-    if !failures.is_empty() && !quiet {
-        let _ = writeln!(out, "\n{}", "=".repeat(SEPARATOR_WIDTH));
-        let _ = write!(out, "{}", "FAILURES".red().bold());
-        out.push('\n');
-        let _ = writeln!(out, "{}", "=".repeat(SEPARATOR_WIDTH));
+    if !failures.is_empty() {
+        // Centered FAILURES header
+        let header = format!("{:=^width$}", " FAILURES ", width = width);
+        let _ = writeln!(out, "\n{}", header.red().bold());
+
         for result in &failures {
-            let _ = writeln!(out, "___ {} ___", result.test_id);
+            let test_header = format!(
+                "{:_^width$}",
+                format!(" {} ", result.test_id),
+                width = width
+            );
+            let _ = writeln!(out, "{}", test_header);
+
             if let Some(ref err) = result.error {
                 let _ = writeln!(out, "{}", err);
             }
+
+            // Show captured stdout in FAILURES section
+            if !result.stdout.is_empty() {
+                let cap_header = format!("{:-^width$}", " Captured stdout call ", width = width);
+                let _ = writeln!(out, "{}", cap_header);
+                let _ = writeln!(out, "{}", result.stdout);
+            }
+
+            // Show captured stderr in FAILURES section
+            if !result.stderr.is_empty() {
+                let cap_header = format!("{:-^width$}", " Captured stderr call ", width = width);
+                let _ = writeln!(out, "{}", cap_header);
+                let _ = writeln!(out, "{}", result.stderr);
+            }
+
             out.push('\n');
         }
     }
 
     // Short test summary info
-    if !failures.is_empty() && !quiet {
-        let _ = writeln!(out, "\n= SHORT TEST SUMMARY INFO =");
+    if !failures.is_empty() {
+        let summary_header = format!("{:=^width$}", " short test summary info ", width = width);
+        let _ = writeln!(out, "{}", summary_header.yellow());
         for result in &failures {
             let error_summary = result
                 .error
@@ -283,12 +343,27 @@ pub fn write_junit_xml(results: &[TestResult], path: &str) -> anyhow::Result<()>
     Ok(())
 }
 
+/// Print a pytest-style header line with context.
+///
+/// Example: `====== fastest v2.3.1 — rootdir: /home/user/project, platform: linux ======`
+pub fn print_header(rootdir: &Path) {
+    let width = term_width();
+    let info = format!(
+        " fastest v{} — rootdir: {}, platform: {} ",
+        fastest_core::VERSION,
+        rootdir.display(),
+        std::env::consts::OS,
+    );
+    let header = format!("{:=^width$}", info, width = width);
+    eprintln!("{}", header.bold());
+}
+
 /// Print a coloured summary line with timing.
 ///
-/// Example: "4 passed, 1 failed in 2.34s"
+/// Example: "====== 4 passed, 1 failed in 2.34s ======"
 pub fn print_summary(results: &[TestResult], duration: Duration) {
+    let width = term_width();
     let c = count_outcomes(results);
-    let total = results.len();
 
     let mut parts: Vec<String> = Vec::new();
 
@@ -318,28 +393,28 @@ pub fn print_summary(results: &[TestResult], duration: Duration) {
     };
 
     let has_failures = c.failed > 0 || c.errors > 0 || c.xpassed > 0;
-    let separator = "=".repeat(SEPARATOR_WIDTH);
-    let decoration = if has_failures {
-        separator.red().to_string()
-    } else {
-        separator.green().to_string()
-    };
 
-    // TODO: Warnings summary — collect and display pytest-style warnings here
-    // before the final decorated result line. Example:
-    //   eprintln!("{}", "= warnings summary =".yellow());
-    //   for warning in &collected_warnings {
-    //       eprintln!("  {}", warning);
-    //   }
-
-    eprintln!("{}", decoration);
-    eprintln!(
-        "{} {} in {:.2}s",
+    // Build the centered summary line: "====== N passed in 1.23s ======"
+    // We need to strip ANSI codes to compute the visual width
+    let plain_summary = strip_ansi_codes(&summary);
+    let timing = format!("in {:.2}s", duration.as_secs_f64());
+    let inner = format!(" {} {} ", plain_summary, timing);
+    let pad = width.saturating_sub(inner.len());
+    let left_pad = pad / 2;
+    let right_pad = pad - left_pad;
+    let line = format!(
+        "{} {} {} {}",
+        "=".repeat(left_pad),
         summary,
-        format!("({} total)", total).dimmed(),
-        duration.as_secs_f64()
+        timing,
+        "=".repeat(right_pad)
     );
-    eprintln!("{}", decoration);
+
+    if has_failures {
+        eprintln!("{}", line.red());
+    } else {
+        eprintln!("{}", line.green());
+    }
 }
 
 /// Print a report summary filtered by the given report characters.
@@ -421,9 +496,49 @@ pub fn print_report_summary(results: &[TestResult], report_chars: &str) {
     }
 }
 
+/// Format a single test result for live/streaming output.
+pub fn format_result_line(result: &TestResult, verbose: bool) -> String {
+    let status = match &result.outcome {
+        TestOutcome::Passed => "PASSED".green().bold().to_string(),
+        TestOutcome::Failed => "FAILED".red().bold().to_string(),
+        TestOutcome::Skipped { .. } => "SKIPPED".yellow().bold().to_string(),
+        TestOutcome::XFailed { .. } => "XFAIL".yellow().to_string(),
+        TestOutcome::XPassed => "XPASS".yellow().bold().to_string(),
+        TestOutcome::Error { .. } => "ERROR".red().bold().to_string(),
+    };
+    if verbose {
+        format!(
+            "{} {} ({:.3}s)",
+            status,
+            result.test_id,
+            result.duration.as_secs_f64()
+        )
+    } else {
+        format!("{} {}", status, result.test_id)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Strip ANSI escape codes for computing visual width.
+fn strip_ansi_codes(s: &str) -> String {
+    let mut out = String::new();
+    let mut in_escape = false;
+    for ch in s.chars() {
+        if in_escape {
+            if ch.is_ascii_alphabetic() {
+                in_escape = false;
+            }
+        } else if ch == '\x1b' {
+            in_escape = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
 
 /// Outcome counts for summary display.
 struct OutcomeCounts {
@@ -575,5 +690,18 @@ mod tests {
             OutputFormat::from_str_with_junit(None, Some("report.xml".into())),
             OutputFormat::JunitXml(_)
         ));
+    }
+
+    #[test]
+    fn test_strip_ansi_codes() {
+        assert_eq!(strip_ansi_codes("hello"), "hello");
+        assert_eq!(strip_ansi_codes("\x1b[32mgreen\x1b[0m"), "green");
+    }
+
+    #[test]
+    fn test_term_width_fallback() {
+        // In test environment, term_width might return default
+        let w = term_width();
+        assert!(w > 0);
     }
 }

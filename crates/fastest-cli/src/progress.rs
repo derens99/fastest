@@ -1,15 +1,27 @@
 //! Progress display for test execution.
 //!
-//! Uses the `indicatif` crate to show a spinner while tests run.
+//! Uses the `indicatif` crate to show a progress bar as tests complete.
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-/// Create a spinner for test execution.
+/// Create a progress bar for test execution.
 ///
-/// Displays a spinning indicator with the test count while the executor runs.
-/// This is preferable to a progress bar because the hybrid executor returns
-/// all results at once rather than streaming them.
-pub fn create_spinner(total: usize) -> ProgressBar {
+/// Displays a progress bar showing `[15/100] tests running... ..F.s.`
+/// that updates as each test result arrives via the streaming callback.
+pub fn create_progress_bar(total: usize) -> ProgressBar {
+    let pb = ProgressBar::new(total as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{spinner:.green} [{pos}/{len}] {msg} [{elapsed_precise}]")
+            .unwrap_or_else(|_| ProgressStyle::default_bar()),
+    );
+    pb.set_message("running tests...");
+    pb.enable_steady_tick(std::time::Duration::from_millis(100));
+    pb
+}
+
+/// Create a simple spinner for when total count is unknown.
+#[cfg(test)]
+fn create_spinner(total: usize) -> ProgressBar {
     let pb = ProgressBar::new_spinner();
     pb.set_style(
         ProgressStyle::with_template("{spinner:.green} running {msg}")
@@ -23,6 +35,12 @@ pub fn create_spinner(total: usize) -> ProgressBar {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_create_progress_bar() {
+        let pb = create_progress_bar(100);
+        assert_eq!(pb.length(), Some(100));
+    }
 
     #[test]
     fn test_create_spinner() {

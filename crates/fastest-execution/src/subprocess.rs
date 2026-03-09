@@ -278,6 +278,18 @@ impl SubprocessPool {
     /// Each worker is a persistent Python process running the worker harness.
     /// Tests are sorted by (path, class_name) to improve setup/teardown lifecycle.
     pub fn execute(&self, tests: &[TestItem]) -> Vec<TestResult> {
+        self.execute_with_callback(tests, &|_| {})
+    }
+
+    /// Execute tests with a callback invoked after each test completes.
+    ///
+    /// The callback is called from worker threads as each result arrives,
+    /// enabling live progress bars and streaming output.
+    pub fn execute_with_callback(
+        &self,
+        tests: &[TestItem],
+        on_result: &(dyn Fn(&TestResult) + Send + Sync),
+    ) -> Vec<TestResult> {
         if tests.is_empty() {
             return Vec::new();
         }
@@ -382,6 +394,7 @@ impl SubprocessPool {
                                 TestOutcome::Error { message } if message.contains("timeout")
                             );
                             if was_timeout {
+                                on_result(&result);
                                 let mut guard = results_lock.lock();
                                 guard[idx] = Some(result);
                             } else {
@@ -389,6 +402,7 @@ impl SubprocessPool {
                                 injector.push((idx, test));
                             }
                         } else {
+                            on_result(&result);
                             let mut guard = results_lock.lock();
                             guard[idx] = Some(result);
                         }

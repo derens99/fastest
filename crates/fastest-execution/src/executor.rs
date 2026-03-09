@@ -76,6 +76,22 @@ impl HybridExecutor {
         }
     }
 
+    /// Execute tests with a callback invoked after each test completes.
+    ///
+    /// Enables live progress bars and streaming output.
+    pub fn execute_streaming(
+        &self,
+        tests: &[TestItem],
+        on_result: &(dyn Fn(&TestResult) + Send + Sync),
+    ) -> Vec<TestResult> {
+        match select_strategy(tests.len()) {
+            ExecutionStrategy::InProcess => self.inprocess.execute_with_callback(tests, on_result),
+            ExecutionStrategy::Subprocess => {
+                self.subprocess.execute_with_callback(tests, on_result)
+            }
+        }
+    }
+
     /// Access the underlying in-process executor.
     pub fn inprocess(&self) -> &InProcessExecutor {
         &self.inprocess
