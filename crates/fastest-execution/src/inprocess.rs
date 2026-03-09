@@ -5,6 +5,7 @@
 //! because it avoids the overhead of spawning subprocesses.
 
 use std::ffi::CString;
+use std::fmt::Write;
 
 use fastest_core::fixtures::builtin::generate_builtin_code;
 use fastest_core::markers::{classify_marker, BuiltinMarker};
@@ -321,10 +322,28 @@ fn json_value_to_python(val: &serde_json::Value) -> String {
 
 /// Escape a string for safe embedding in a Python single-quoted string literal.
 fn escape_for_python_string(s: &str) -> String {
-    s.replace('\\', "\\\\") // must be first to avoid double-escaping
-        .replace('\'', "\\'")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
+    let mut result = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => result.push_str("\\\\"),
+            '\'' => result.push_str("\\'"),
+            '\n' => result.push_str("\\n"),
+            '\r' => result.push_str("\\r"),
+            '\t' => result.push_str("\\t"),
+            '\0' => result.push_str("\\0"),
+            c if c.is_ascii() => result.push(c),
+            c => {
+                // Escape non-ASCII to \uXXXX or \UXXXXXXXX for safe Python string embedding
+                let code = c as u32;
+                if code <= 0xFFFF {
+                    write!(result, "\\u{:04x}", code).unwrap();
+                } else {
+                    write!(result, "\\U{:08x}", code).unwrap();
+                }
+            }
+        }
+    }
+    result
 }
 
 /// Check that a string is a valid Python identifier (safe for code interpolation).
@@ -687,6 +706,9 @@ if not hasattr(sys.modules.get('pytest', None), 'raises'):\n\
 
     format!(
         "import sys, importlib, os\n\
+         __fastest_rootdir = os.environ.get('FASTEST_ROOTDIR', '')\n\
+         if __fastest_rootdir and __fastest_rootdir not in sys.path:\n\
+         \x20   sys.path.insert(0, __fastest_rootdir)\n\
          __fastest_test_dir = os.path.dirname(os.path.abspath('{path}'))\n\
          if __fastest_test_dir not in sys.path:\n\
          \x20   sys.path.insert(0, __fastest_test_dir)\n\

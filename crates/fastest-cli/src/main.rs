@@ -957,6 +957,12 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
     // Print header
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    // Set rootdir env var so subprocess workers and inprocess executor add it to sys.path.
+    // This mirrors pytest behavior: rootdir is always on sys.path[0] so that
+    // package-relative imports like `from tests.module import X` work.
+    std::env::set_var("FASTEST_ROOTDIR", &rootdir);
+
     if !cli.no_header {
         print_header(&rootdir);
         eprintln!(
@@ -1361,6 +1367,8 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     }
 
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    std::env::set_var("FASTEST_ROOTDIR", &rootdir);
+
     if !cfg.no_header {
         print_header(&rootdir);
         eprintln!(

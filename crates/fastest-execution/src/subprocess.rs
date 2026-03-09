@@ -535,6 +535,7 @@ impl PersistentWorker {
     fn spawn(python_path: &str, harness_path: &str) -> Result<Self, std::io::Error> {
         let mut child = Command::new(python_path)
             .arg(harness_path)
+            .env("PYTHONIOENCODING", "utf-8")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

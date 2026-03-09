@@ -1,5 +1,17 @@
 import json, sys, time, traceback, importlib, importlib.util, io, os, asyncio, platform, tempfile, pathlib, inspect
 
+# Ensure UTF-8 encoding for stdin/stdout on Windows (default may be cp1252)
+if hasattr(sys.stdin, 'reconfigure'):
+    sys.stdin.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
+# Add project rootdir to sys.path so package-relative imports work
+# (e.g. `from tests.concurrency import sleep` in httpx's conftest.py)
+_fastest_rootdir = os.environ.get('FASTEST_ROOTDIR', '')
+if _fastest_rootdir and _fastest_rootdir not in sys.path:
+    sys.path.insert(0, _fastest_rootdir)
+
 # Cache the builtin abs() to avoid issues when __builtins__ is a module vs dict
 builtins_abs = abs
 
@@ -150,6 +162,77 @@ def _call_module_func(func, mod):
             func()
 
 
+def _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixture_cleanups, _resolving=None):
+    """Recursively resolve a conftest fixture and its dependencies.
+
+    Handles session/module/class scope caching and yield fixtures.
+    Recursively resolves any fixture dependencies before calling the fixture function.
+    """
+    if _resolving is None:
+        _resolving = set()
+    # Prevent infinite recursion
+    if name in _resolving or name in fixture_kwargs:
+        return
+    _resolving.add(name)
+
+    # Check scope cache first
+    for sc in ('session', 'module', 'class'):
+        if name in _fixture_scope_cache.get(sc, {}):
+            fixture_kwargs[name] = _fixture_scope_cache[sc][name]
+            return
+
+    fixture_func = getattr(cmod, name, None)
+    if fixture_func is None:
+        # Search other conftest modules
+        for cp in conftest_paths:
+            abs_cp = os.path.abspath(cp)
+            if abs_cp in _conftest_cache and hasattr(_conftest_cache[abs_cp], name):
+                fixture_func = getattr(_conftest_cache[abs_cp], name)
+                cmod = _conftest_cache[abs_cp]
+                break
+        if fixture_func is None:
+            return
+
+    fix_scope = getattr(fixture_func, '_fastest_scope', 'function') if fixture_func else 'function'
+
+    # Re-check scope cache (may have been populated by dependency resolution)
+    if fix_scope in ('session', 'module', 'class') and name in _fixture_scope_cache.get(fix_scope, {}):
+        fixture_kwargs[name] = _fixture_scope_cache[fix_scope][name]
+        return
+
+    # Resolve dependencies first (recursive)
+    sig = inspect.signature(fixture_func)
+    for pname in sig.parameters:
+        if pname not in fixture_kwargs and pname != 'self':
+            # Try to find this dependency in conftest modules
+            for cp in conftest_paths:
+                abs_cp = os.path.abspath(cp)
+                if abs_cp in _conftest_cache and hasattr(_conftest_cache[abs_cp], pname):
+                    _resolve_conftest_fixture(pname, _conftest_cache[abs_cp], conftest_paths,
+                                             fixture_kwargs, fixture_cleanups, _resolving)
+                    break
+
+    # Build kwargs from resolved fixtures
+    fix_args = {}
+    for pname in sig.parameters:
+        if pname in fixture_kwargs:
+            fix_args[pname] = fixture_kwargs[pname]
+
+    result = fixture_func(**fix_args)
+    if inspect.isgenerator(result):
+        try:
+            fixture_kwargs[name] = next(result)
+            fixture_cleanups.append(lambda gen=result: next(gen, None))
+        except StopIteration:
+            fixture_kwargs[name] = None
+    else:
+        fixture_kwargs[name] = result
+
+    # Store in scope cache if scoped
+    if fix_scope in ('session', 'module', 'class'):
+        _fixture_scope_cache[fix_scope][name] = fixture_kwargs[name]
+
+
 def run_test(test_item):
     """Execute a single test item and return the result as a dict."""
     global _current_module_path, _current_class_name
@@ -248,17 +331,72 @@ def run_test(test_item):
         test_dir = os.path.dirname(new_module)
         if test_dir not in sys.path:
             sys.path.insert(0, test_dir)
-        # Load module using cache (avoid unnecessary reimport)
+        # Compute package-qualified module name for relative imports.
+        # Walk from the test file up to rootdir, collecting __init__.py-containing
+        # directories to form the dotted package path (e.g. "tests.client.test_auth").
         module_name = os.path.splitext(os.path.basename(new_module))[0]
-        if not module_name.isidentifier():
+        package_name = None
+        rootdir = os.environ.get('FASTEST_ROOTDIR', '')
+        if rootdir:
+            try:
+                rel = os.path.relpath(new_module, rootdir)
+                parts = rel.replace(os.sep, '/').split('/')
+                # Remove .py extension from last part
+                parts[-1] = os.path.splitext(parts[-1])[0]
+                # Check if parent dirs have __init__.py (i.e. are packages)
+                pkg_parts = []
+                cur = rootdir
+                is_package = True
+                for part in parts[:-1]:
+                    cur = os.path.join(cur, part)
+                    if os.path.exists(os.path.join(cur, '__init__.py')):
+                        pkg_parts.append(part)
+                    else:
+                        is_package = False
+                        break
+                if is_package and pkg_parts:
+                    dotted = '.'.join(pkg_parts + [parts[-1]])
+                    package_name = '.'.join(pkg_parts)
+                    module_name = dotted
+                    # Ensure parent packages are in sys.modules so relative imports work.
+                    # E.g. for "tests.client.test_auth", register "tests" and "tests.client".
+                    for i in range(len(pkg_parts)):
+                        pkg_dotted = '.'.join(pkg_parts[:i+1])
+                        if pkg_dotted not in sys.modules:
+                            pkg_dir = os.path.join(rootdir, *pkg_parts[:i+1])
+                            pkg_init = os.path.join(pkg_dir, '__init__.py')
+                            try:
+                                pkg_spec = importlib.util.spec_from_file_location(
+                                    pkg_dotted, pkg_init,
+                                    submodule_search_locations=[pkg_dir])
+                                pkg_mod = importlib.util.module_from_spec(pkg_spec)
+                                pkg_mod.__package__ = pkg_dotted
+                                pkg_mod.__path__ = [pkg_dir]
+                                sys.modules[pkg_dotted] = pkg_mod
+                                pkg_spec.loader.exec_module(pkg_mod)
+                            except Exception:
+                                # If __init__.py can't be loaded, create a namespace package
+                                import types
+                                pkg_mod = types.ModuleType(pkg_dotted)
+                                pkg_mod.__package__ = pkg_dotted
+                                pkg_mod.__path__ = [pkg_dir]
+                                sys.modules[pkg_dotted] = pkg_mod
+            except (ValueError, IndexError):
+                pass
+        if not module_name.isidentifier() and '.' not in module_name:
             module_name = "".join(c if c.isalnum() or c == "_" else "_" for c in module_name)
             if not module_name or module_name[0].isdigit():
                 module_name = "_" + module_name
+        # Load module using cache (avoid unnecessary reimport)
         if new_module in _module_cache:
             mod = _module_cache[new_module]
         else:
-            spec = importlib.util.spec_from_file_location(module_name, new_module)
+            spec = importlib.util.spec_from_file_location(module_name, new_module,
+                submodule_search_locations=[test_dir] if package_name else None)
             mod = importlib.util.module_from_spec(spec)
+            if package_name:
+                mod.__package__ = package_name
+            sys.modules[module_name] = mod
             spec.loader.exec_module(mod)
             _module_cache[new_module] = mod
         # Get and call test function
@@ -498,40 +636,24 @@ def run_test(test_item):
                             del sys.modules[conftest_key]
                         import pytest as _pt
                         _orig_fix = _pt.fixture
-                        _pt.fixture = lambda f=None, **kw: f if f is not None else (lambda fn: fn)
+                        # Replace pytest.fixture with a scope-preserving decorator
+                        # so that _fastest_scope metadata is recorded on fixture functions.
+                        # The old identity lambda stripped all metadata (scope, autouse, params).
+                        def _scope_recording_fixture(f=None, *, scope='function', autouse=False, params=None, **kw):
+                            if f is None:
+                                return lambda fn: _scope_recording_fixture(fn, scope=scope, autouse=autouse, params=params, **kw)
+                            f._fastest_scope = scope
+                            f._fastest_autouse = autouse
+                            f._fastest_params = params
+                            return f
+                        _pt.fixture = _scope_recording_fixture
                         spec = importlib.util.spec_from_file_location(conftest_key, cp)
                         cmod = importlib.util.module_from_spec(spec)
                         spec.loader.exec_module(cmod)
                         _pt.fixture = _orig_fix
                         _conftest_cache[abs_cp] = cmod
                     if hasattr(cmod, dep):
-                        fixture_func = getattr(cmod, dep)
-                        # Determine fixture scope
-                        fix_scope = getattr(fixture_func, '_fastest_scope', 'function') if fixture_func else 'function'
-                        # Check scope cache
-                        if fix_scope in ('session', 'module', 'class') and dep in _fixture_scope_cache.get(fix_scope, {}):
-                            fixture_kwargs[dep] = _fixture_scope_cache[fix_scope][dep]
-                            break
-                        # Pass already-resolved fixtures as kwargs to support dependencies
-                        import inspect as _insp
-                        _sig = _insp.signature(fixture_func)
-                        _fix_args = {}
-                        for _pname in _sig.parameters:
-                            if _pname in fixture_kwargs:
-                                _fix_args[_pname] = fixture_kwargs[_pname]
-                        result = fixture_func(**_fix_args)
-                        import inspect
-                        if inspect.isgenerator(result):
-                            try:
-                                fixture_kwargs[dep] = next(result)
-                                fixture_cleanups.append(lambda gen=result: next(gen, None))
-                            except StopIteration:
-                                fixture_kwargs[dep] = None
-                        else:
-                            fixture_kwargs[dep] = result
-                        # Store in scope cache if scoped
-                        if fix_scope in ('session', 'module', 'class'):
-                            _fixture_scope_cache[fix_scope][dep] = fixture_kwargs[dep]
+                        _resolve_conftest_fixture(dep, cmod, conftest_paths, fixture_kwargs, fixture_cleanups)
                         break  # Found the fixture, stop searching conftest files
 
         # Call setup_module if present and not already called for this module
