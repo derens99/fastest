@@ -3,6 +3,7 @@
 //! Uses `rustpython-parser` to parse Python source into an AST, then extracts
 //! test functions and test classes into [`TestItem`] instances.
 
+use crate::config::Config;
 use crate::error::{Error, Result};
 use crate::model::{Marker, TestItem};
 use rustpython_parser::ast::{self, Expr, Ranged, Stmt};
@@ -12,10 +13,22 @@ use std::path::Path;
 
 /// Parse a Python test file and return all discovered test items.
 ///
-/// This function parses the given source code using the rustpython AST parser
-/// and extracts top-level `def test_*()` functions and `class Test*` classes
-/// with their nested `def test_*()` methods.
-pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
+/// Uses the default `test_*` / `Test*` naming conventions.
+/// Prefer [`parse_test_file_with_config`] when a [`Config`] is available.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
+    parse_test_file_with_config(source, path, None)
+}
+
+/// Parse a Python test file with optional config for custom naming conventions.
+///
+/// When `config` is `Some`, respects `python_functions` and `python_classes`
+/// patterns. When `None`, uses the default `test_*` / `Test*` conventions.
+pub fn parse_test_file_with_config(
+    source: &str,
+    path: &Path,
+    config: Option<&Config>,
+) -> Result<Vec<TestItem>> {
     let stmts = ast::Suite::parse(source, &path.display().to_string())
         .map_err(|e| Error::Parse(format!("Failed to parse {}: {}", path.display(), e)))?;
 
@@ -36,7 +49,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::FunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -53,7 +66,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::AsyncFunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -70,7 +83,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
             }
             Stmt::ClassDef(class_def) => {
                 let class_name = class_def.name.as_str();
-                if is_test_class_name(class_name) {
+                if is_test_class(class_name, config) {
                     extract_class_methods(
                         class_def,
                         &path_str,
@@ -78,6 +91,7 @@ pub fn parse_test_file(source: &str, path: &Path) -> Result<Vec<TestItem>> {
                         &line_index,
                         &mut items,
                         None,
+                        config,
                     );
                 }
             }
@@ -112,6 +126,7 @@ fn extract_class_methods(
     line_index: &LineIndex,
     items: &mut Vec<TestItem>,
     parent_class: Option<&str>,
+    config: Option<&Config>,
 ) {
     let own_name = class_def.name.as_str();
     let full_class_name = if let Some(parent) = parent_class {
@@ -124,7 +139,7 @@ fn extract_class_methods(
         match stmt {
             Stmt::FunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -141,7 +156,7 @@ fn extract_class_methods(
             }
             Stmt::AsyncFunctionDef(func_def) => {
                 let name = func_def.name.as_str();
-                if is_test_function_name(name) {
+                if is_test_function(name, config) {
                     let item = build_test_item_from_function(
                         name,
                         &func_def.args,
@@ -158,7 +173,7 @@ fn extract_class_methods(
             }
             Stmt::ClassDef(nested_class_def) => {
                 let nested_name = nested_class_def.name.as_str();
-                if is_test_class_name(nested_name) {
+                if is_test_class(nested_name, config) {
                     extract_class_methods(
                         nested_class_def,
                         path_str,
@@ -166,6 +181,7 @@ fn extract_class_methods(
                         line_index,
                         items,
                         Some(&full_class_name),
+                        config,
                     );
                 }
             }
@@ -459,14 +475,25 @@ fn extract_pytestmark_single(expr: &Expr) -> Vec<Marker> {
             vec![]
         }
         Expr::Call(call) => {
-            // pytest.mark.slow(...) (with call)
+            // pytest.mark.slow(...) (with call) — preserve args and kwargs
             if let Expr::Attribute(attr) = call.func.as_ref() {
                 if let Expr::Attribute(inner) = attr.value.as_ref() {
                     if inner.attr.as_str() == "mark" {
+                        let args: Vec<serde_json::Value> =
+                            call.args.iter().map(ast_expr_to_json).collect();
+                        let mut kwargs = HashMap::new();
+                        for kw in &call.keywords {
+                            if let Some(ref arg_name) = kw.arg {
+                                kwargs.insert(
+                                    arg_name.as_str().to_string(),
+                                    ast_expr_to_json(&kw.value),
+                                );
+                            }
+                        }
                         return vec![Marker {
                             name: attr.attr.to_string(),
-                            args: vec![],
-                            kwargs: HashMap::new(),
+                            args,
+                            kwargs,
                         }];
                     }
                 }
@@ -479,14 +506,24 @@ fn extract_pytestmark_single(expr: &Expr) -> Vec<Marker> {
 
 /// Check if a function name matches the test function naming convention.
 ///
-/// Matches `test_*` only, consistent with pytest's default `python_functions` pattern.
-fn is_test_function_name(name: &str) -> bool {
-    name.starts_with("test_")
+/// When config is provided, uses `python_functions` patterns. Otherwise
+/// matches `test_*` (pytest's default).
+fn is_test_function(name: &str, config: Option<&Config>) -> bool {
+    match config {
+        Some(cfg) => cfg.is_test_function(name),
+        None => name.starts_with("test_"),
+    }
 }
 
 /// Check if a class name matches the test class naming convention.
-fn is_test_class_name(name: &str) -> bool {
-    name.starts_with("Test")
+///
+/// When config is provided, uses `python_classes` patterns. Otherwise
+/// matches `Test*` (pytest's default).
+fn is_test_class(name: &str, config: Option<&Config>) -> bool {
+    match config {
+        Some(cfg) => cfg.is_test_class(name),
+        None => name.starts_with("Test"),
+    }
 }
 
 /// A simple line index that maps byte offsets to 1-based line numbers.
@@ -730,5 +767,64 @@ class TestOuter:
             .find(|i| i.function_name == "test_nested")
             .unwrap();
         assert_eq!(nested.class_name, Some("TestOuter::TestInner".to_string()));
+    }
+
+    #[test]
+    fn test_pytestmark_with_args_kwargs() {
+        let source = r#"
+import pytest
+
+pytestmark = pytest.mark.skipif(True, reason="not ready")
+
+def test_skipped():
+    pass
+"#;
+        let path = PathBuf::from("tests/test_mark.py");
+        let items = parse_test_file(source, &path).unwrap();
+        assert_eq!(items.len(), 1);
+        let marker = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "skipif")
+            .expect("skipif marker should be present");
+        // args should contain the condition
+        assert!(!marker.args.is_empty(), "skipif should have positional arg");
+        // kwargs should contain reason
+        assert!(
+            marker.kwargs.contains_key("reason"),
+            "skipif should have reason kwarg"
+        );
+    }
+
+    #[test]
+    fn test_pytestmark_list_preserves_args() {
+        let source = r#"
+import pytest
+
+pytestmark = [
+    pytest.mark.slow,
+    pytest.mark.timeout(30),
+]
+
+def test_multi_mark():
+    pass
+"#;
+        let path = PathBuf::from("tests/test_multi_mark.py");
+        let items = parse_test_file(source, &path).unwrap();
+        assert_eq!(items.len(), 1);
+        let slow = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "slow")
+            .expect("slow marker should be present");
+        assert!(slow.args.is_empty());
+
+        let timeout = items[0]
+            .markers
+            .iter()
+            .find(|m| m.name == "timeout")
+            .expect("timeout marker should be present");
+        assert_eq!(timeout.args.len(), 1);
+        assert_eq!(timeout.args[0], serde_json::json!(30));
     }
 }

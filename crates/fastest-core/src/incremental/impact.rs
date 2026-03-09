@@ -16,6 +16,7 @@ const CONFIG_FILES: &[&str] = &[
     "tox.ini",
     "setup.py",
     "requirements.txt",
+    "conftest.py",
 ];
 
 /// Given a list of tests and a set of changed file paths, return only the tests
@@ -54,13 +55,33 @@ pub fn find_affected_tests(tests: &[TestItem], changed_files: &HashSet<PathBuf>)
 }
 
 /// Check whether two paths refer to the same file, tolerating relative vs absolute
-/// differences.  Returns true if one path ends with the other's components.
+/// differences.  Tries canonical comparison first, then falls back to component-based
+/// suffix matching that requires at least the filename and its parent directory to match.
 fn paths_match(a: &std::path::Path, b: &std::path::Path) -> bool {
     if a == b {
         return true;
     }
-    // Check if one is a suffix of the other
-    a.ends_with(b) || b.ends_with(a)
+    // Try canonical comparison for accurate matching
+    if let (Ok(ca), Ok(cb)) = (a.canonicalize(), b.canonicalize()) {
+        if ca == cb {
+            return true;
+        }
+    }
+    // Fallback: compare file name + parent components to avoid false positives
+    // across different directories that share a filename (e.g. a/test_utils.py vs b/test_utils.py).
+    let a_comps: Vec<_> = a.components().collect();
+    let b_comps: Vec<_> = b.components().collect();
+
+    // At minimum, filenames must match
+    if a_comps.last() != b_comps.last() {
+        return false;
+    }
+
+    // Check from the end: the shorter path's components must all match the tail of the longer
+    let min_len = a_comps.len().min(b_comps.len());
+    let a_tail = &a_comps[a_comps.len() - min_len..];
+    let b_tail = &b_comps[b_comps.len() - min_len..];
+    a_tail == b_tail
 }
 
 #[cfg(test)]
@@ -114,6 +135,22 @@ mod tests {
             affected.iter().all(|t| t.id != "test_b"),
             "test_b should have been filtered out"
         );
+    }
+
+    #[test]
+    fn test_paths_match_no_false_positive_across_dirs() {
+        // Two files with the same name in different directories must NOT match
+        let tests = vec![
+            make_test("test_a_utils", "a/test_utils.py"),
+            make_test("test_b_utils", "b/test_utils.py"),
+        ];
+
+        // Only a/test_utils.py changed
+        let changed: HashSet<PathBuf> = [PathBuf::from("a/test_utils.py")].into_iter().collect();
+
+        let affected = find_affected_tests(&tests, &changed);
+        assert_eq!(affected.len(), 1);
+        assert_eq!(affected[0].id, "test_a_utils");
     }
 
     #[test]

@@ -6,6 +6,7 @@ use std::path::Path;
 
 const CACHE_DIR: &str = ".fastest_cache";
 const LASTFAILED_FILE: &str = "lastfailed";
+const STEPWISE_FILE: &str = "stepwise";
 
 /// Load the set of test IDs that failed in the last run.
 pub fn load_lastfailed(root: &Path) -> HashSet<String> {
@@ -17,13 +18,60 @@ pub fn load_lastfailed(root: &Path) -> HashSet<String> {
 }
 
 /// Save the set of failed test IDs to the cache file.
+///
+/// Uses atomic write (write to tmp then rename) to avoid corrupted
+/// files if the process is killed mid-write.
 pub fn save_lastfailed(root: &Path, failed: &HashSet<String>) {
     let cache_dir = root.join(CACHE_DIR);
     let _ = fs::create_dir_all(&cache_dir);
     let path = cache_dir.join(LASTFAILED_FILE);
     if let Ok(json) = serde_json::to_string_pretty(failed) {
-        let _ = fs::write(&path, json);
+        atomic_write(&path, json.as_bytes());
     }
+}
+
+/// Load the stepwise marker: the test ID where we stopped last time.
+pub fn load_stepwise(root: &Path) -> Option<String> {
+    let path = root.join(CACHE_DIR).join(STEPWISE_FILE);
+    fs::read_to_string(&path).ok().and_then(|s| {
+        let trimmed = s.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
+/// Save the stepwise marker: the test ID where we stopped.
+pub fn save_stepwise(root: &Path, test_id: &str) {
+    let cache_dir = root.join(CACHE_DIR);
+    let _ = fs::create_dir_all(&cache_dir);
+    let path = cache_dir.join(STEPWISE_FILE);
+    atomic_write(&path, test_id.as_bytes());
+}
+
+/// Write data atomically: write to a `.tmp` sibling then rename.
+///
+/// If the rename fails (e.g. cross-device), falls back to a direct write.
+fn atomic_write(path: &Path, data: &[u8]) {
+    let tmp = path.with_extension("tmp");
+    if fs::write(&tmp, data).is_ok() {
+        if fs::rename(&tmp, path).is_err() {
+            // rename failed (rare), fall back to direct write
+            let _ = fs::write(path, data);
+            let _ = fs::remove_file(&tmp);
+        }
+    } else {
+        // tmp write failed, fall back to direct write
+        let _ = fs::write(path, data);
+    }
+}
+
+/// Clear the stepwise marker (called when all tests pass).
+pub fn clear_stepwise(root: &Path) {
+    let path = root.join(CACHE_DIR).join(STEPWISE_FILE);
+    let _ = fs::remove_file(&path);
 }
 
 #[cfg(test)]
@@ -70,5 +118,33 @@ mod tests {
 
         let result = load_lastfailed(dir.path());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_stepwise_save_and_load() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Initially no stepwise marker
+        assert!(load_stepwise(dir.path()).is_none());
+
+        // Save a marker
+        save_stepwise(dir.path(), "tests/test_a.py::test_fail");
+        let loaded = load_stepwise(dir.path());
+        assert_eq!(loaded.as_deref(), Some("tests/test_a.py::test_fail"));
+
+        // Clear the marker
+        clear_stepwise(dir.path());
+        assert!(load_stepwise(dir.path()).is_none());
+    }
+
+    #[test]
+    fn test_stepwise_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+
+        save_stepwise(dir.path(), "tests/test_a.py::test_one");
+        save_stepwise(dir.path(), "tests/test_b.py::test_two");
+
+        let loaded = load_stepwise(dir.path());
+        assert_eq!(loaded.as_deref(), Some("tests/test_b.py::test_two"));
     }
 }

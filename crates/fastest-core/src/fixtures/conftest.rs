@@ -10,29 +10,141 @@ use crate::fixtures::{Fixture, FixtureScope};
 use rustpython_parser::ast::{self, Constant, Expr, Stmt};
 use rustpython_parser::Parse;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-/// Discover all fixtures defined in `conftest.py` files under `root`.
+// ---------------------------------------------------------------------------
+// Hierarchical conftest fixture map (Phase 4.1)
+// ---------------------------------------------------------------------------
+
+/// A directory-scoped conftest fixture registry.
 ///
-/// Walks the directory tree starting at `root`, finds every file named
-/// `conftest.py`, parses it, and extracts all `@pytest.fixture`-decorated
-/// function definitions.  Fixtures from deeper directories override those
-/// from shallower ones (closer conftest wins).
-pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture>> {
-    discover_conftest_fixtures_with_config(root, &[])
+/// Stores fixtures keyed by the directory containing their `conftest.py`,
+/// enabling proper pytest scoping where sibling directories with the same
+/// fixture name get isolated values.
+#[derive(Debug, Clone, Default)]
+pub struct ConftestMap {
+    /// `(directory, fixtures)` pairs sorted shallowest-first.
+    layers: Vec<(PathBuf, HashMap<String, Fixture>)>,
 }
 
-/// Discover conftest fixtures, respecting additional skip directories from config.
-pub fn discover_conftest_fixtures_with_config(
-    root: &Path,
-    norecursedirs: &[String],
-) -> Result<HashMap<String, Fixture>> {
-    let mut fixtures = HashMap::new();
+impl ConftestMap {
+    /// Discover conftest fixtures under `root`, building a hierarchical map.
+    pub fn discover(root: &Path) -> Result<Self> {
+        Self::discover_with_config(root, &[])
+    }
 
-    // Collect conftest.py paths, sorted so shallower files come first.
-    // Deeper conftest files can then override shallower ones.
-    let mut conftest_paths: Vec<std::path::PathBuf> = Vec::new();
+    /// Discover with extra skip directories from config.
+    pub fn discover_with_config(root: &Path, norecursedirs: &[String]) -> Result<Self> {
+        let conftest_paths = collect_conftest_paths(root, norecursedirs);
+        let mut layers = Vec::new();
+
+        for conftest_path in &conftest_paths {
+            let dir = conftest_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf();
+
+            let source = match std::fs::read_to_string(conftest_path) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("Warning: failed to read {}: {}", conftest_path.display(), e);
+                    continue;
+                }
+            };
+
+            match extract_fixtures_from_source(&source, conftest_path) {
+                Ok(fixtures) if !fixtures.is_empty() => {
+                    layers.push((dir, fixtures));
+                }
+                Ok(_) => {} // empty conftest
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to parse {}: {}",
+                        conftest_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(Self { layers })
+    }
+
+    /// Resolve fixtures visible to a test at `test_path`.
+    ///
+    /// Walks from the test file's directory toward the root, collecting
+    /// fixtures from each conftest layer whose directory is an ancestor.
+    /// Closer conftest files override more distant ones.
+    pub fn resolve_for_test(&self, test_path: &Path) -> HashMap<String, Fixture> {
+        let test_dir = test_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        let mut merged = HashMap::new();
+
+        // layers are shallowest-first, so we iterate in order and deeper
+        // entries naturally override shallower ones.
+        for (dir, fixtures) in &self.layers {
+            if test_dir.starts_with(dir) || dir == Path::new(".") {
+                for (name, fixture) in fixtures {
+                    merged.insert(name.clone(), fixture.clone());
+                }
+            }
+        }
+
+        merged
+    }
+
+    /// Flatten all fixtures into a single map (deeper overrides shallower).
+    ///
+    /// This is the legacy behaviour — use [`resolve_for_test`] for proper
+    /// scoping when a test path is available.
+    pub fn flatten(&self) -> HashMap<String, Fixture> {
+        let mut merged = HashMap::new();
+        for (_dir, fixtures) in &self.layers {
+            for (name, fixture) in fixtures {
+                merged.insert(name.clone(), fixture.clone());
+            }
+        }
+        merged
+    }
+
+    /// Return all autouse fixture names across all layers.
+    pub fn autouse_names(&self) -> Vec<String> {
+        let mut names = Vec::new();
+        for (_dir, fixtures) in &self.layers {
+            for fixture in fixtures.values() {
+                if fixture.autouse && !names.contains(&fixture.name) {
+                    names.push(fixture.name.clone());
+                }
+            }
+        }
+        names
+    }
+
+    /// Return autouse fixture names visible to a specific test path.
+    pub fn autouse_for_test(&self, test_path: &Path) -> Vec<String> {
+        let resolved = self.resolve_for_test(test_path);
+        resolved
+            .values()
+            .filter(|f| f.autouse)
+            .map(|f| f.name.clone())
+            .collect()
+    }
+
+    /// Check if the map is empty (no conftest fixtures at all).
+    pub fn is_empty(&self) -> bool {
+        self.layers.is_empty()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper: collect conftest.py paths sorted by depth
+// ---------------------------------------------------------------------------
+
+fn collect_conftest_paths(root: &Path, norecursedirs: &[String]) -> Vec<PathBuf> {
+    let mut conftest_paths: Vec<PathBuf> = Vec::new();
 
     let walker = WalkDir::new(root).into_iter().filter_entry(|e| {
         if e.file_type().is_dir() {
@@ -52,35 +164,38 @@ pub fn discover_conftest_fixtures_with_config(
         }
     }
 
-    // Sort by path depth (component count) so shallow conftest files are processed first
-    conftest_paths.sort_by_key(|p| p.components().count());
+    // Sort by path depth (component count) so shallow conftest files come first.
+    // Use the path string as a secondary key for deterministic ordering of siblings.
+    conftest_paths.sort_by(|a, b| {
+        a.components()
+            .count()
+            .cmp(&b.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    conftest_paths
+}
 
-    for conftest_path in &conftest_paths {
-        let source = match std::fs::read_to_string(conftest_path) {
-            Ok(s) => s,
-            Err(e) => {
-                eprintln!("Warning: failed to read {}: {}", conftest_path.display(), e);
-                continue;
-            }
-        };
+// ---------------------------------------------------------------------------
+// Legacy flat API (delegates to ConftestMap)
+// ---------------------------------------------------------------------------
 
-        match extract_fixtures_from_source(&source, conftest_path) {
-            Ok(file_fixtures) => {
-                for (name, fixture) in file_fixtures {
-                    fixtures.insert(name, fixture);
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "Warning: failed to parse {}: {}",
-                    conftest_path.display(),
-                    e
-                );
-            }
-        }
-    }
+/// Discover all fixtures defined in `conftest.py` files under `root`.
+///
+/// Walks the directory tree starting at `root`, finds every file named
+/// `conftest.py`, parses it, and extracts all `@pytest.fixture`-decorated
+/// function definitions.  Fixtures from deeper directories override those
+/// from shallower ones (closer conftest wins).
+pub fn discover_conftest_fixtures(root: &Path) -> Result<HashMap<String, Fixture>> {
+    discover_conftest_fixtures_with_config(root, &[])
+}
 
-    Ok(fixtures)
+/// Discover conftest fixtures, respecting additional skip directories from config.
+pub fn discover_conftest_fixtures_with_config(
+    root: &Path,
+    norecursedirs: &[String],
+) -> Result<HashMap<String, Fixture>> {
+    let map = ConftestMap::discover_with_config(root, norecursedirs)?;
+    Ok(map.flatten())
 }
 
 /// Extract fixture definitions from a single Python source string.
@@ -327,10 +442,20 @@ fn stmt_contains_yield(stmt: &Stmt) -> bool {
             body_contains_yield(&if_stmt.body) || body_contains_yield(&if_stmt.orelse)
         }
         Stmt::Try(try_stmt) => {
-            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body)
+                || body_contains_yield(&try_stmt.orelse)
+                || body_contains_yield(&try_stmt.finalbody)
+                || try_stmt.handlers.iter().any(|h| match h {
+                    ast::ExceptHandler::ExceptHandler(eh) => body_contains_yield(&eh.body),
+                })
         }
         Stmt::TryStar(try_stmt) => {
-            body_contains_yield(&try_stmt.body) || body_contains_yield(&try_stmt.finalbody)
+            body_contains_yield(&try_stmt.body)
+                || body_contains_yield(&try_stmt.orelse)
+                || body_contains_yield(&try_stmt.finalbody)
+                || try_stmt.handlers.iter().any(|h| match h {
+                    ast::ExceptHandler::ExceptHandler(eh) => body_contains_yield(&eh.body),
+                })
         }
         Stmt::For(for_stmt) => body_contains_yield(&for_stmt.body),
         Stmt::While(while_stmt) => body_contains_yield(&while_stmt.body),
@@ -562,5 +687,189 @@ def shared():
         // The deeper definition should win
         let shared = fixtures.get("shared").unwrap();
         assert_eq!(shared.scope, FixtureScope::Function);
+    }
+
+    #[test]
+    fn test_conftest_map_sibling_isolation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // Root conftest
+        std::fs::write(
+            root.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture
+def root_fix():
+    return "root"
+"#,
+        )
+        .unwrap();
+
+        // tests/a/conftest.py
+        let a = root.join("tests").join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::write(
+            a.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture
+def shared():
+    return "a_version"
+"#,
+        )
+        .unwrap();
+
+        // tests/b/conftest.py with different "shared"
+        let b = root.join("tests").join("b");
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(
+            b.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture(scope="session")
+def shared():
+    return "b_version"
+"#,
+        )
+        .unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+
+        // Resolve for a test in tests/a → should see a's "shared"
+        let a_fixtures = map.resolve_for_test(&a.join("test_a.py"));
+        assert!(a_fixtures.contains_key("root_fix"));
+        assert_eq!(a_fixtures["shared"].scope, FixtureScope::Function);
+
+        // Resolve for a test in tests/b → should see b's "shared"
+        let b_fixtures = map.resolve_for_test(&b.join("test_b.py"));
+        assert!(b_fixtures.contains_key("root_fix"));
+        assert_eq!(b_fixtures["shared"].scope, FixtureScope::Session);
+    }
+
+    #[test]
+    fn test_resolve_for_test_at_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::write(
+            root.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture
+def root_fix():
+    return "root"
+"#,
+        )
+        .unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+
+        // A test file at the project root should see root fixtures
+        let fixtures = map.resolve_for_test(&root.join("test_bare.py"));
+        assert!(
+            fixtures.contains_key("root_fix"),
+            "test at root should resolve root fixtures"
+        );
+
+        // Also test bare filename resolve — empty parent gets mapped to "."
+        let bare = std::path::Path::new("test_bare.py");
+        let bare_dir = bare
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(std::path::Path::new("."));
+        assert_eq!(bare_dir, std::path::Path::new("."));
+    }
+
+    #[test]
+    fn test_autouse_for_test_sibling_isolation() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        // tests/a/conftest.py with autouse fixture
+        let a = root.join("tests").join("a");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::write(
+            a.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture(autouse=True)
+def a_autouse():
+    pass
+"#,
+        )
+        .unwrap();
+
+        // tests/b/ has no conftest
+        let b = root.join("tests").join("b");
+        std::fs::create_dir_all(&b).unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+
+        // Test in tests/a should see a_autouse
+        let a_autouse = map.autouse_for_test(&a.join("test_a.py"));
+        assert!(a_autouse.contains(&"a_autouse".to_string()));
+
+        // Test in tests/b should NOT see a_autouse
+        let b_autouse = map.autouse_for_test(&b.join("test_b.py"));
+        assert!(
+            !b_autouse.contains(&"a_autouse".to_string()),
+            "sibling directory should not see a_autouse"
+        );
+    }
+
+    #[test]
+    fn test_yield_in_try_except_else() {
+        // Yield inside except handler
+        let source = r#"
+import pytest
+
+@pytest.fixture
+def fix_except():
+    try:
+        setup()
+    except Exception:
+        yield "fallback"
+    else:
+        yield "success"
+"#;
+        let path = PathBuf::from("conftest.py");
+        let fixtures = extract_fixtures_from_source(source, &path).unwrap();
+        let fixture = fixtures.get("fix_except").unwrap();
+        assert!(
+            fixture.is_yield,
+            "yield inside except handler should be detected"
+        );
+    }
+
+    #[test]
+    fn test_conftest_map_autouse() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::write(
+            root.join("conftest.py"),
+            r#"
+import pytest
+
+@pytest.fixture(autouse=True)
+def auto_fix():
+    pass
+
+@pytest.fixture
+def normal_fix():
+    pass
+"#,
+        )
+        .unwrap();
+
+        let map = ConftestMap::discover(root).unwrap();
+        let autouse = map.autouse_names();
+        assert_eq!(autouse, vec!["auto_fix"]);
     }
 }
