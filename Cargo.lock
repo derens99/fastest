@@ -373,7 +373,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-cli"
-version = "2.3.2"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -393,7 +393,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-core"
-version = "2.3.2"
+version = "2.4.0"
 dependencies = [
  "anyhow",
  "git2",
@@ -413,7 +413,7 @@ dependencies = [
 
 [[package]]
 name = "fastest-execution"
-version = "2.3.2"
+version = "2.4.0"
 dependencies = [
  "crossbeam",
  "crossbeam-deque",

@@ -1,3 +1,11 @@
+# [2.4.0](https://github.com/derens99/fastest/compare/v2.3.2...v2.4.0) (2026-03-09)
+
+
+### Features
+
+* phase 3 streaming output & UX polish ([5677072](https://github.com/derens99/fastest/commit/567707249fb1a844358c4b15693c3a771fcc2528))
+* phase 3 streaming output & UX polish ([#38](https://github.com/derens99/fastest/issues/38)) ([2d7ab73](https://github.com/derens99/fastest/commit/2d7ab7353b053a7e67f23b1e70b65c7e22961059))
+
 ## [2.3.2](https://github.com/derens99/fastest/compare/v2.3.1...v2.3.2) (2026-03-09)
 
 
