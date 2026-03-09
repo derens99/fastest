@@ -1,3 +1,10 @@
+## [2.3.2](https://github.com/derens99/fastest/compare/v2.3.1...v2.3.2) (2026-03-09)
+
+
+### Bug Fixes
+
+* phase 2 test isolation & correctness - timeout, crash recovery, protocol robustness ([a26997c](https://github.com/derens99/fastest/commit/a26997cdec3057dd768641b27f9a6c3a2434ebf2))
+
 ## [2.3.1](https://github.com/derens99/fastest/compare/v2.3.0...v2.3.1) (2026-03-08)
 
 
