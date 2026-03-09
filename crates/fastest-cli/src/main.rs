@@ -922,6 +922,33 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
         tests
     };
 
+    // 8c. Apply node-ID filters from :: syntax in paths
+    let (class_filters, function_filters) = extract_node_filters(&cli.paths);
+    let tests = if !class_filters.is_empty() || !function_filters.is_empty() {
+        tests
+            .into_iter()
+            .filter(|t| {
+                let class_ok = class_filters.is_empty()
+                    || t.class_name
+                        .as_ref()
+                        .is_some_and(|c| class_filters.contains(c));
+                let func_ok =
+                    function_filters.is_empty() || function_filters.contains(&t.function_name);
+                // If only function filters, match function name OR class name
+                if class_filters.is_empty() {
+                    func_ok
+                        || t.class_name
+                            .as_ref()
+                            .is_some_and(|c| function_filters.contains(c))
+                } else {
+                    class_ok && func_ok
+                }
+            })
+            .collect()
+    } else {
+        tests
+    };
+
     if tests.is_empty() {
         eprintln!("{}", "no tests collected".yellow());
         plugins.shutdown_all()?;
@@ -1394,7 +1421,14 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
             eprintln!("{}", format_result_line(result, true));
         })
     } else {
-        executor.execute(&tests)
+        let pb = create_progress_bar(tests.len());
+        let verbose = cfg.verbose;
+        executor.execute_streaming(&tests, &move |result| {
+            pb.inc(1);
+            if verbose {
+                pb.println(format_result_line(result, true));
+            }
+        })
     };
 
     // Save last-failed cache
