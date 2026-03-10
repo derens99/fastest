@@ -33,6 +33,6 @@ mimalloc = { version = "0.1", default-features = false, optional = true }
 
 # Process management
 which = "7.0"
-tempfile = "3.2"
+tempfile = "3.26"
 
 [dev-dependencies]
