@@ -9,8 +9,11 @@ use crate::config::Config;
 use crate::error::Result;
 use crate::model::TestItem;
 use rayon::prelude::*;
+use rustpython_parser::ast::{self, Constant, Expr, Stmt};
+use rustpython_parser::Parse;
+use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// Discover all tests from the given paths using the provided configuration.
@@ -149,6 +152,115 @@ fn collect_test_files(
     }
 
     test_files
+}
+
+/// Discover all conftest.py files in the given paths and extract session-scoped fixture names.
+///
+/// Walks the directory tree collecting conftest.py files, parses each one to find
+/// functions decorated with `@pytest.fixture(scope="session")`, and returns
+/// their names as a set.
+pub fn discover_session_fixtures(paths: &[PathBuf], norecursedirs: &[String]) -> HashSet<String> {
+    let conftest_files = collect_conftest_files(paths, norecursedirs);
+    let mut session_fixtures = HashSet::new();
+
+    for path in &conftest_files {
+        if let Ok(content) = fs::read_to_string(path) {
+            if let Ok(stmts) = ast::Suite::parse(&content, &path.to_string_lossy()) {
+                for stmt in &stmts {
+                    if let Some(name) = extract_session_fixture_name(stmt) {
+                        session_fixtures.insert(name);
+                    }
+                }
+            }
+        }
+    }
+
+    session_fixtures
+}
+
+/// Collect conftest.py files from the given paths.
+fn collect_conftest_files(paths: &[PathBuf], norecursedirs: &[String]) -> Vec<PathBuf> {
+    let mut conftest_files = Vec::new();
+
+    for path in paths {
+        let root = if path.is_file() {
+            path.parent().unwrap_or(Path::new(".")).to_path_buf()
+        } else {
+            path.clone()
+        };
+
+        let walker = WalkDir::new(&root).into_iter().filter_entry(|e| {
+            if e.file_type().is_dir() {
+                if let Some(name) = e.file_name().to_str() {
+                    return !should_skip_dir(name, norecursedirs);
+                }
+            }
+            true
+        });
+
+        for entry in walker.filter_map(|e| e.ok()) {
+            if entry.file_type().is_file() {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name == "conftest.py" {
+                        conftest_files.push(entry.into_path());
+                    }
+                }
+            }
+        }
+    }
+
+    conftest_files
+}
+
+/// Check if a statement is a function decorated with `@pytest.fixture(scope="session")`
+/// and return the function name if so.
+fn extract_session_fixture_name(stmt: &Stmt) -> Option<String> {
+    let func = match stmt {
+        Stmt::FunctionDef(f) => f,
+        Stmt::AsyncFunctionDef(f) => {
+            // AsyncFunctionDef has the same shape — treat it the same
+            // by returning from the decorated check below
+            return check_session_fixture_decorators(&f.decorator_list, &f.name);
+        }
+        _ => return None,
+    };
+
+    check_session_fixture_decorators(&func.decorator_list, &func.name)
+}
+
+/// Check a list of decorators for `@pytest.fixture(scope="session")`.
+fn check_session_fixture_decorators(decorators: &[Expr], func_name: &str) -> Option<String> {
+    for decorator in decorators {
+        if let Expr::Call(call) = decorator {
+            // Check if the function is pytest.fixture or fixture
+            let is_fixture = match call.func.as_ref() {
+                Expr::Attribute(attr) => {
+                    attr.attr.as_str() == "fixture"
+                        && matches!(attr.value.as_ref(), Expr::Name(n) if n.id.as_str() == "pytest")
+                }
+                Expr::Name(name) => name.id.as_str() == "fixture",
+                _ => false,
+            };
+
+            if is_fixture {
+                // Check for scope="session" in keyword arguments
+                for kw in &call.keywords {
+                    if let Some(ref arg) = kw.arg {
+                        if arg.as_str() == "scope" {
+                            if let Expr::Constant(c) = &kw.value {
+                                if let Constant::Str(s) = &c.value {
+                                    if s == "session" {
+                                        return Some(func_name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 #[cfg(test)]

@@ -5,13 +5,14 @@
 //! isolation and parallelism.
 
 use fastest_core::model::{TestItem, TestResult};
+use std::collections::HashSet;
 
 use crate::inprocess::InProcessExecutor;
 use crate::subprocess::SubprocessPool;
 use crate::timeout::TimeoutConfig;
 
 /// Test count threshold: suites with this many tests or fewer use in-process execution.
-pub const INPROCESS_THRESHOLD: usize = 20;
+pub const INPROCESS_THRESHOLD: usize = 50;
 
 /// Strategy chosen by the hybrid executor for a given run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,6 +61,20 @@ impl HybridExecutor {
         Self {
             inprocess: InProcessExecutor::with_timeout(timeout.clone()),
             subprocess: SubprocessPool::new(num_workers).with_timeout(timeout),
+        }
+    }
+
+    /// Create a hybrid executor with full configuration and session fixture names.
+    pub fn with_config_and_session_fixtures(
+        num_workers: Option<usize>,
+        timeout: TimeoutConfig,
+        session_fixture_names: HashSet<String>,
+    ) -> Self {
+        Self {
+            inprocess: InProcessExecutor::with_timeout(timeout.clone()),
+            subprocess: SubprocessPool::new(num_workers)
+                .with_timeout(timeout)
+                .with_session_fixtures(session_fixture_names),
         }
     }
 
@@ -119,10 +134,10 @@ mod tests {
         assert_eq!(select_strategy(0), ExecutionStrategy::InProcess);
         assert_eq!(select_strategy(1), ExecutionStrategy::InProcess);
         assert_eq!(select_strategy(10), ExecutionStrategy::InProcess);
-        assert_eq!(select_strategy(20), ExecutionStrategy::InProcess);
+        assert_eq!(select_strategy(50), ExecutionStrategy::InProcess);
 
         // Above threshold -> Subprocess
-        assert_eq!(select_strategy(21), ExecutionStrategy::Subprocess);
+        assert_eq!(select_strategy(51), ExecutionStrategy::Subprocess);
         assert_eq!(select_strategy(100), ExecutionStrategy::Subprocess);
         assert_eq!(select_strategy(1000), ExecutionStrategy::Subprocess);
     }
@@ -131,8 +146,8 @@ mod tests {
     fn test_hybrid_executor_strategy() {
         let executor = HybridExecutor::new();
         assert_eq!(executor.strategy_for(5), ExecutionStrategy::InProcess);
-        assert_eq!(executor.strategy_for(20), ExecutionStrategy::InProcess);
-        assert_eq!(executor.strategy_for(21), ExecutionStrategy::Subprocess);
+        assert_eq!(executor.strategy_for(50), ExecutionStrategy::InProcess);
+        assert_eq!(executor.strategy_for(51), ExecutionStrategy::Subprocess);
     }
 
     #[test]
@@ -144,6 +159,6 @@ mod tests {
 
     #[test]
     fn test_inprocess_threshold_constant() {
-        assert_eq!(INPROCESS_THRESHOLD, 20);
+        assert_eq!(INPROCESS_THRESHOLD, 50);
     }
 }

@@ -305,17 +305,26 @@ fn json_value_to_python(val: &serde_json::Value) -> String {
             format!("[{}]", items.join(", "))
         }
         serde_json::Value::Object(map) => {
-            let items: Vec<String> = map
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "'{}': {}",
-                        escape_for_python_string(k),
-                        json_value_to_python(v)
-                    )
-                })
-                .collect();
-            format!("{{{}}}", items.join(", "))
+            // Check for special __bytes__ encoding: {"__bytes__": [104, 101, ...]}
+            if let Some(serde_json::Value::Array(bytes)) = map.get("__bytes__") {
+                let byte_values: Vec<String> = bytes
+                    .iter()
+                    .map(|v| v.as_u64().unwrap_or(0).to_string())
+                    .collect();
+                format!("bytes([{}])", byte_values.join(", "))
+            } else {
+                let items: Vec<String> = map
+                    .iter()
+                    .map(|(k, v)| {
+                        format!(
+                            "'{}': {}",
+                            escape_for_python_string(k),
+                            json_value_to_python(v)
+                        )
+                    })
+                    .collect();
+                format!("{{{}}}", items.join(", "))
+            }
         }
     }
 }

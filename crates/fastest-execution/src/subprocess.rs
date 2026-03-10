@@ -4,6 +4,7 @@
 //! JSON over stdin/stdout. Uses `crossbeam_deque::Injector` for
 //! fair work distribution across workers.
 
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -228,8 +229,12 @@ pub fn find_python() -> Option<String> {
 /// A pool of persistent Python subprocess workers.
 pub struct SubprocessPool {
     num_workers: usize,
+    /// Whether the user explicitly specified the worker count (via -j flag).
+    user_specified_workers: bool,
     python_path: String,
     timeout_config: TimeoutConfig,
+    /// Names of session-scoped fixtures. Tests depending on these are routed to worker #0.
+    session_fixture_names: HashSet<String>,
 }
 
 impl SubprocessPool {
@@ -237,28 +242,43 @@ impl SubprocessPool {
     ///
     /// `num_workers` defaults to the number of CPUs if `None`.
     pub fn new(num_workers: Option<usize>) -> Self {
+        let user_specified = num_workers.is_some();
         let workers = num_workers.unwrap_or_else(num_cpus::get);
         let python = find_python().unwrap_or_else(|| "python3".into());
         Self {
             num_workers: workers.max(1),
+            user_specified_workers: user_specified,
             python_path: python,
             timeout_config: TimeoutConfig::default(),
+            session_fixture_names: HashSet::new(),
         }
     }
 
     /// Create a subprocess pool with a specific Python path.
     pub fn with_python(num_workers: Option<usize>, python_path: String) -> Self {
+        let user_specified = num_workers.is_some();
         let workers = num_workers.unwrap_or_else(num_cpus::get);
         Self {
             num_workers: workers.max(1),
+            user_specified_workers: user_specified,
             python_path,
             timeout_config: TimeoutConfig::default(),
+            session_fixture_names: HashSet::new(),
         }
     }
 
     /// Set the timeout configuration.
     pub fn with_timeout(mut self, config: TimeoutConfig) -> Self {
         self.timeout_config = config;
+        self
+    }
+
+    /// Set the session-scoped fixture names for test partitioning.
+    ///
+    /// Tests that depend on any of these fixtures will be routed to worker #0
+    /// to ensure session fixtures are created once and shared.
+    pub fn with_session_fixtures(mut self, names: HashSet<String>) -> Self {
+        self.session_fixture_names = names;
         self
     }
 
@@ -325,25 +345,69 @@ impl SubprocessPool {
             key_a.cmp(&key_b)
         });
 
-        // Set up the work-stealing injector (sorted order)
+        // Partition tests: session-fixture-dependent tests go to worker #0's dedicated queue,
+        // everything else goes to the shared work-stealing injector.
+        let session_injector = Injector::new();
         let injector = Injector::new();
-        for (idx, test) in indexed_tests {
-            injector.push((idx, test.clone()));
+        let mut session_test_count = 0usize;
+
+        if self.session_fixture_names.is_empty() {
+            // No session fixtures — all tests go to work-stealing
+            for (idx, test) in indexed_tests {
+                injector.push((idx, test.clone()));
+            }
+        } else {
+            for (idx, test) in indexed_tests {
+                let is_session_bound = test
+                    .fixture_deps
+                    .iter()
+                    .any(|dep| self.session_fixture_names.contains(dep));
+                if is_session_bound {
+                    session_injector.push((idx, test.clone()));
+                    session_test_count += 1;
+                } else {
+                    injector.push((idx, test.clone()));
+                }
+            }
         }
 
-        let actual_workers = self.num_workers.min(tests.len());
+        // If there are session-bound tests, we need at least one dedicated worker for them.
+        // The remaining workers handle parallel tests from the shared injector.
+        let has_session_tests = session_test_count > 0;
+        let total_parallel_tests = tests.len() - session_test_count;
+        // Auto-tune worker count when not user-specified to avoid excessive spawn overhead.
+        // Each worker needs ~50 tests to amortize Python interpreter startup cost.
+        let effective_workers = if !self.user_specified_workers {
+            let max_by_count = (tests.len() / 50).max(1);
+            self.num_workers.min(max_by_count)
+        } else {
+            self.num_workers
+        };
+        let actual_workers = if has_session_tests {
+            // Worker #0 is dedicated to session tests; remaining workers handle parallel tests.
+            let parallel_workers = if total_parallel_tests > 0 {
+                (effective_workers - 1).max(1).min(total_parallel_tests)
+            } else {
+                0
+            };
+            1 + parallel_workers
+        } else {
+            effective_workers.min(tests.len())
+        };
         let mut results: Vec<Option<TestResult>> = vec![None; tests.len()];
 
         // Spawn workers and process tests
         let results_lock = parking_lot::Mutex::new(&mut results);
 
         crossbeam::scope(|scope| {
-            for _ in 0..actual_workers {
+            for worker_id in 0..actual_workers {
                 let injector = &injector;
+                let session_injector = &session_injector;
                 let results_lock = &results_lock;
                 let python_path = &self.python_path;
                 let harness_path = &harness_path;
                 let timeout = &self.timeout_config;
+                let is_session_worker = has_session_tests && worker_id == 0;
 
                 scope.spawn(move |_| {
                     let harness_str = harness_path.to_string_lossy();
@@ -377,8 +441,25 @@ impl SubprocessPool {
                     };
 
                     let mut restart_count = 0;
+                    let mut retried_tests: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                    // Worker #0 drains session-bound tests first, then helps with parallel tests.
+                    // Other workers only process from the shared injector.
+                    let mut session_phase = is_session_worker;
                     loop {
-                        let (idx, test) = match injector.steal() {
+                        let steal_result = if session_phase {
+                            match session_injector.steal() {
+                                Steal::Success(item) => Steal::Success(item),
+                                Steal::Empty => {
+                                    // Session queue drained — switch to parallel queue
+                                    session_phase = false;
+                                    injector.steal()
+                                }
+                                Steal::Retry => Steal::Retry,
+                            }
+                        } else {
+                            injector.steal()
+                        };
+                        let (idx, test) = match steal_result {
                             Steal::Success(item) => item,
                             Steal::Empty => break,
                             Steal::Retry => continue,
@@ -397,8 +478,25 @@ impl SubprocessPool {
                                 on_result(&result);
                                 let mut guard = results_lock.lock();
                                 guard[idx] = Some(result);
+                            } else if retried_tests.contains(&idx) {
+                                // Already retried this test — mark as error, don't re-enqueue
+                                let crash_result = TestResult {
+                                    test_id: test.id.clone(),
+                                    outcome: TestOutcome::Error {
+                                        message: "Test caused worker crash on retry".into(),
+                                    },
+                                    duration: result.duration,
+                                    output: String::new(),
+                                    error: Some("Worker process crashed while running this test".into()),
+                                    stdout: result.stdout,
+                                    stderr: result.stderr,
+                                };
+                                on_result(&crash_result);
+                                let mut guard = results_lock.lock();
+                                guard[idx] = Some(crash_result);
                             } else {
-                                // Unexpected crash — re-enqueue for retry on new worker
+                                // First crash for this test — re-enqueue for retry
+                                retried_tests.insert(idx);
                                 injector.push((idx, test));
                             }
                         } else {
@@ -411,32 +509,9 @@ impl SubprocessPool {
                         if worker_died {
                             restart_count += 1;
                             if restart_count > MAX_WORKER_RESTARTS {
-                                // Too many restarts — drain remaining and mark as errors
-                                loop {
-                                    match injector.steal() {
-                                        Steal::Success((idx, test)) => {
-                                            let result = TestResult {
-                                                test_id: test.id.clone(),
-                                                outcome: TestOutcome::Error {
-                                                    message: format!(
-                                                        "Worker crashed {} times, giving up",
-                                                        MAX_WORKER_RESTARTS
-                                                    ),
-                                                },
-                                                duration: Duration::ZERO,
-                                                output: String::new(),
-                                                error: Some("Max worker restarts exceeded".into()),
-                                                stdout: String::new(),
-                                                stderr: String::new(),
-                                            };
-                                            let mut guard = results_lock.lock();
-                                            guard[idx] = Some(result);
-                                        }
-                                        Steal::Empty => break,
-                                        Steal::Retry => continue,
-                                    }
-                                }
-                                return;
+                                // Too many restarts for this worker — stop it but let
+                                // other workers continue processing remaining tests.
+                                break;
                             }
                             match PersistentWorker::spawn(python_path, &harness_str) {
                                 Ok(w) => worker = w,

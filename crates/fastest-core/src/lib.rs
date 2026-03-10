@@ -13,7 +13,7 @@ pub mod plugins;
 pub mod watch;
 
 pub use config::Config;
-pub use discovery::discover_tests;
+pub use discovery::{discover_session_fixtures, discover_tests};
 pub use error::{Error, Result};
 pub use fixtures::{
     discover_conftest_fixtures, discover_conftest_fixtures_with_config, generate_builtin_code,

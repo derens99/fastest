@@ -119,8 +119,140 @@ except ImportError:
     sys.modules['pytest'] = _PytestShim()
 
 _fixture_scope_cache = {'session': {}, 'module': {}, 'class': {}}
+_session_fixture_cleanups = []  # Deferred cleanups for session-scoped generator fixtures
 _current_module_path = None
 _current_class_name = None
+_conftest_paths_for_dir = {}  # Cache: test_dir -> list of conftest paths (root to leaf)
+
+
+def _scope_recording_fixture(f=None, *, scope='function', autouse=False, params=None, name=None, **kw):
+    """Replacement for pytest.fixture that preserves scope/autouse/params/name metadata."""
+    if f is None:
+        return lambda fn: _scope_recording_fixture(fn, scope=scope, autouse=autouse, params=params, name=name, **kw)
+    f._fastest_scope = scope
+    f._fastest_autouse = autouse
+    f._fastest_params = params
+    if name is not None:
+        f._fastest_fixture_name = name
+    return f
+
+
+def _load_conftest_hierarchy(test_dir):
+    """Load all conftest.py files from test_dir up to rootdir. Returns list of paths (root to leaf).
+    Caches results per directory and pre-loads all conftest modules into _conftest_cache."""
+    if test_dir in _conftest_paths_for_dir:
+        return _conftest_paths_for_dir[test_dir]
+
+    conftest_paths = []
+    conftest_dir = test_dir
+    rootdir = os.environ.get('FASTEST_ROOTDIR', '')
+    stop_dir = os.path.abspath(rootdir) if rootdir else None
+
+    while conftest_dir:
+        cp = os.path.join(conftest_dir, "conftest.py")
+        if os.path.exists(cp):
+            conftest_paths.append(cp)
+        parent = os.path.dirname(conftest_dir)
+        if parent == conftest_dir:
+            break
+        # Stop at rootdir — don't walk above the project
+        if stop_dir and os.path.abspath(conftest_dir) == stop_dir:
+            break
+        conftest_dir = parent
+
+    # Reverse so root conftest is loaded first (deeper overrides shallower)
+    conftest_paths.reverse()
+
+    # Pre-load all conftest modules
+    for cp in conftest_paths:
+        abs_cp = os.path.abspath(cp)
+        if abs_cp in _conftest_cache:
+            continue
+        conftest_key = "conftest_" + cp.replace(os.sep, "_").replace(".", "_")
+        if conftest_key in sys.modules:
+            del sys.modules[conftest_key]
+        import pytest as _pt
+        _orig_fix = _pt.fixture
+        _pt.fixture = _scope_recording_fixture
+        try:
+            spec = importlib.util.spec_from_file_location(conftest_key, cp)
+            cmod = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(cmod)
+            _conftest_cache[abs_cp] = cmod
+        except Exception:
+            pass  # Skip broken conftest files
+        finally:
+            _pt.fixture = _orig_fix
+
+    _conftest_paths_for_dir[test_dir] = conftest_paths
+    return conftest_paths
+
+
+def _resolve_fixture_from_conftest(name, conftest_paths, fixture_kwargs, fixture_cleanups, test_module=None):
+    """Try to resolve a fixture by name from the conftest hierarchy or test module.
+
+    Also checks for fixtures defined with name= kwarg (e.g., @pytest.fixture(name="client")).
+    """
+    # First check the test module itself for fixtures (module-local fixtures)
+    if test_module is not None:
+        func = _find_fixture_in_module(test_module, name)
+        if func is not None:
+            _resolve_conftest_fixture(name, test_module, conftest_paths, fixture_kwargs, fixture_cleanups)
+            return True
+
+    # Then check conftest hierarchy
+    for cp in conftest_paths:
+        abs_cp = os.path.abspath(cp)
+        if abs_cp in _conftest_cache:
+            cmod = _conftest_cache[abs_cp]
+            if hasattr(cmod, name) or _find_fixture_in_module(cmod, name) is not None:
+                _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixture_cleanups)
+                return True
+    return False
+
+
+def _find_fixture_in_module(module, name):
+    """Find a fixture function by name in a module.
+
+    Handles both direct attribute access (fixture function named 'name')
+    and fixtures with name= kwarg (e.g., @pytest.fixture(name="client") def get_client(...)).
+    Only returns functions that have been marked by _scope_recording_fixture.
+    """
+    # Direct attribute match — only if it has our fixture marker
+    if hasattr(module, name):
+        func = getattr(module, name)
+        if callable(func) and hasattr(func, '_fastest_scope'):
+            return func
+
+    # Search for fixtures with name= kwarg
+    for attr_name in dir(module):
+        try:
+            attr = getattr(module, attr_name)
+            if callable(attr) and getattr(attr, '_fastest_fixture_name', None) == name:
+                return attr
+        except Exception:
+            continue
+    return None
+
+
+_reconstruct_module = None  # Set to test module before calling _reconstruct_value
+
+def _reconstruct_value(v):
+    """Reconstruct special serialized values from JSON (e.g. bytes encoded as {__bytes__: [...]})."""
+    if isinstance(v, dict):
+        if '__bytes__' in v:
+            return bytes(v['__bytes__'])
+        if '__repr__' in v:
+            # Complex expression serialized as repr string — eval it in the test module context
+            try:
+                ns = vars(_reconstruct_module) if _reconstruct_module else {}
+                return eval(v['__repr__'], ns)
+            except Exception:
+                return None
+        return {k: _reconstruct_value(val) for k, val in v.items()}
+    if isinstance(v, list):
+        return [_reconstruct_value(item) for item in v]
+    return v
 
 
 def _run_pending_teardowns():
@@ -181,15 +313,17 @@ def _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixtur
             fixture_kwargs[name] = _fixture_scope_cache[sc][name]
             return
 
-    fixture_func = getattr(cmod, name, None)
+    fixture_func = _find_fixture_in_module(cmod, name)
     if fixture_func is None:
         # Search other conftest modules
         for cp in conftest_paths:
             abs_cp = os.path.abspath(cp)
-            if abs_cp in _conftest_cache and hasattr(_conftest_cache[abs_cp], name):
-                fixture_func = getattr(_conftest_cache[abs_cp], name)
-                cmod = _conftest_cache[abs_cp]
-                break
+            if abs_cp in _conftest_cache:
+                found = _find_fixture_in_module(_conftest_cache[abs_cp], name)
+                if found is not None:
+                    fixture_func = found
+                    cmod = _conftest_cache[abs_cp]
+                    break
         if fixture_func is None:
             return
 
@@ -204,13 +338,60 @@ def _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixtur
     sig = inspect.signature(fixture_func)
     for pname in sig.parameters:
         if pname not in fixture_kwargs and pname != 'self':
-            # Try to find this dependency in conftest modules
-            for cp in conftest_paths:
-                abs_cp = os.path.abspath(cp)
-                if abs_cp in _conftest_cache and hasattr(_conftest_cache[abs_cp], pname):
-                    _resolve_conftest_fixture(pname, _conftest_cache[abs_cp], conftest_paths,
-                                             fixture_kwargs, fixture_cleanups, _resolving)
-                    break
+            # Try built-in fixtures first
+            if pname == 'request':
+                if 'request' not in fixture_kwargs:
+                    class _FixReq:
+                        def __init__(self2):
+                            self2.param = None
+                            self2.node = None
+                            self2.config = None
+                            self2.fspath = None
+                            self2._finalizers = []
+                        def addfinalizer(self2, func):
+                            self2._finalizers.append(func)
+                        def _run_finalizers(self2):
+                            for func in reversed(self2._finalizers):
+                                func()
+                            self2._finalizers.clear()
+                    fixture_kwargs['request'] = _FixReq()
+                    fixture_cleanups.append(lambda: fixture_kwargs['request']._run_finalizers())
+                # Set request.param from fixture's _fastest_params if available
+                fix_params = getattr(fixture_func, '_fastest_params', None)
+                if fix_params and len(fix_params) > 0:
+                    p = fix_params[0]
+                    # Extract value from pytest.param or raw value
+                    if hasattr(p, 'values'):
+                        fixture_kwargs['request'].param = p.values[0] if len(p.values) == 1 else p.values
+                    else:
+                        fixture_kwargs['request'].param = p
+                continue
+            # Handle other built-in fixtures
+            if pname == 'tmp_path':
+                fixture_kwargs['tmp_path'] = pathlib.Path(tempfile.mkdtemp())
+                continue
+            if pname == 'tmp_path_factory':
+                class _TmpPathFactory:
+                    def mktemp(self2, basename, numbered=True):
+                        return pathlib.Path(tempfile.mkdtemp())
+                fixture_kwargs['tmp_path_factory'] = _TmpPathFactory()
+                continue
+            # Try to find this dependency in the source module first (for chained module-local fixtures)
+            _dep_found = False
+            if _find_fixture_in_module(cmod, pname) is not None:
+                _resolve_conftest_fixture(pname, cmod, conftest_paths,
+                                         fixture_kwargs, fixture_cleanups, _resolving)
+                _dep_found = True
+            # Then try conftest modules
+            if not _dep_found:
+                for cp in conftest_paths:
+                    abs_cp = os.path.abspath(cp)
+                    if abs_cp in _conftest_cache:
+                        found = _find_fixture_in_module(_conftest_cache[abs_cp], pname)
+                        if found is not None:
+                            _resolve_conftest_fixture(pname, _conftest_cache[abs_cp], conftest_paths,
+                                                     fixture_kwargs, fixture_cleanups, _resolving)
+                            break
 
     # Build kwargs from resolved fixtures
     fix_args = {}
@@ -222,7 +403,13 @@ def _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixtur
     if inspect.isgenerator(result):
         try:
             fixture_kwargs[name] = next(result)
-            fixture_cleanups.append(lambda gen=result: next(gen, None))
+            # Session-scoped generator cleanups must be deferred to worker shutdown,
+            # NOT run after each test. Otherwise yield fixtures like `server()` that
+            # start a background server would shut it down after the first test.
+            if fix_scope == 'session':
+                _session_fixture_cleanups.append(lambda gen=result: next(gen, None))
+            else:
+                fixture_cleanups.append(lambda gen=result: next(gen, None))
         except StopIteration:
             fixture_kwargs[name] = None
     else:
@@ -235,7 +422,7 @@ def _resolve_conftest_fixture(name, cmod, conftest_paths, fixture_kwargs, fixtur
 
 def run_test(test_item):
     """Execute a single test item and return the result as a dict."""
-    global _current_module_path, _current_class_name
+    global _current_module_path, _current_class_name, _reconstruct_module
     start = time.time()
 
     # Use absolute paths for consistent caching
@@ -397,7 +584,14 @@ def run_test(test_item):
             if package_name:
                 mod.__package__ = package_name
             sys.modules[module_name] = mod
-            spec.loader.exec_module(mod)
+            # Patch pytest.fixture during module load to capture name= kwargs
+            import pytest as _pt_mod
+            _orig_fix_mod = _pt_mod.fixture
+            _pt_mod.fixture = _scope_recording_fixture
+            try:
+                spec.loader.exec_module(mod)
+            finally:
+                _pt_mod.fixture = _orig_fix_mod
             _module_cache[new_module] = mod
         # Get and call test function
         # Setup builtin fixtures
@@ -466,6 +660,7 @@ def run_test(test_item):
                 fixture_kwargs["capfd"] = _Capfd()
                 fixture_cleanups.append(lambda: fixture_kwargs["capfd"]._restore())
             elif dep == "monkeypatch":
+                _builtins_delattr = delattr  # capture builtin before class shadows it
                 class _MonkeyPatch:
                     def __init__(self_inner):
                         self_inner._patches = []
@@ -492,10 +687,30 @@ def run_test(test_item):
                         old = getattr(target, name)
                         self_inner._patches.append((target, name, old))
                         setattr(target, name, value)
-                    def delattr(self_inner, target, name):
-                        old = getattr(target, name)
+                    def delattr(self_inner, target, name=_NOTSET, raising=True):
+                        if name is self_inner._NOTSET:
+                            # String dotted-path form: delattr("os.path.exists")
+                            if not isinstance(target, str):
+                                raise TypeError("delattr requires at least 2 arguments or a string target")
+                            parts = target.rsplit('.', 1)
+                            if len(parts) == 2:
+                                modpath, attrname = parts
+                                segs = modpath.split('.')
+                                obj = importlib.import_module(segs[0])
+                                for seg in segs[1:]:
+                                    obj = getattr(obj, seg)
+                                target = obj
+                                name = attrname
+                            else:
+                                raise TypeError("string target must be dotted path")
+                        if raising:
+                            old = getattr(target, name)
+                        else:
+                            old = getattr(target, name, self_inner._NOTSET)
+                            if old is self_inner._NOTSET:
+                                return
                         self_inner._patches.append((target, name, old))
-                        delattr(target, name)
+                        _builtins_delattr(target, name)
                     def setenv(self_inner, key, value):
                         old = os.environ.get(key)
                         self_inner._env_patches.append((key, old))
@@ -577,6 +792,9 @@ def run_test(test_item):
                     @property
                     def messages(self):
                         return [r.getMessage() for r in self.records]
+                    @property
+                    def record_tuples(self):
+                        return [(r.name, r.levelno, r.getMessage()) for r in self.records]
                     def set_level(self, level):
                         self.handler.setLevel(level)
                     def clear(self):
@@ -612,49 +830,12 @@ def run_test(test_item):
                         break
                 if _scope_cache_hit:
                     continue
-                # Try loading from conftest.py files (load entire hierarchy)
-                conftest_paths = []
-                conftest_dir = test_dir
-                while conftest_dir:
-                    cp = os.path.join(conftest_dir, "conftest.py")
-                    if os.path.exists(cp):
-                        conftest_paths.append(cp)
-                    parent = os.path.dirname(conftest_dir)
-                    if parent == conftest_dir:
-                        break
-                    conftest_dir = parent
-                # Load from root to leaf so deeper conftest overrides
-                conftest_paths.reverse()
-                for cp in conftest_paths:
-                    # Use conftest cache to avoid re-executing conftest.py on every lookup
-                    abs_cp = os.path.abspath(cp)
-                    if abs_cp in _conftest_cache:
-                        cmod = _conftest_cache[abs_cp]
-                    else:
-                        conftest_key = "conftest_" + cp.replace(os.sep, "_").replace(".", "_")
-                        if conftest_key in sys.modules:
-                            del sys.modules[conftest_key]
-                        import pytest as _pt
-                        _orig_fix = _pt.fixture
-                        # Replace pytest.fixture with a scope-preserving decorator
-                        # so that _fastest_scope metadata is recorded on fixture functions.
-                        # The old identity lambda stripped all metadata (scope, autouse, params).
-                        def _scope_recording_fixture(f=None, *, scope='function', autouse=False, params=None, **kw):
-                            if f is None:
-                                return lambda fn: _scope_recording_fixture(fn, scope=scope, autouse=autouse, params=params, **kw)
-                            f._fastest_scope = scope
-                            f._fastest_autouse = autouse
-                            f._fastest_params = params
-                            return f
-                        _pt.fixture = _scope_recording_fixture
-                        spec = importlib.util.spec_from_file_location(conftest_key, cp)
-                        cmod = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(cmod)
-                        _pt.fixture = _orig_fix
-                        _conftest_cache[abs_cp] = cmod
-                    if hasattr(cmod, dep):
-                        _resolve_conftest_fixture(dep, cmod, conftest_paths, fixture_kwargs, fixture_cleanups)
-                        break  # Found the fixture, stop searching conftest files
+                # Try loading from conftest.py files (pre-loaded hierarchy)
+                conftest_paths = _load_conftest_hierarchy(test_dir)
+                _resolve_fixture_from_conftest(dep, conftest_paths, fixture_kwargs, fixture_cleanups, test_module=mod)
+
+        # Pre-load conftest hierarchy for this test directory
+        conftest_paths = _load_conftest_hierarchy(test_dir)
 
         # Call setup_module if present and not already called for this module
         if hasattr(mod, 'setup_module') and new_module not in _setup_module_done:
@@ -679,7 +860,29 @@ def run_test(test_item):
                     call_kwargs = dict(fixture_kwargs)
                     params = test_item.get("parameters")
                     if params and params.get("values"):
-                        call_kwargs.update(params["values"])
+                        _reconstruct_module = mod
+                        call_kwargs.update({k: _reconstruct_value(v) for k, v in params["values"].items()})
+                    # Discover unresolved fixtures from function signature at runtime
+                    # (catches inherited class methods, transitive deps not in fixture_deps)
+                    try:
+                        _func_params = set(inspect.signature(func).parameters.keys())
+                        _param_names = set(params.get("names", [])) if params else set()
+                        for pname in _func_params:
+                            if pname == 'self' or pname in call_kwargs or pname in _param_names:
+                                continue
+                            # Check scope cache first
+                            _found = False
+                            for _sc in ('session', 'module', 'class'):
+                                if pname in _fixture_scope_cache.get(_sc, {}):
+                                    call_kwargs[pname] = _fixture_scope_cache[_sc][pname]
+                                    _found = True
+                                    break
+                            if not _found:
+                                _resolve_fixture_from_conftest(pname, conftest_paths, call_kwargs, fixture_cleanups, test_module=mod)
+                        # Filter to only kwargs the function accepts
+                        call_kwargs = {k: v for k, v in call_kwargs.items() if k in _func_params}
+                    except (ValueError, TypeError):
+                        pass
                     if call_kwargs:
                         result = func(**call_kwargs)
                     else:
@@ -696,7 +899,27 @@ def run_test(test_item):
                     call_kwargs = dict(fixture_kwargs)
                     params = test_item.get("parameters")
                     if params and params.get("values"):
-                        call_kwargs.update(params["values"])
+                        _reconstruct_module = mod
+                        call_kwargs.update({k: _reconstruct_value(v) for k, v in params["values"].items()})
+                    # Discover unresolved fixtures from function signature at runtime
+                    try:
+                        _func_params = set(inspect.signature(func).parameters.keys())
+                        _param_names = set(params.get("names", [])) if params else set()
+                        for pname in _func_params:
+                            if pname == 'self' or pname in call_kwargs or pname in _param_names:
+                                continue
+                            _found = False
+                            for _sc in ('session', 'module', 'class'):
+                                if pname in _fixture_scope_cache.get(_sc, {}):
+                                    call_kwargs[pname] = _fixture_scope_cache[_sc][pname]
+                                    _found = True
+                                    break
+                            if not _found:
+                                _resolve_fixture_from_conftest(pname, conftest_paths, call_kwargs, fixture_cleanups, test_module=mod)
+                        # Filter to only kwargs the function accepts
+                        call_kwargs = {k: v for k, v in call_kwargs.items() if k in _func_params}
+                    except (ValueError, TypeError):
+                        pass
                     if call_kwargs:
                         result = func(**call_kwargs)
                     else:
@@ -798,3 +1021,10 @@ for line in sys.stdin:
 
 # Run final teardowns for the last module/class processed
 _run_pending_teardowns()
+
+# Run deferred session-scoped fixture cleanups (e.g. shutting down servers started by yield fixtures)
+for _session_cleanup in _session_fixture_cleanups:
+    try:
+        _session_cleanup()
+    except Exception:
+        pass
