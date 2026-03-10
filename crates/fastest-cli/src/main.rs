@@ -14,9 +14,9 @@ use clap::{Parser, Subcommand};
 use colored::Colorize;
 
 use fastest_core::{
-    discover_conftest_fixtures, discover_tests, expand_parametrized_tests, filter_by_keyword,
-    filter_by_markers, Config, ConftestMap, HookArgs, IncrementalTester, PluginManager,
-    TestWatcher,
+    discover_conftest_fixtures, discover_session_fixtures, discover_tests,
+    expand_parametrized_tests, filter_by_keyword, filter_by_markers, Config, ConftestMap, HookArgs,
+    IncrementalTester, PluginManager, TestWatcher,
 };
 use fastest_execution::timeout::TimeoutConfig;
 use fastest_execution::HybridExecutor;
@@ -957,6 +957,12 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
 
     // Print header
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+
+    // Set rootdir env var so subprocess workers and inprocess executor add it to sys.path.
+    // This mirrors pytest behavior: rootdir is always on sys.path[0] so that
+    // package-relative imports like `from tests.module import X` work.
+    std::env::set_var("FASTEST_ROOTDIR", &rootdir);
+
     if !cli.no_header {
         print_header(&rootdir);
         eprintln!(
@@ -970,7 +976,16 @@ fn run_tests(cli: &Cli) -> anyhow::Result<bool> {
     // 9. Execute tests
     let timeout_config =
         TimeoutConfig::with_duration(std::time::Duration::from_secs(cli.timeout.unwrap_or(60)));
-    let executor = HybridExecutor::with_config(cli.workers, timeout_config);
+
+    // Discover session-scoped fixtures from conftest files for test partitioning.
+    // Tests depending on session fixtures are routed to a single worker to avoid
+    // creating duplicate fixture instances across processes.
+    let session_fixtures = discover_session_fixtures(&search_paths, &config.norecursedirs);
+    let executor = HybridExecutor::with_config_and_session_fixtures(
+        cli.workers,
+        timeout_config,
+        session_fixtures,
+    );
 
     // Stepwise implies exitfirst (stop on first failure)
     let max_failures = if cli.exitfirst || cli.stepwise {
@@ -1361,6 +1376,8 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
     }
 
     let rootdir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    std::env::set_var("FASTEST_ROOTDIR", &rootdir);
+
     if !cfg.no_header {
         print_header(&rootdir);
         eprintln!(
@@ -1373,7 +1390,12 @@ fn run_watch_cycle(cfg: &WatchConfig) -> anyhow::Result<()> {
 
     let timeout_config =
         TimeoutConfig::with_duration(std::time::Duration::from_secs(cfg.timeout.unwrap_or(60)));
-    let executor = HybridExecutor::with_config(cfg.workers, timeout_config);
+    let session_fixtures = discover_session_fixtures(&search_paths, &config.norecursedirs);
+    let executor = HybridExecutor::with_config_and_session_fixtures(
+        cfg.workers,
+        timeout_config,
+        session_fixtures,
+    );
 
     let max_failures = if cfg.exitfirst || cfg.stepwise {
         Some(1)

@@ -10,8 +10,96 @@ use crate::model::{Parameters, TestItem};
 use rustpython_parser::ast::{self, Constant, Expr, Stmt};
 use rustpython_parser::Parse;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs;
 use std::path::Path;
+
+/// Helper to format an AST expression as a Python repr string.
+struct ExprRepr<'a>(&'a Expr);
+
+impl<'a> fmt::Display for ExprRepr<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            Expr::Constant(c) => match &c.value {
+                Constant::Str(s) => write!(f, "'{}'", s.replace('\'', "\\'")),
+                Constant::Int(n) => write!(f, "{}", n),
+                Constant::Float(fl) => write!(f, "{}", fl),
+                Constant::Bool(b) => write!(f, "{}", if *b { "True" } else { "False" }),
+                Constant::None => write!(f, "None"),
+                Constant::Bytes(b) => {
+                    write!(f, "b'")?;
+                    for byte in b {
+                        if byte.is_ascii_graphic() || *byte == b' ' {
+                            write!(f, "{}", *byte as char)?;
+                        } else {
+                            write!(f, "\\x{:02x}", byte)?;
+                        }
+                    }
+                    write!(f, "'")
+                }
+                _ => write!(f, "None"),
+            },
+            Expr::Name(name) => write!(f, "{}", name.id),
+            Expr::Attribute(attr) => {
+                write!(f, "{}.{}", ExprRepr(attr.value.as_ref()), attr.attr)
+            }
+            Expr::Call(call) => {
+                write!(f, "{}(", ExprRepr(call.func.as_ref()))?;
+                let mut first = true;
+                for arg in &call.args {
+                    if !first {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", ExprRepr(arg))?;
+                    first = false;
+                }
+                for kw in &call.keywords {
+                    if !first {
+                        write!(f, ", ")?;
+                    }
+                    if let Some(ref arg) = kw.arg {
+                        write!(f, "{}={}", arg, ExprRepr(&kw.value))?;
+                    }
+                    first = false;
+                }
+                write!(f, ")")
+            }
+            Expr::List(list) => {
+                write!(f, "[")?;
+                for (i, elt) in list.elts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", ExprRepr(elt))?;
+                }
+                write!(f, "]")
+            }
+            Expr::Tuple(tuple) => {
+                write!(f, "(")?;
+                for (i, elt) in tuple.elts.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", ExprRepr(elt))?;
+                }
+                if tuple.elts.len() == 1 {
+                    write!(f, ",")?;
+                }
+                write!(f, ")")
+            }
+            Expr::UnaryOp(unary) => {
+                let op = match unary.op {
+                    ast::UnaryOp::USub => "-",
+                    ast::UnaryOp::UAdd => "+",
+                    ast::UnaryOp::Not => "not ",
+                    ast::UnaryOp::Invert => "~",
+                };
+                write!(f, "{}{}", op, ExprRepr(unary.operand.as_ref()))
+            }
+            _ => write!(f, "None"),
+        }
+    }
+}
 
 /// Expand parametrized tests into individual test items.
 ///
@@ -300,12 +388,35 @@ fn extract_ids_from_pytest_params(values_expr: &Expr) -> Option<Vec<String>> {
 /// Parse parameter names from the first argument of `@pytest.mark.parametrize`.
 /// Handles: `"x"` and `"x,y,expected"`
 fn parse_param_names(expr: &Expr) -> Option<Vec<String>> {
+    // Handle string like "data, expected"
     if let Expr::Constant(c) = expr {
         if let Constant::Str(s) = &c.value {
             let names: Vec<String> = s.split(',').map(|n| n.trim().to_string()).collect();
             if names.iter().all(|n| !n.is_empty()) {
                 return Some(names);
             }
+        }
+    }
+    // Handle list/tuple of strings like ["data", "expected"] or ("data", "expected")
+    let elts = match expr {
+        Expr::List(list) => Some(&list.elts),
+        Expr::Tuple(tuple) => Some(&tuple.elts),
+        _ => None,
+    };
+    if let Some(elts) = elts {
+        let names: Vec<String> = elts
+            .iter()
+            .filter_map(|e| {
+                if let Expr::Constant(c) = e {
+                    if let Constant::Str(s) = &c.value {
+                        return Some(s.clone());
+                    }
+                }
+                None
+            })
+            .collect();
+        if names.len() == elts.len() && names.iter().all(|n| !n.is_empty()) {
+            return Some(names);
         }
     }
     None
@@ -474,12 +585,70 @@ fn expr_to_json(expr: &Expr) -> serde_json::Value {
             let items: Vec<serde_json::Value> = tuple.elts.iter().map(expr_to_json).collect();
             serde_json::Value::Array(items)
         }
+        Expr::Dict(dict) => {
+            let mut map = serde_json::Map::new();
+            for (key_opt, value) in dict.keys.iter().zip(dict.values.iter()) {
+                if let Some(key_expr) = key_opt {
+                    let key_str = match expr_to_json(key_expr) {
+                        serde_json::Value::String(s) => s,
+                        other => other.to_string(),
+                    };
+                    map.insert(key_str, expr_to_json(value));
+                }
+            }
+            serde_json::Value::Object(map)
+        }
+        Expr::Set(set) => {
+            let items: Vec<serde_json::Value> = set.elts.iter().map(expr_to_json).collect();
+            serde_json::Value::Array(items)
+        }
         Expr::Name(name) => match name.id.as_str() {
             "True" => serde_json::Value::Bool(true),
             "False" => serde_json::Value::Bool(false),
             "None" => serde_json::Value::Null,
-            _ => serde_json::Value::String(name.id.to_string()),
+            _ => {
+                // Variable reference — use __repr__ so it can be eval'd in module context
+                let mut map = serde_json::Map::new();
+                map.insert("__repr__".to_string(), serde_json::Value::String(name.id.to_string()));
+                serde_json::Value::Object(map)
+            }
         },
+        Expr::Call(call) => {
+            // Handle dict(...) calls: dict(key=value) -> {"key": value}
+            if let Expr::Name(name) = call.func.as_ref() {
+                if name.id.as_str() == "dict" {
+                    let mut map = serde_json::Map::new();
+                    for kw in &call.keywords {
+                        if let Some(ref arg) = kw.arg {
+                            map.insert(arg.to_string(), expr_to_json(&kw.value));
+                        }
+                    }
+                    // Also handle positional args if they're tuples of (key, value)
+                    return serde_json::Value::Object(map);
+                }
+                if name.id.as_str() == "frozenset" || name.id.as_str() == "set" {
+                    // Handle set/frozenset with iterable argument
+                    if let Some(arg) = call.args.first() {
+                        return expr_to_json(arg);
+                    }
+                    return serde_json::Value::Array(vec![]);
+                }
+            }
+            // For other calls, serialize as a repr string marker so we can eval it later
+            let mut map = serde_json::Map::new();
+            map.insert("__repr__".to_string(), serde_json::Value::String(
+                format!("{}", ExprRepr(expr))
+            ));
+            serde_json::Value::Object(map)
+        }
+        Expr::Attribute(_) => {
+            // Handle module.attr references like re.IGNORECASE, httpx.Client
+            let mut map = serde_json::Map::new();
+            map.insert("__repr__".to_string(), serde_json::Value::String(
+                format!("{}", ExprRepr(expr))
+            ));
+            serde_json::Value::Object(map)
+        }
         _ => serde_json::Value::Null,
     }
 }
@@ -505,6 +674,18 @@ fn constant_to_json(c: &Constant) -> serde_json::Value {
             let json_items: Vec<serde_json::Value> = items.iter().map(constant_to_json).collect();
             serde_json::Value::Array(json_items)
         }
+        Constant::Bytes(b) => {
+            let byte_values: Vec<serde_json::Value> = b
+                .iter()
+                .map(|&byte| serde_json::Value::Number(byte.into()))
+                .collect();
+            let mut map = serde_json::Map::new();
+            map.insert(
+                "__bytes__".to_string(),
+                serde_json::Value::Array(byte_values),
+            );
+            serde_json::Value::Object(map)
+        }
         _ => serde_json::Value::Null,
     }
 }
@@ -523,6 +704,16 @@ fn constant_to_string(c: &Constant) -> String {
             }
         }
         Constant::None => "None".to_string(),
+        Constant::Bytes(b) => match String::from_utf8(b.clone()) {
+            Ok(s) => s,
+            Err(e) => format!(
+                "b'{}'",
+                e.into_bytes()
+                    .iter()
+                    .map(|b| format!("\\x{:02x}", b))
+                    .collect::<String>()
+            ),
+        },
         _ => "?".to_string(),
     }
 }
@@ -544,7 +735,35 @@ fn value_to_id_string(v: &serde_json::Value) -> String {
             let parts: Vec<String> = arr.iter().map(value_to_id_string).collect();
             parts.join("-")
         }
-        serde_json::Value::Object(_) => "object".to_string(),
+        serde_json::Value::Object(map) => {
+            if let Some(serde_json::Value::Array(bytes)) = map.get("__bytes__") {
+                // Reconstruct readable bytes representation like b'gzip'
+                let byte_vec: Vec<u8> = bytes
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                match String::from_utf8(byte_vec) {
+                    Ok(s) => s,
+                    Err(e) => format!(
+                        "b'{}'",
+                        e.into_bytes()
+                            .iter()
+                            .map(|b| format!("\\x{:02x}", b))
+                            .collect::<String>()
+                    ),
+                }
+            } else if let Some(serde_json::Value::String(repr)) = map.get("__repr__") {
+                // Python expression repr — use as-is for ID
+                repr.clone()
+            } else {
+                // Generic dict representation for test IDs
+                let parts: Vec<String> = map
+                    .iter()
+                    .map(|(k, v)| format!("{}-{}", k, value_to_id_string(v)))
+                    .collect();
+                parts.join("-")
+            }
+        }
     }
 }
 
