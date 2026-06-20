@@ -32,65 +32,33 @@ pub use config::Config;
 pub use error::{Error, Result};
 
 // Test discovery exports
-pub use test::discovery::{
-    discover_tests, 
-    discover_tests_with_filtering, 
-    TestItem,
-    TestMetadata,
-};
+pub use test::discovery::{discover_tests, discover_tests_with_filtering, TestItem, TestMetadata};
 
 // Parser exports
 pub use test::parser::{
-    Parser,
-    TestFunction,
-    FixtureDefinition as ParserFixtureDefinition,
-    SetupTeardownMethod,
-    SetupTeardownType,
-    SetupTeardownScope,
-    ModuleMetadata,
-    ClassMetadata,
+    ClassMetadata, FixtureDefinition as ParserFixtureDefinition, ModuleMetadata, Parser,
+    SetupTeardownMethod, SetupTeardownScope, SetupTeardownType, TestFunction,
 };
 
 // Advanced fixture exports
 pub use test::fixtures::advanced::{
-    FixtureDefinition,
-    FixtureScope,
-    FixtureRequest,
-    FixtureValue,
-    AdvancedFixtureManager,
+    AdvancedFixtureManager, FixtureDefinition, FixtureRequest, FixtureScope, FixtureValue,
 };
 
 // Basic fixture exports (for compatibility)
 pub use test::fixtures::{
-    extract_fixture_deps,
-    generate_builtin_fixture_code,
-    generate_test_code_with_fixtures,
-    is_builtin_fixture,
-    Fixture,
-    FixtureExecutor,
-    FixtureManager,
+    extract_fixture_deps, generate_builtin_fixture_code, generate_test_code_with_fixtures,
+    is_builtin_fixture, Fixture, FixtureExecutor, FixtureManager,
 };
 
 // Marker exports
-pub use test::markers::{
-    filter_by_markers,
-    BuiltinMarker,
-    Marker,
-    MarkerExpr,
-};
+pub use test::markers::{filter_by_markers, BuiltinMarker, Marker, MarkerExpr};
 
 // Parametrize exports
-pub use test::parametrize::{
-    expand_parametrized_tests,
-    parse_parametrize_decorator,
-};
+pub use test::parametrize::{expand_parametrized_tests, parse_parametrize_decorator};
 
 // Debug exports
-pub use debug::{
-    DebugConfig,
-    DebugManager,
-    EnhancedError,
-};
+pub use debug::{DebugConfig, DebugManager, EnhancedError};
 
 // Version information
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -110,7 +78,7 @@ pub struct PerformanceStats {
 pub fn initialize() -> Result<()> {
     // Set up SIMD if available
     utils::simd_json::initialize_simd();
-    
+
     // Configure rayon thread pool
     if let Err(e) = rayon::ThreadPoolBuilder::new()
         .num_threads(num_cpus::get())
@@ -119,20 +87,19 @@ pub fn initialize() -> Result<()> {
     {
         eprintln!("Warning: Failed to configure thread pool: {}", e);
     }
-    
+
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_version() {
-        assert!(!VERSION.is_empty());
         assert!(VERSION.split('.').count() >= 2);
     }
-    
+
     #[test]
     fn test_initialize() {
         assert!(initialize().is_ok());

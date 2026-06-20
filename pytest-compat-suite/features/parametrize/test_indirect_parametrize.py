@@ -27,6 +27,17 @@ def string_fixture(request):
     return "default"
 
 
+@pytest.fixture
+def data_source(request):
+    """Fixture that expands indirect data source names into configuration."""
+    sources = {
+        "file": {"type": "file", "path": "/tmp/data.txt"},
+        "database": {"type": "database", "connection": "db://localhost"},
+        "api": {"type": "api", "url": "http://api.test.com"},
+    }
+    return sources[request.param]
+
+
 # Test with indirect parametrization
 @pytest.mark.parametrize("number_fixture", [1, 2, 3], indirect=True)
 def test_indirect_single(number_fixture):

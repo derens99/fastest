@@ -225,7 +225,7 @@ impl WorkUnit {
             score += 15;
         }
 
-        score.min(u16::MAX)
+        score
     }
 
     /// Estimate test duration for scheduling optimization

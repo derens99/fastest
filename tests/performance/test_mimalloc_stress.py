@@ -3,6 +3,7 @@ import pytest
 import json
 import random
 import string
+import time
 from typing import List, Dict, Any
 
 # Generate large data structures to stress the allocator

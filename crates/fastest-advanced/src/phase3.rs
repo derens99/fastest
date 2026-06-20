@@ -174,7 +174,7 @@ impl Phase3Manager {
         for entry in walkdir::WalkDir::new(".")
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "py"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))
         {
             if let Ok(metadata) = entry.metadata() {
                 if let Ok(modified) = metadata.modified() {
@@ -205,7 +205,7 @@ impl Phase3Manager {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.extension().map_or(false, |ext| ext == "py")
+                path.extension().is_some_and(|ext| ext == "py")
                     && (path.to_string_lossy().contains("test_")
                         || path.to_string_lossy().ends_with("_test.py"))
             })
@@ -276,7 +276,7 @@ impl Phase3Manager {
         let coverage_available = Command::new("python")
             .args(["-m", "coverage", "--version"])
             .output()
-            .map_or(false, |out| out.status.success());
+            .is_ok_and(|out| out.status.success());
 
         if coverage_available {
             self.collect_real_coverage(test_files).await
@@ -439,7 +439,7 @@ impl Phase3Manager {
         let git_available = Command::new("git")
             .args(["--version"])
             .output()
-            .map_or(false, |out| out.status.success());
+            .is_ok_and(|out| out.status.success());
         stats.insert(
             "git_available".to_string(),
             serde_json::Value::Bool(git_available),
@@ -449,7 +449,7 @@ impl Phase3Manager {
         let coverage_available = Command::new("python")
             .args(["-m", "coverage", "--version"])
             .output()
-            .map_or(false, |out| out.status.success());
+            .is_ok_and(|out| out.status.success());
         stats.insert(
             "coverage_py_available".to_string(),
             serde_json::Value::Bool(coverage_available),

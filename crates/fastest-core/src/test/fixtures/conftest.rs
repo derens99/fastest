@@ -35,28 +35,19 @@ impl ConftestDiscovery {
         let mut parser = Parser::new();
         parser.set_language(&tree_sitter_python::language())?;
 
-        // Query for finding fixture decorators and functions
+        // Query for decorated functions. Fixture filtering and decorator argument
+        // extraction are handled in Rust so both `@pytest.fixture` and
+        // `@pytest.fixture(...)` are supported.
         let fixture_query = Query::new(
             &tree_sitter_python::language(),
             r#"
             (decorated_definition
-              decorator: (decorator
-                (call
-                  function: [
-                    (identifier) @decorator_name
-                    (attribute
-                      object: (identifier) @module
-                      attribute: (identifier) @decorator_name)
-                  ]
-                  (#match? @decorator_name "fixture")
-                  arguments: (argument_list)? @args
-                )
-              )
-              definition: (function_definition
+              (decorator) @decorator
+              (function_definition
                 name: (identifier) @function_name
                 parameters: (parameters) @params
                 body: (block) @body
-              )
+              ) @function_def
             ) @fixture_def
             "#,
         )?;
@@ -76,6 +67,9 @@ impl ConftestDiscovery {
             .follow_links(true)
             .into_iter()
             .filter_entry(|e| {
+                if e.path() == root_path {
+                    return true;
+                }
                 // Skip hidden directories and __pycache__
                 let name = e.file_name().to_string_lossy();
                 !name.starts_with('.') && name != "__pycache__" && name != "node_modules"
@@ -154,17 +148,23 @@ impl ConftestDiscovery {
         let mut decorator_args = None;
         let mut params_node = None;
         let mut body_node = None;
+        let mut function_node = None;
         let mut line_number = 0;
+        let mut is_fixture = false;
 
         for capture in match_.captures {
             match self.fixture_query.capture_names()[capture.index as usize] {
+                "decorator" => {
+                    let decorator_text = capture.node.utf8_text(content.as_bytes()).ok()?;
+                    if is_fixture_decorator(decorator_text) {
+                        is_fixture = true;
+                        decorator_args = find_argument_list(capture.node);
+                    }
+                }
                 "function_name" => {
                     fixture_name =
                         Some(capture.node.utf8_text(content.as_bytes()).ok()?.to_string());
                     line_number = capture.node.start_position().row + 1;
-                }
-                "args" => {
-                    decorator_args = Some(capture.node);
                 }
                 "params" => {
                     params_node = Some(capture.node);
@@ -172,8 +172,15 @@ impl ConftestDiscovery {
                 "body" => {
                     body_node = Some(capture.node);
                 }
+                "function_def" => {
+                    function_node = Some(capture.node);
+                }
                 _ => {}
             }
+        }
+
+        if !is_fixture {
+            return None;
         }
 
         let name = fixture_name?;
@@ -200,22 +207,32 @@ impl ConftestDiscovery {
         };
 
         // Check if async
-        let is_async = params_node
-            .and_then(|n| n.prev_sibling())
-            .map(|n| n.kind() == "async")
+        let is_async = function_node
+            .and_then(|node| node.child(0))
+            .map(|node| node.kind() == "async")
             .unwrap_or(false);
+
+        // Build flags from boolean values
+        let mut flags = 0u8;
+        if autouse {
+            flags |= 0x01;
+        }
+        if is_yield_fixture {
+            flags |= 0x02;
+        }
+        if is_async {
+            flags |= 0x04;
+        }
 
         Some(FixtureDefinition {
             name,
             scope,
-            autouse,
-            params,
-            ids,
-            dependencies,
+            flags,
+            params: params.into_iter().collect(),
+            ids: ids.into_iter().collect(),
+            dependencies: dependencies.into_iter().collect(),
             module_path: file_path.to_path_buf(),
-            line_number,
-            is_yield_fixture,
-            is_async,
+            line_number: line_number as u32,
         })
     }
 
@@ -427,6 +444,30 @@ impl Default for ConftestDiscovery {
     }
 }
 
+fn is_fixture_decorator(decorator_text: &str) -> bool {
+    let decorator = decorator_text.trim().trim_start_matches('@').trim();
+    decorator == "fixture"
+        || decorator.starts_with("fixture(")
+        || decorator == "pytest.fixture"
+        || decorator.starts_with("pytest.fixture(")
+}
+
+fn find_argument_list(node: Node<'_>) -> Option<Node<'_>> {
+    if node.kind() == "argument_list" {
+        return Some(node);
+    }
+
+    for index in 0..node.child_count() {
+        if let Some(child) = node.child(index) {
+            if let Some(argument_list) = find_argument_list(child) {
+                return Some(argument_list);
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -503,15 +544,15 @@ def dependent_fixture(simple_fixture, module_fixture):
         let simple = &conftest.fixtures[0];
         assert_eq!(simple.name, "simple_fixture");
         assert_eq!(simple.scope, FixtureScope::Function);
-        assert!(!simple.autouse);
-        assert!(!simple.is_yield_fixture);
+        assert!(!simple.is_autouse());
+        assert!(!simple.is_yield_fixture());
 
         // Check module fixture
         let module = &conftest.fixtures[1];
         assert_eq!(module.name, "module_fixture");
         assert_eq!(module.scope, FixtureScope::Module);
-        assert!(module.autouse);
-        assert!(module.is_yield_fixture);
+        assert!(module.is_autouse());
+        assert!(module.is_yield_fixture());
 
         // Check parametrized fixture
         let param = &conftest.fixtures[2];
@@ -522,7 +563,7 @@ def dependent_fixture(simple_fixture, module_fixture):
         // Check async fixture
         let async_fix = &conftest.fixtures[3];
         assert_eq!(async_fix.name, "async_fixture");
-        assert!(async_fix.is_async);
+        assert!(async_fix.is_async());
 
         // Check dependent fixture
         let dependent = &conftest.fixtures[4];

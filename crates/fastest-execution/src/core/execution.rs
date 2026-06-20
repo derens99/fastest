@@ -720,7 +720,7 @@ impl Clone for FixtureValue {
         FixtureValue {
             name: self.name.clone(),
             value: self.value.clone(),
-            scope: self.scope.clone(),
+            scope: self.scope,
             teardown_code: self.teardown_code.clone(),
             created_at: self.created_at,
             last_accessed: self.last_accessed,
@@ -990,6 +990,12 @@ pub struct DependencyResolver {
     node_indices: HashMap<String, NodeIndex>,
 }
 
+impl Default for DependencyResolver {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DependencyResolver {
     pub fn new() -> Self {
         Self {
@@ -1202,7 +1208,7 @@ impl PythonRuntimeManager {
     }
 
     /// Convert serde_json::Value to Python object using manual conversion
-    fn json_to_python(&self, py: Python, value: &serde_json::Value) -> PyResult<PyObject> {
+    fn json_to_python(py: Python, value: &serde_json::Value) -> PyResult<PyObject> {
         match value {
             serde_json::Value::Null => Ok(py.None()),
             serde_json::Value::Bool(b) => {
@@ -1232,7 +1238,7 @@ impl PythonRuntimeManager {
             serde_json::Value::Array(arr) => {
                 let py_list = pyo3::types::PyList::empty(py);
                 for item in arr {
-                    let py_item = self.json_to_python(py, item)?;
+                    let py_item = Self::json_to_python(py, item)?;
                     py_list.append(py_item)?;
                 }
                 Ok(py_list.into())
@@ -1240,7 +1246,7 @@ impl PythonRuntimeManager {
             serde_json::Value::Object(obj) => {
                 let py_dict = pyo3::types::PyDict::new(py);
                 for (key, val) in obj {
-                    let py_val = self.json_to_python(py, val)?;
+                    let py_val = Self::json_to_python(py, val)?;
                     py_dict.set_item(key, py_val)?;
                 }
                 Ok(py_dict.into())
@@ -1249,7 +1255,7 @@ impl PythonRuntimeManager {
     }
 
     /// Convert Python object to serde_json::Value using manual conversion
-    fn python_to_json(&self, py: Python, obj: &PyObject) -> PyResult<serde_json::Value> {
+    fn python_to_json(py: Python, obj: &PyObject) -> PyResult<serde_json::Value> {
         let obj_ref = obj.bind(py);
 
         if obj_ref.is_none() {
@@ -1267,14 +1273,14 @@ impl PythonRuntimeManager {
         } else if let Ok(list) = obj_ref.downcast::<pyo3::types::PyList>() {
             let mut arr = Vec::new();
             for item in list {
-                arr.push(self.python_to_json(py, &item.unbind())?);
+                arr.push(Self::python_to_json(py, &item.unbind())?);
             }
             Ok(serde_json::Value::Array(arr))
         } else if let Ok(dict) = obj_ref.downcast::<pyo3::types::PyDict>() {
             let mut map = serde_json::Map::new();
             for (key, value) in dict {
                 let key_str = key.extract::<String>()?;
-                let json_value = self.python_to_json(py, &value.unbind())?;
+                let json_value = Self::python_to_json(py, &value.unbind())?;
                 map.insert(key_str, json_value);
             }
             Ok(serde_json::Value::Object(map))
@@ -1518,7 +1524,7 @@ pub struct FixtureExecutor {
 impl FixtureExecutor {
     pub fn new() -> Self {
         // 🚀 Initialize SIMD JSON for 2-3x faster fixture serialization
-        simd_json::init_simd_json();
+        simd_json::initialize_simd();
 
         let max_parallel = num_cpus::get().min(8); // Limit parallel Python processes
 
@@ -1745,7 +1751,7 @@ impl FixtureExecutor {
 
             let deps = fixture_info
                 .map(|f| f.dependencies.clone())
-                .unwrap_or_else(Vec::new);
+                .unwrap_or_default();
 
             let mut current_level = 0;
             for dep_name in &deps {
@@ -1761,7 +1767,7 @@ impl FixtureExecutor {
                     let class_key = self.extract_class_key_from_fixture(fixture);
                     class_fixture_groups
                         .entry(class_key)
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push(fixture_name.clone());
 
                     // Class fixtures should be at higher priority to ensure proper setup
@@ -1831,7 +1837,7 @@ impl FixtureExecutor {
                         self.dependency_resolver
                             .fixture_registry
                             .get(*name)
-                            .map_or(false, |f| f.scope == FixtureScope::Class)
+                            .is_some_and(|f| f.scope == FixtureScope::Class)
                     })
                     .collect();
 
@@ -1852,7 +1858,7 @@ impl FixtureExecutor {
         // Try to extract class name from fixture path or name
         if let Some(file_name) = fixture.func_path.file_name() {
             if let Some(name_str) = file_name.to_str() {
-                return format!("{}:{}", name_str, fixture.scope.clone() as u8);
+                return format!("{}:{}", name_str, fixture.scope as u8);
             }
         }
 
@@ -1897,7 +1903,7 @@ impl FixtureExecutor {
             .get(fixture_name)
             .ok_or_else(|| anyhow!("Fixture '{}' not found", fixture_name))?;
 
-        let cache_key = FixtureCacheKey::for_test(fixture_name, test, fixture.scope.clone());
+        let cache_key = FixtureCacheKey::for_test(fixture_name, test, fixture.scope);
 
         // Check enhanced cache first for class-aware fixtures
         if let Some(enhanced_cached) = self.enhanced_cache.get(&cache_key) {
@@ -1940,7 +1946,7 @@ impl FixtureExecutor {
                 let scope_id = cache_key.scope_id.clone();
                 self.teardown_stack
                     .entry(scope_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((cache_key, teardown_code.clone()));
             }
         }
@@ -1998,7 +2004,7 @@ impl FixtureExecutor {
         Ok(FixtureValue {
             name: fixture.name.clone(),
             value,
-            scope: fixture.scope.clone(),
+            scope: fixture.scope,
             teardown_code: self.extract_teardown_code(fixture)?,
             created_at: std::time::SystemTime::now(),
             last_accessed: std::time::SystemTime::now(),
@@ -2061,8 +2067,7 @@ impl FixtureExecutor {
                     .get_or_create_classmethod_fixture(py, &fixture.name, class_name, &fixture_fn)
                     .map_err(|e| anyhow!("Failed to execute @classmethod fixture: {}", e))?;
 
-                return runtime
-                    .python_to_json(py, &result_obj)
+                return PythonRuntimeManager::python_to_json(py, &result_obj)
                     .map_err(|e| anyhow!("Failed to convert @classmethod fixture result: {}", e));
             }
 
@@ -2075,8 +2080,7 @@ impl FixtureExecutor {
                 .call((), Some(&kwargs))
                 .map_err(|e| anyhow!("Class fixture '{}' execution failed: {}", fixture.name, e))?;
 
-            runtime
-                .python_to_json(py, &result.unbind())
+            PythonRuntimeManager::python_to_json(py, &result.unbind())
                 .map_err(|e| anyhow!("Failed to convert class fixture result: {}", e))
         })
     }
@@ -2098,6 +2102,7 @@ impl FixtureExecutor {
             .arg(&execution_code)
             .env("FASTEST_CLASS_FIXTURE", "1")
             .env("FASTEST_CLASS_NAME", class_name)
+            .env("PYTHONIOENCODING", "utf-8")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
@@ -2230,7 +2235,7 @@ finally:
         Ok(FixtureValue {
             name: fixture.name.clone(),
             value,
-            scope: fixture.scope.clone(),
+            scope: fixture.scope,
             teardown_code: self.extract_teardown_code(fixture)?,
             created_at: std::time::SystemTime::now(),
             last_accessed: std::time::SystemTime::now(),
@@ -2341,16 +2346,12 @@ finally:
                             "PyObject cache miss for dependency '{}' - using JSON conversion",
                             key
                         );
-                        let runtime = self.python_runtime.lock();
-                        runtime
-                            .json_to_python(py, value)
+                        PythonRuntimeManager::json_to_python(py, value)
                             .map_err(|e| anyhow!("Failed to convert dependency '{}': {}", key, e))?
                     }
                 } else {
                     cache_misses += 1;
-                    let runtime = self.python_runtime.lock();
-                    runtime
-                        .json_to_python(py, value)
+                    PythonRuntimeManager::json_to_python(py, value)
                         .map_err(|e| anyhow!("Failed to convert dependency '{}': {}", key, e))?
                 };
 
@@ -2378,15 +2379,8 @@ finally:
             // 5. Execute the fixture function and cache the PyObject result
             let (result_json, cached_pyobj) = if is_generator_fn {
                 // Handle generator fixtures (yield fixtures)
-                let mut runtime = self.python_runtime.lock();
-                let json_result = self.execute_generator_fixture_pyo3(
-                    py,
-                    fixture,
-                    &fixture_fn,
-                    &kwargs,
-                    &mut runtime,
-                )?;
-                drop(runtime);
+                let json_result =
+                    self.execute_generator_fixture_pyo3(py, fixture, &fixture_fn, &kwargs)?;
                 (json_result, None) // Generators are more complex to cache
             } else {
                 // Handle regular fixtures
@@ -2399,11 +2393,8 @@ finally:
                 let cached_obj = Some(py_obj.clone_ref(py));
 
                 // Convert result to JSON for backward compatibility
-                let runtime = self.python_runtime.lock();
-                let json_result = runtime
-                    .python_to_json(py, &py_obj)
+                let json_result = PythonRuntimeManager::python_to_json(py, &py_obj)
                     .map_err(|e| anyhow!("Failed to convert result from Python: {}", e))?;
-                drop(runtime);
 
                 (json_result, cached_obj)
             };
@@ -2426,7 +2417,7 @@ finally:
             let cache_key = FixtureCacheKey {
                 name: fixture.name.clone(),
                 scope_id: "default".to_string(), // TODO: Use proper scope
-                scope: fixture.scope.clone(),
+                scope: fixture.scope,
                 param_id: None,
             };
 
@@ -2454,7 +2445,6 @@ finally:
         fixture: &Fixture,
         fixture_fn: &Bound<PyAny>,
         kwargs: &Bound<PyDict>,
-        runtime: &mut PythonRuntimeManager,
     ) -> Result<serde_json::Value> {
         // Call the generator function
         let generator = fixture_fn
@@ -2474,19 +2464,18 @@ finally:
         // Store the generator for teardown
         let cache_key = FixtureCacheKey::new(
             fixture.name.clone(),
-            fixture.scope.clone(),
+            fixture.scope,
             "current_scope".to_string(), // TODO: proper scope ID
             None,
         );
 
         self.generator_teardown_stack
             .entry("current_scope".to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push((cache_key, generator.into()));
 
         // Convert the yielded value to JSON
-        runtime
-            .python_to_json(py, &yielded_value.into())
+        PythonRuntimeManager::python_to_json(py, &yielded_value.into())
             .map_err(|e| anyhow!("Failed to convert generator result: {}", e))
     }
 
@@ -2559,6 +2548,7 @@ finally:
             .arg(&execution_code)
             .env("FASTEST_OUTPUT_FORMAT", "msgpack")
             .env("FASTEST_FIXTURE_TIMEOUT", "30") // 30 second timeout
+            .env("PYTHONIOENCODING", "utf-8")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
@@ -2636,9 +2626,8 @@ finally:
                     if let Some(json_end) = stdout_str.rfind('}') {
                         if json_start <= json_end {
                             let json_part = &stdout_str[json_start..=json_end];
-                            match simd_json::from_str(json_part) {
-                                Ok(value) => return Ok(value),
-                                Err(_) => {}
+                            if let Ok(value) = simd_json::from_str(json_part) {
+                                return Ok(value);
                             }
                         }
                     }
@@ -2815,6 +2804,7 @@ except Exception as e:
         let output = std::process::Command::new("python")
             .arg("-c")
             .arg(&python_code)
+            .env("PYTHONIOENCODING", "utf-8")
             .output()
             .map_err(|e| anyhow!("Failed to execute fixtures: {}", e))?;
 
@@ -2979,10 +2969,11 @@ except Exception as e:
         // Also check regular cache
         self.cache.iter().for_each(|entry| {
             let key = entry.key();
-            if key.scope == scope && (scope == FixtureScope::Session || key.scope_id == scope_id) {
-                if !keys_to_remove.contains(key) {
-                    keys_to_remove.push(key.clone());
-                }
+            if key.scope == scope
+                && (scope == FixtureScope::Session || key.scope_id == scope_id)
+                && !keys_to_remove.contains(key)
+            {
+                keys_to_remove.push(key.clone());
             }
         });
 
@@ -3261,6 +3252,7 @@ except Exception as e:
         let output = std::process::Command::new("python")
             .arg("-c")
             .arg(&teardown_script)
+            .env("PYTHONIOENCODING", "utf-8")
             .output()
             .map_err(|e| {
                 anyhow!(
@@ -3293,7 +3285,7 @@ except Exception as e:
             || self
                 .teardown_stack
                 .get(scope_id)
-                .map_or(false, |list| list.is_empty())
+                .is_some_and(|list| list.is_empty())
         {
             self.teardown_stack.remove(scope_id);
         }
@@ -3303,7 +3295,7 @@ except Exception as e:
             || self
                 .generator_teardown_stack
                 .get(scope_id)
-                .map_or(false, |list| list.is_empty())
+                .is_some_and(|list| list.is_empty())
         {
             self.generator_teardown_stack.remove(scope_id);
         }
@@ -3366,7 +3358,7 @@ except Exception as e:
         self.cache.iter().for_each(|entry| {
             let key = entry.key();
             let value = entry.value();
-            *stats_by_scope.entry(key.scope.clone()).or_insert(0) += 1;
+            *stats_by_scope.entry(key.scope).or_insert(0) += 1;
             total_cached += 1;
 
             // Estimate memory usage
@@ -3483,12 +3475,7 @@ except Exception as e:
                 .map(|entry| {
                     let key = entry.key().clone();
                     let value = entry.value();
-                    (
-                        key,
-                        value.last_accessed,
-                        value.access_count,
-                        value.scope.clone(),
-                    )
+                    (key, value.last_accessed, value.access_count, value.scope)
                 })
                 .collect();
 
@@ -3842,6 +3829,7 @@ if __name__ == "__main__":
         let mut process = std::process::Command::new("python")
             .arg("-c")
             .arg(daemon_script)
+            .env("PYTHONIOENCODING", "utf-8")
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null()) // Suppress stderr to avoid pollution
@@ -3966,7 +3954,7 @@ if __name__ == "__main__":
         let mut response_line = String::new();
         daemon.stdout.read_line(&mut response_line)?;
 
-        let response: DaemonResponse = simd_json::from_str(&response_line.trim())
+        let response: DaemonResponse = simd_json::from_str(response_line.trim())
             .map_err(|e| anyhow!("Failed to deserialize daemon response: {}", e))?;
 
         // Update daemon stats
@@ -4299,9 +4287,10 @@ mod tests {
             line_number: Some(10),
             is_async: false,
             class_name: Some("TestClass".to_string()),
-            decorators: vec![],
-            fixture_deps: vec![],
+            decorators: vec![].into(),
+            fixture_deps: vec![].into(),
             is_xfail: false,
+            indirect_params: Default::default(),
         };
 
         let key = FixtureCacheKey::for_test("my_fixture", &test, FixtureScope::Class);

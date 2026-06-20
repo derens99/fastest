@@ -26,13 +26,13 @@ fastest tests/
 
 ### Installation
 ```bash
-# Install fastest
-pip install fastest
+# Install the Python wrapper
+uv tool install fastest-runner
 
 # Or from source
 git clone https://github.com/derens99/fastest.git
 cd fastest
-cargo build --release
+PYO3_PYTHON=$(command -v python3.12 || command -v python3) cargo build --release
 ```
 
 ## Command Line Equivalents
@@ -255,7 +255,7 @@ fastest tests/
    ```bash
    # First run builds cache
    fastest tests/
-   
+
    # Subsequent runs are faster
    fastest tests/
    ```
@@ -287,4 +287,4 @@ Check the [compatibility matrix](../README.md#-pytest-compatibility) for support
 
 ---
 
-Remember: You don't need to migrate everything at once. Start with simple test modules and gradually expand as Fastest gains more features. 
+Remember: You don't need to migrate everything at once. Start with simple test modules and gradually expand as Fastest gains more features.

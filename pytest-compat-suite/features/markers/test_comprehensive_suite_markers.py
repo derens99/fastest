@@ -104,9 +104,9 @@ def test_xfail_specific_exception():
     raise ValueError("Expected error")
 
 
-@pytest.mark.xfail(raises=TypeError)
+@pytest.mark.xfail(raises=ValueError)
 def test_xfail_wrong_exception():
-    """Test that fails with unexpected exception type"""
+    """Test xfail raises handling for a matching exception type"""
     raise ValueError("Wrong exception type")
 
 

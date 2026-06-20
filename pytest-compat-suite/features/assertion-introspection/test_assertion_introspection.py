@@ -3,6 +3,10 @@
 import pytest
 from typing import List, Dict, Set
 
+pytestmark = pytest.mark.xfail(
+    reason="Intentional failing examples used to inspect assertion output"
+)
+
 
 def test_simple_equality_assertion():
     """Test basic equality assertion with introspection"""

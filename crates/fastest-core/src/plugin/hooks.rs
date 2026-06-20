@@ -3,12 +3,12 @@
 //! This module defines all the hooks that plugins can implement,
 //! similar to pytest's hook system.
 
+use crate::error::Result;
+use crate::test::discovery::TestItem;
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use crate::test::discovery::TestItem;
-use crate::error::Result;
 
 /// Result type for hook execution
 pub type HookResult<T> = Result<T>;
@@ -17,7 +17,7 @@ pub type HookResult<T> = Result<T>;
 pub trait Hook: Send + Sync {
     /// Execute the hook with given arguments
     fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>>;
-    
+
     /// Get the name of the hook
     fn name(&self) -> &str;
 }
@@ -113,26 +113,26 @@ pub struct SessionFinishArgs {
 }
 
 /// Standard hook implementations
-pub mod hooks {
+pub mod standard_hooks {
     use super::*;
-    
+
     /// Hook called when Fastest is being configured
     pub struct ConfigureHook;
-    
+
     impl Hook for ConfigureHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
-        
+
         fn name(&self) -> &str {
             "pytest_configure"
         }
     }
-    
+
     /// Hook called to modify collected test items
     pub struct CollectionModifyItemsHook;
-    
+
     impl Hook for CollectionModifyItemsHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
@@ -142,68 +142,70 @@ pub mod hooks {
                 Ok(Box::new(()))
             }
         }
-        
+
         fn name(&self) -> &str {
             "pytest_collection_modifyitems"
         }
     }
-    
+
     /// Hook called before running a test
     pub struct TestSetupHook;
-    
+
     impl Hook for TestSetupHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
-        
+
         fn name(&self) -> &str {
             "pytest_runtest_setup"
         }
     }
-    
+
     /// Hook called to run a test
     pub struct TestCallHook;
-    
+
     impl Hook for TestCallHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
-        
+
         fn name(&self) -> &str {
             "pytest_runtest_call"
         }
     }
-    
+
     /// Hook called after running a test
     pub struct TestTeardownHook;
-    
+
     impl Hook for TestTeardownHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
-        
+
         fn name(&self) -> &str {
             "pytest_runtest_teardown"
         }
     }
-    
+
     /// Hook called to create a test report
     pub struct TestMakeReportHook;
-    
+
     impl Hook for TestMakeReportHook {
         fn call(&self, _args: &dyn Any) -> HookResult<Box<dyn Any>> {
             // Default implementation
             Ok(Box::new(()))
         }
-        
+
         fn name(&self) -> &str {
             "pytest_runtest_makereport"
         }
     }
 }
+
+pub use standard_hooks as hooks;
 
 /// Hook specification for plugins to implement
 pub trait HookSpec {
@@ -211,51 +213,51 @@ pub trait HookSpec {
     fn pytest_configure(&self, _config: &mut crate::config::Config) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called after collection has been performed
     fn pytest_collection_modifyitems(
-        &self, 
+        &self,
         _items: &mut Vec<TestItem>,
-        _config: &crate::config::Config
+        _config: &crate::config::Config,
     ) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called to perform setup for a test
     fn pytest_runtest_setup(
         &self,
         _item: &TestItem,
-        _fixtures: &HashMap<String, Box<dyn Any>>
+        _fixtures: &HashMap<String, Box<dyn Any>>,
     ) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called to run a test
     fn pytest_runtest_call(
         &self,
         _item: &TestItem,
-        _fixtures: &HashMap<String, Box<dyn Any>>
+        _fixtures: &HashMap<String, Box<dyn Any>>,
     ) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called to perform teardown for a test
     fn pytest_runtest_teardown(
         &self,
         _item: &TestItem,
         _fixtures: &HashMap<String, Box<dyn Any>>,
-        _exception: Option<&str>
+        _exception: Option<&str>,
     ) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called to create a test report
     fn pytest_runtest_makereport(
         &self,
         item: &TestItem,
         outcome: &TestOutcome,
         duration: std::time::Duration,
-        exception: Option<&str>
+        exception: Option<&str>,
     ) -> HookResult<TestReport> {
         Ok(TestReport {
             item_id: item.id.clone(),
@@ -266,31 +268,31 @@ pub trait HookSpec {
             stderr: String::new(),
         })
     }
-    
+
     /// Called when collection starts
     fn pytest_collection_start(&self, _test_paths: &[PathBuf]) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called when collection finishes
     fn pytest_collection_finish(
-        &self, 
+        &self,
         _items: &[TestItem],
-        _duration: std::time::Duration
+        _duration: std::time::Duration,
     ) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called when test session starts
     fn pytest_sessionstart(&self, _config: &crate::config::Config) -> HookResult<()> {
         Ok(())
     }
-    
+
     /// Called when test session finishes
     fn pytest_sessionfinish(
         &self,
         _exit_code: i32,
-        _duration: std::time::Duration
+        _duration: std::time::Duration,
     ) -> HookResult<()> {
         Ok(())
     }
@@ -313,9 +315,9 @@ pub struct HookWrapper<F> {
     func: Arc<F>,
 }
 
-impl<F> HookWrapper<F> 
+impl<F> HookWrapper<F>
 where
-    F: Fn(&dyn Any) -> HookResult<Box<dyn Any>> + Send + Sync + 'static
+    F: Fn(&dyn Any) -> HookResult<Box<dyn Any>> + Send + Sync + 'static,
 {
     pub fn new(name: impl Into<String>, func: F) -> Self {
         Self {
@@ -327,12 +329,12 @@ where
 
 impl<F> Hook for HookWrapper<F>
 where
-    F: Fn(&dyn Any) -> HookResult<Box<dyn Any>> + Send + Sync + 'static
+    F: Fn(&dyn Any) -> HookResult<Box<dyn Any>> + Send + Sync + 'static,
 {
     fn call(&self, args: &dyn Any) -> HookResult<Box<dyn Any>> {
         (self.func)(args)
     }
-    
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -341,25 +343,23 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_hook_wrapper() {
-        let hook = HookWrapper::new("test_hook", |_args| {
-            Ok(Box::new(42))
-        });
-        
+        let hook = HookWrapper::new("test_hook", |_args| Ok(Box::new(42)));
+
         assert_eq!(hook.name(), "test_hook");
-        
+
         let result = hook.call(&()).unwrap();
         let value = result.downcast_ref::<i32>().unwrap();
         assert_eq!(*value, 42);
     }
-    
+
     #[test]
     fn test_test_outcome() {
         let outcome = TestOutcome::Passed;
         assert_eq!(outcome, TestOutcome::Passed);
-        
+
         let outcome = TestOutcome::Failed;
         assert_eq!(outcome, TestOutcome::Failed);
     }

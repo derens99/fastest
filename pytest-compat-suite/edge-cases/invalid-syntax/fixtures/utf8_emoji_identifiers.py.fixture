@@ -1,0 +1,22 @@
+# -*- coding: utf-8 -*-
+"""Test file with Unicode characters"""
+
+
+def test_emoji_🚀():
+    """Test with rocket emoji"""
+    assert True
+
+
+def test_unicode_αβγ():
+    """Test with Greek letters"""
+    assert True
+
+
+def test_chinese_你好():
+    """Test with Chinese characters"""
+    assert True
+
+
+def test_mixed_émojî_文字():
+    """Test with mixed Unicode"""
+    assert True

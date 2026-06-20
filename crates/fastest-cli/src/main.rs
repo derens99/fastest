@@ -14,7 +14,6 @@ use fastest_execution::DevExperienceConfig;
 use fastest_execution::UltraFastExecutor;
 use fastest_plugins::{builtin::*, HookArgs, PluginManagerBuilder};
 use indicatif::{ProgressBar, ProgressStyle};
-use serde_json;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -51,7 +50,6 @@ mod simd_json_utils {
         Ok(serde_json::to_string_pretty(value)?)
     }
 }
-use tokio;
 
 /// Output format options
 #[derive(Debug, Clone, ValueEnum)]
@@ -81,9 +79,9 @@ enum CoverageFormat {
 
 #[derive(Parser, Clone)]
 #[command(name = "fastest")]
-#[command(about = "🚀 Fast Python Test Runner - 3.9x faster than pytest")]
+#[command(about = "Rust-backed Python test runner")]
 #[command(
-    long_about = "\nFastest is a fast Python test runner built in Rust.\n\nFEATURES:\n• 3.9x faster than pytest (real benchmarks)\n• Smart coverage collection with real-time optimization\n• Incremental testing - only run affected tests\n• Watch mode with intelligent file monitoring\n• Test prioritization based on failure patterns\n• Dependency analysis for optimal execution order\n• Fixtures: tmp_path, capsys, monkeypatch\n• Parametrized tests with @pytest.mark.parametrize\n• Advanced caching and performance optimization\n\nADVANCED OPTIONS:\n• --coverage: Real-time coverage collection\n• --incremental: Smart change detection\n• --watch: Continuous testing\n• --prioritize: ML-based test ordering\n• --analyze-deps: Dependency optimization"
+    long_about = "\nFastest is a Rust-backed Python test runner under active compatibility work.\n\nVERIFIED CORE:\n• Test discovery for module, class, async, and parametrized tests\n• Built-in fixture support for common paths such as tmp_path, capsys, and monkeypatch\n• Skip and xfail marker handling for supported patterns\n• Discovery caching and keyword/marker filtering\n\nEXPERIMENTAL OPTIONS:\n• --coverage, --incremental, --watch, --prioritize, and --analyze-deps are still being stabilized\n• Treat advanced feature output as development feedback until the compatibility harness covers it"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -143,35 +141,35 @@ struct Cli {
     pdb: bool,
 
     // === ADVANCED FEATURES ===
-    /// Enable code coverage collection
+    /// Experimental: enable coverage framework output
     #[arg(long = "coverage")]
     coverage: bool,
 
-    /// Coverage report formats (can specify multiple)
+    /// Experimental: coverage report formats to request
     #[arg(long = "cov-report", value_enum)]
     cov_format: Vec<CoverageFormat>,
 
-    /// Only run tests affected by recent changes (requires git)
+    /// Experimental: select tests affected by recent changes (requires git)
     #[arg(long = "incremental")]
     incremental: bool,
 
-    /// Only run tests for changed files since last commit
+    /// Experimental: select tests for changed files since last commit
     #[arg(long = "changed-only")]
     changed_only: bool,
 
-    /// Watch mode - continuously run tests when files change
+    /// Experimental: watch mode framework
     #[arg(short = 'f', long = "watch")]
     watch: bool,
 
-    /// Enable test prioritization based on failure history
+    /// Experimental: prioritize tests based on failure history
     #[arg(long = "prioritize")]
     prioritize: bool,
 
-    /// Analyze and optimize test execution order
+    /// Experimental: analyze dependency-informed execution order
     #[arg(long = "analyze-deps")]
     analyze_deps: bool,
 
-    /// Maximum number of priority tests to run first
+    /// Experimental: maximum number of priority tests to run first
     #[arg(long = "priority-limit", default_value = "50")]
     priority_limit: usize,
 
@@ -180,7 +178,7 @@ struct Cli {
     #[arg(long = "no-plugins")]
     no_plugins: bool,
 
-    /// Additional plugin directories
+    /// Experimental: additional plugin directories
     #[arg(long = "plugin-dir")]
     plugin_dirs: Vec<PathBuf>,
 
@@ -188,15 +186,15 @@ struct Cli {
     #[arg(long = "disable-plugin")]
     disabled_plugins: Vec<String>,
 
-    /// Plugin configuration options (key=value)
+    /// Experimental: plugin configuration options (key=value)
     #[arg(long = "plugin-opt")]
     plugin_opts: Vec<String>,
 
-    /// Coverage source directories (for pytest-cov compatibility)
+    /// Experimental: coverage source directories (pytest-cov-style compatibility)
     #[arg(long = "cov")]
     cov_source: Vec<PathBuf>,
 
-    /// Generate coverage report in HTML format (pytest-cov compat)
+    /// Experimental: generate pytest-cov-style HTML coverage output
     #[arg(long = "cov-report-html")]
     cov_report_html: Option<PathBuf>,
 }
@@ -277,18 +275,17 @@ fn show_banner(cli: &Cli) {
     let version = env!("CARGO_PKG_VERSION");
     println!(
         "{}",
-        format!("🚀 Fastest v{} - Fast Python Test Runner", version)
+        format!("Fastest v{} - Rust-backed Python test runner", version)
             .bold()
             .cyan()
     );
 
     if cli.verbose > 0 {
-        println!("{}", "   ⚡ 3.9x faster than pytest (verified)".dimmed());
         println!(
             "{}",
-            "   🧠 Built with Rust for maximum performance".dimmed()
+            "   Built with Rust for compatibility-focused execution".dimmed()
         );
-        println!("{}", "   🎯 Basic pytest compatibility".dimmed());
+        println!("{}", "   🎯 Compatibility-first pytest support".dimmed());
         println!();
     }
 }
@@ -377,39 +374,39 @@ async fn discover_command(cli: &Cli, format: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Run tests command with advanced features
+/// Run tests command with optional experimental feature scaffolding
 async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     // Handle watch mode
     if cli.watch {
         println!(
             "{}",
-            "⚠️  Watch mode: Framework ready, implementation coming soon!".yellow()
+            "⚠️  Watch mode is experimental; running tests once.".yellow()
         );
         println!(
             "{}",
-            "   Running tests once with advanced features enabled...".dimmed()
+            "   File watching is not treated as a stable user-facing loop yet.".dimmed()
         );
     }
 
     // Show advanced features status
-    if cli.coverage || cli.incremental || cli.changed_only || cli.prioritize || cli.analyze_deps {
-        if cli.verbose > 0 {
-            eprintln!("🚀 Advanced features requested:");
-            if cli.coverage {
-                eprintln!("  📊 Coverage: Framework ready (implementation pending)");
-            }
-            if cli.incremental {
-                eprintln!("  ⚡ Incremental: Framework active");
-            }
-            if cli.changed_only {
-                eprintln!("  🔍 Changed-only: Framework active");
-            }
-            if cli.prioritize {
-                eprintln!("  🎯 Prioritization: Framework active");
-            }
-            if cli.analyze_deps {
-                eprintln!("  🔗 Dependencies: Framework active");
-            }
+    if (cli.coverage || cli.incremental || cli.changed_only || cli.prioritize || cli.analyze_deps)
+        && cli.verbose > 0
+    {
+        eprintln!("Experimental features requested:");
+        if cli.coverage {
+            eprintln!("  📊 Coverage: framework output is not a verified report yet");
+        }
+        if cli.incremental {
+            eprintln!("  ⚡ Incremental: experimental selection framework active");
+        }
+        if cli.changed_only {
+            eprintln!("  🔍 Changed-only: experimental selection framework active");
+        }
+        if cli.prioritize {
+            eprintln!("  🎯 Prioritization: experimental ordering framework active");
+        }
+        if cli.analyze_deps {
+            eprintln!("  🔗 Dependencies: experimental analysis framework active");
         }
     }
 
@@ -651,7 +648,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
         "✓".green(),
         discovered_tests.len(),
         if cli.coverage {
-            "with coverage framework"
+            "with experimental coverage framework"
         } else {
             ""
         }
@@ -669,7 +666,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
     // Configure executor
     if cli.verbose > 0 {
         let features = if advanced_manager.is_some() {
-            " with advanced optimizations"
+            " with experimental feature scaffolding"
         } else {
             ""
         };
@@ -761,7 +758,7 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
                 "xpassed": xpassed,
                 "total": results.len(),
                 "duration_seconds": duration.as_secs_f64(),
-                "success": failed == 0 && xpassed == 0,
+                "success": failed == 0,
                 "advanced_features_enabled": advanced_manager.is_some(),
                 "coverage_enabled": cli.coverage,
                 "incremental_enabled": cli.incremental || cli.changed_only,
@@ -792,21 +789,12 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
             if summary_parts.is_empty() {
                 println!("No tests were run");
             } else {
-                let emoji = if failed == 0 && xpassed == 0 {
-                    "🎉"
-                } else {
-                    "💔"
-                };
+                let emoji = if failed == 0 { "🎉" } else { "💔" };
                 println!(
-                    "{} {} in {:.2}s {}",
+                    "{} {} in {:.2}s",
                     emoji.bold(),
                     summary_parts.join(", "),
-                    duration.as_secs_f64(),
-                    if failed == 0 && xpassed == 0 {
-                        format!("(3.9x faster than pytest)").dimmed()
-                    } else {
-                        "".into()
-                    }
+                    duration.as_secs_f64()
                 );
             }
 
@@ -832,29 +820,29 @@ async fn run_command(cli: &Cli) -> anyhow::Result<()> {
                     "  Tests per second: {:.0}",
                     results.len() as f64 / duration.as_secs_f64()
                 );
-                println!("  Speedup vs pytest: 3.9x");
 
                 if advanced_manager.is_some() {
-                    println!("  🧠 Advanced features framework: Active");
+                    println!("  🧠 Advanced features framework: Experimental");
                     if cli.coverage {
-                        println!("    📊 Coverage: Framework ready");
+                        println!("    📊 Coverage: Experimental");
                     }
                     if cli.incremental || cli.changed_only {
-                        println!("    ⚡ Incremental: Active");
+                        println!("    ⚡ Incremental: Experimental");
                     }
                     if cli.prioritize {
-                        println!("    🎯 Prioritization: Active");
+                        println!("    🎯 Prioritization: Experimental");
                     }
                     if cli.analyze_deps {
-                        println!("    🔗 Dependencies: Active");
+                        println!("    🔗 Dependencies: Experimental");
                     }
                 }
             }
         }
     }
 
-    // Exit with error code if tests failed or xpassed
-    if failed > 0 || xpassed > 0 {
+    // Match pytest's default behavior: non-strict XPASS is reported but does
+    // not fail the process unless strict xfail support is added separately.
+    if failed > 0 {
         std::process::exit(1);
     }
 
@@ -867,7 +855,7 @@ async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> any
 
     if detailed {
         println!("{}", format!("🚀 Fastest v{}", version).bold().cyan());
-        println!("{}", "Fast Python Test Runner".bold());
+        println!("{}", "Rust-backed Python test runner".bold());
         println!();
 
         // System information
@@ -879,30 +867,28 @@ async fn version_command(_cli: &Cli, detailed: bool, check_updates: bool) -> any
         // Features
         println!();
         println!("{}", "Core Features:".bold().yellow());
-        println!("  ✓ Ultra-fast test discovery and execution");
+        println!("  ✓ Rust-backed test discovery and execution");
         println!("  ✓ Built-in fixture support (tmp_path, capsys, monkeypatch)");
         println!("  ✓ Parametrized tests (@pytest.mark.parametrize)");
         println!("  ✓ Advanced test filtering and selection");
-        println!("  ✓ Intelligent parallel execution");
+        println!("  ✓ Compatibility-first in-process execution");
         println!("  ✓ Smart discovery caching");
 
         println!();
-        println!("{}", "Advanced Features:".bold().cyan());
-        println!("  ⚡ Real-time code coverage collection (--coverage)");
-        println!("  🎯 Incremental testing - only run affected tests (--incremental)");
-        println!("  👀 Watch mode - continuous testing (--watch)");
-        println!("  🧠 ML-based test prioritization (--prioritize)");
-        println!("  🔗 Dependency analysis for optimal execution (--analyze-deps)");
-        println!("  📊 Multi-format coverage reports (HTML, XML, JSON, LCOV)");
-        println!("  🚀 Self-updating binary with integrity checks");
+        println!("{}", "Experimental Features:".bold().cyan());
+        println!("  📊 Coverage framework (--coverage)");
+        println!("  🎯 Incremental selection framework (--incremental)");
+        println!("  👀 Watch mode framework (--watch)");
+        println!("  🧠 Prioritization framework (--prioritize)");
+        println!("  🔗 Dependency analysis framework (--analyze-deps)");
+        println!("  🚀 Self-update support");
 
         // Performance
         println!();
         println!("{}", "Performance:".bold().yellow());
-        println!("  • 3.9x faster than pytest (verified with real benchmarks)");
         println!("  • Rust-based execution engine");
         println!("  • Intelligent test discovery caching");
-        println!("  • Parallel test execution");
+        println!("  • Current benchmark claims are tracked in docs/reference/roadmap.md");
     } else {
         println!("fastest {}", version);
     }

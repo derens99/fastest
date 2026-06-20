@@ -2,9 +2,8 @@ pub mod tree_sitter;
 
 // Re-export the tree-sitter parser as the default parser
 pub use tree_sitter::{
-    FixtureDefinition, Parser, TestFunction, 
-    SetupTeardownMethod, SetupTeardownType, SetupTeardownScope,
-    ModuleMetadata, ClassMetadata
+    ClassMetadata, FixtureDefinition, ModuleMetadata, Parser, SetupTeardownMethod,
+    SetupTeardownScope, SetupTeardownType, TestFunction,
 };
 
 // For backward compatibility

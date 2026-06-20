@@ -1,19 +1,20 @@
 # Installation Guide
 
-Fastest is a blazing-fast Python test runner written in Rust. This guide covers all installation methods for different platforms and use cases.
+Fastest is a Rust-backed Python test runner under active compatibility work.
+This guide covers installation methods for development and local validation.
 
 ## 🚀 Quick Install (Recommended)
 
 ### macOS/Linux
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 ```
 
 These scripts will:
@@ -43,7 +44,7 @@ For contributors or those who want the latest development version:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/fastest.git
+git clone https://github.com/derens99/fastest.git
 cd fastest
 
 # Install development version
@@ -60,7 +61,7 @@ This will:
 
 ### Step 1: Download Binary
 
-Download the appropriate binary from the [releases page](https://github.com/yourusername/fastest/releases):
+Download the appropriate binary from the [releases page](https://github.com/derens99/fastest/releases):
 
 - **macOS (Apple Silicon)**: `fastest-aarch64-apple-darwin.tar.gz`
 - **macOS (Intel)**: `fastest-x86_64-apple-darwin.tar.gz`
@@ -85,7 +86,7 @@ sudo mv fastest /usr/local/bin/  # or any directory in your PATH
 
 ```bash
 # Check version
-fastest --version
+fastest version
 
 # Run help
 fastest --help
@@ -100,6 +101,20 @@ fastest test_example.py
 - Python 3.8 or higher
 - Works with virtual environments (venv, conda, poetry)
 - Automatically detects active Python environment
+
+## 🧩 PyO3 Linking For Development
+
+When building or testing from source, set `PYO3_PYTHON` to a linkable Python.
+The Makefile defaults to `python3.12` when available, then falls back to
+`python3`.
+
+```bash
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
+make verify
+```
+
+If Cargo tries to link an unavailable system Python, set `PYO3_PYTHON`
+explicitly and rerun the command.
 
 ## 🔄 Updating Fastest
 

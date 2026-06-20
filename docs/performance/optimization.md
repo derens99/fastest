@@ -148,7 +148,7 @@ jobs:
       - name: Install Fastest
         run: |
           if ! command -v fastest &> /dev/null; then
-            curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+            curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
           fi
       
       # Run tests with optimizations
@@ -165,11 +165,11 @@ jobs:
 FROM rust:1.70 as builder
 WORKDIR /app
 COPY . .
-RUN cargo build --release --features mimalloc
+RUN PYO3_PYTHON=$(command -v python3.12 || command -v python3) cargo build --release --features mimalloc
 
 FROM python:3.11-slim
 COPY --from=builder /app/target/release/fastest /usr/local/bin/
-RUN fastest --version
+RUN fastest version
 ```
 
 ## 📋 Performance Checklist
@@ -250,4 +250,4 @@ FASTEST_LOG=debug fastest tests/ 2>&1 | grep "strategy"
 
 ---
 
-*Remember: Fastest is already optimized out of the box. These techniques help you get the absolute maximum performance.*
+*Remember: measure before tuning. These techniques are useful only when current benchmark artifacts show they help your suite.*

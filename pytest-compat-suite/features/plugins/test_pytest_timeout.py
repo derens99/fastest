@@ -186,6 +186,7 @@ class TestTimeoutErrors:
         time.sleep(2)
         # Should show timeout error with duration
     
+    @pytest.mark.xfail(reason="Intentional exception-reporting example")
     @pytest.mark.timeout(1)
     def test_timeout_with_exception(self):
         """Test timeout when test raises exception."""

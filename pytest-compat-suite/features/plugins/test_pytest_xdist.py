@@ -131,6 +131,7 @@ class TestXdistReporting:
         # Should show [gw0] PASSED etc.
         assert True
     
+    @pytest.mark.xfail(reason="Intentional failure-reporting example")
     def test_failure_reporting(self):
         """Test failure reporting from workers."""
         # Failures should be properly collected
@@ -229,6 +230,7 @@ class TestXdistErrors:
         # Should be reported properly
         assert True
     
+    @pytest.mark.xfail(reason="Intentional worker fixture-error example")
     def test_fixture_error_in_worker(self, broken_fixture):
         """Test fixture errors in workers."""
         assert True

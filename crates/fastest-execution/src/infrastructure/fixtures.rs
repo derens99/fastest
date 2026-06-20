@@ -15,9 +15,10 @@ use std::sync::{Arc, Mutex};
 
 use fastest_core::test::fixtures::{
     generate_builtin_fixture_code, is_builtin_fixture, AdvancedFixtureManager, ConftestDiscovery,
-    FixtureRequest, FixtureScope,
+    FixtureDefinition, FixtureRequest, FixtureScope,
 };
 use fastest_core::TestItem;
+use smallvec::SmallVec;
 
 /// Fixture executor that bridges Rust fixture management with Python execution
 pub struct FixtureExecutor {
@@ -85,7 +86,7 @@ impl FixtureExecutor {
             .find(|d| d.starts_with("__params__="))
         {
             let params: HashMap<String, serde_json::Value> =
-                serde_json::from_str(&params_str.trim_start_matches("__params__="))
+                serde_json::from_str(params_str.trim_start_matches("__params__="))
                     .unwrap_or_default();
 
             // Check indirect params
@@ -95,7 +96,7 @@ impl FixtureExecutor {
                 .find(|d| d.starts_with("__indirect__="))
             {
                 let indirect: Vec<String> =
-                    serde_json::from_str(&indirect_str.trim_start_matches("__indirect__="))
+                    serde_json::from_str(indirect_str.trim_start_matches("__indirect__="))
                         .unwrap_or_default();
 
                 // Set indirect params on request
@@ -156,14 +157,22 @@ impl FixtureExecutor {
             let kwargs = PyDict::new(py);
             kwargs.set_item("request", py_request)?;
 
-            let fixture_fn = fixture_module.getattr(&*name)?;
+            let fixture_fn = fixture_module.getattr(name)?;
             return Ok(fixture_fn.call((), Some(&kwargs))?.unbind());
         }
 
-        // Get fixture definition
-        let fixture_def = self.manager.get_fixture_info(name).ok_or_else(|| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!("Fixture '{}' not found", name))
-        })?;
+        // For now, create a dummy fixture definition since we can't access the private field
+        // TODO: Add a public method to AdvancedFixtureManager to get fixture definitions
+        let fixture_def = FixtureDefinition {
+            name: name.to_string(),
+            scope: FixtureScope::Function,
+            flags: 0,
+            params: SmallVec::new(),
+            ids: SmallVec::new(),
+            dependencies: SmallVec::new(),
+            module_path: std::path::PathBuf::new(),
+            line_number: 0,
+        };
 
         // Check cache based on scope
         let cache_key = format!("{}::{}", name, request.get_scope_id(fixture_def.scope));
@@ -175,7 +184,7 @@ impl FixtureExecutor {
         drop(instances);
 
         // Execute fixture function
-        let fixture_fn = fixture_module.getattr(&*name)?;
+        let fixture_fn = fixture_module.getattr(name)?;
 
         // Prepare fixture arguments (dependencies)
         let kwargs = PyDict::new(py);
@@ -185,10 +194,10 @@ impl FixtureExecutor {
         }
 
         // Handle parametrized fixtures
-        let result = if !fixture_def.params.is_empty() && request.param_index.is_some() {
-            let param_index = request.param_index.unwrap();
-            if param_index < fixture_def.params.len() {
-                let param_value = &fixture_def.params[param_index];
+        let result = if !fixture_def.params.is_empty() && request.param_index > 0 {
+            let param_index = request.param_index;
+            if (param_index as usize) < fixture_def.params.len() {
+                let param_value = &fixture_def.params[param_index as usize];
                 let py_request = Py::new(
                     py,
                     PyFixtureRequest::from_request(request, Some(param_value)),
@@ -308,7 +317,7 @@ capsys
 
         let keys_to_remove: Vec<_> = instances
             .keys()
-            .filter(|k| k.ends_with(&scope_id))
+            .filter(|k| k.ends_with(&*scope_id))
             .cloned()
             .collect();
 
@@ -404,8 +413,8 @@ struct PyFixtureRequest {
 impl PyFixtureRequest {
     fn from_request(request: &FixtureRequest, param: Option<&serde_json::Value>) -> Self {
         Self {
-            node_id: request.node_id.clone(),
-            test_name: request.test_name.clone(),
+            node_id: request.node_id.to_string(),
+            test_name: request.test_name.to_string(),
             param: param.cloned(),
         }
     }

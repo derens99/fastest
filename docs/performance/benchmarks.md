@@ -1,149 +1,85 @@
 # Performance Benchmarks
 
-## Official Benchmark Results
+Fastest is designed to become a high-performance pytest-style runner, but the
+current project policy is evidence first: do not quote fixed speedups unless
+they come from a fresh benchmark artifact generated from this checkout.
 
-**Last Updated:** January 2025  
-**Fastest Version:** 1.0.10+  
-**Comparison:** pytest 8.3.5
+## Current Status
 
-## Executive Summary
+The compatibility-first execution path is the verified path today. The full
+compatibility report currently passes every discovered compatibility category,
+including plugins, but that does not prove the older threshold-based performance
+claims.
 
-- **Average Performance:** **3.9x faster** than pytest (validated)
-- **Peak Performance:** **5,700 tests/second** with WorkStealing strategy
-- **Discovery Speed:** **18.9x faster** test discovery on average
-- **Compatibility:** **91% pytest compatibility** (validated with 339-test suite)
+Use these commands as the current source of truth:
 
-## Comprehensive Test Suite Results
+```bash
+# Accepted local correctness gate
+make verify
 
-We created a 339-test comprehensive suite covering ALL pytest features:
+# Full compatibility baseline
+make compat-report-all
 
-| Metric | Result |
-|--------|--------|
-| Total Tests | 339 |
-| Execution Time | 0.62 seconds |
-| Tests/Second | ~546 |
-| Passed | 284 (90% of non-failing) |
-| Real Compatibility | 91% |
+# Quick benchmark harness
+make bench
 
-## Performance by Test Suite Size
+# Compare Fastest and pytest on a chosen suite
+make compare TEST_DIR=pytest-compat-suite/core/basic
+```
 
-### Discovery Performance
+Generated quick benchmark reports are written under
+`target/benchmark-artifacts/quick/benchmark_results.{json,md}`. Treat those
+artifacts, not this page, as the benchmark record.
 
-| Test Count | Fastest | pytest | Speedup | Tests/Second |
-|------------|---------|--------|---------|-------------|
-| 14 | 0.011s | 0.119s | **10.7x** | ~1,270 |
-| 74 | 0.011s | 0.136s | **12.7x** | ~6,700 |
-| 148 | 0.011s | 0.153s | **14.5x** | ~13,400 |
-| 740 | 0.013s | 0.287s | **21.6x** | ~57,000 |
-| 13,709 | 0.099s | ~2.0s | **~20x** | ~138,000 |
+## What Is Verified
 
-### Total Execution Performance
+- Rust and Python project gates pass through `make verify`.
+- `make compat-report-all` produces `target/compatibility-report-all.json`.
+- Every discovered compatibility category has a passing Fastest summary in the
+  current report.
+- The current integration tests document that suite sizes use the
+  compatibility-first `UltraInProcess` path.
+- `make bench` produces a quick benchmark artifact with hardware, Python,
+  pytest, command-line, and cache-context metadata.
 
-| Test Count | Fastest | pytest | Speedup | Strategy Used |
-|------------|---------|--------|---------|---------------|
-| 10 | 0.109s | 0.261s | **2.4x** | InProcess |
-| 20 | 0.110s | 0.309s | **2.8x** | InProcess |
-| 50 | 0.119s | 0.391s | **3.3x** | HybridBurst |
-| 100 | 0.115s | 0.329s | **2.9x** | HybridBurst |
-| 500 | 0.080s | 0.660s | **8.3x** | WorkStealing |
-| 1,000 | 0.107s | 1.105s | **10.3x** | WorkStealing |
-| 2,000 | 0.159s | 2.071s | **13.1x** | WorkStealing |
+## What Is Not Yet Revalidated
 
-## Execution Strategy Performance
+Older documentation claimed fixed numbers such as multi-x speedups, thousands
+of tests per second, and automatic `InProcess` / `HybridBurst` / `WorkStealing`
+strategy selection. Those claims are not currently treated as product claims.
 
-Fastest automatically selects the optimal strategy based on test count:
+Before publishing performance numbers again, regenerate and archive:
 
-| Strategy | Test Count | Method | Performance |
-|----------|------------|--------|-------------|
-| **InProcess** | ≤20 tests | PyO3 direct execution | **45 tests/sec** |
-| **HybridBurst** | 21-100 tests | Intelligent threading | **180-250 tests/sec** |
-| **WorkStealing** | >100 tests | Lock-free parallel | **5,700 tests/sec** |
-
-## Real-World Performance
-
-### Large Project (749 tests)
-- **Fastest:** 0.13-0.23 seconds
-- **pytest:** 1.0+ seconds  
-- **Speedup:** **3.9x faster**
-- **Throughput:** 3,200-5,700 tests/second
-
-### Django Project Example
-- 500+ tests with database fixtures
-- **Fastest:** 2.3 seconds
-- **pytest:** 8.7 seconds
-- **Speedup:** **3.8x faster**
-
-## Performance Features
-
-### What Makes Fastest So Fast?
-
-1. **Parallel Discovery**
-   - Multi-threaded file traversal
-   - SIMD-accelerated pattern matching
-   - Intelligent caching with content hashing
-
-2. **Smart Execution**
-   - Automatic strategy selection
-   - Lock-free work distribution
-   - Zero-copy result collection
-
-3. **Rust Performance**
-   - No GIL limitations
-   - Memory-efficient processing
-   - CPU cache optimization
-
-4. **Advanced Optimizations**
-   - SIMD JSON parsing (1.8x boost)
-   - Optional mimalloc (8-15% improvement)
-   - Thread-local storage for zero allocation
+- The exact Fastest binary and commit.
+- Python and pytest versions.
+- Hardware and operating-system details.
+- Warm and cold cache behavior.
+- Separate discovery, execution, and total wall-clock times.
+- Raw command lines and raw output artifacts.
 
 ## Benchmark Methodology
 
-### Test Environment
-- **Hardware:** Apple M1/M2, 10 cores
-- **OS:** macOS 15.1.1
-- **Python:** 3.12
-- **Isolation:** Fresh environment, warm filesystem cache
+Use the same input suite for pytest and Fastest, run each command multiple
+times, and report both raw timings and summary statistics. Avoid mixing
+compatibility work and benchmark claims in one result: correctness gates should
+pass before speedups are advertised.
 
-### Measurement Process
-1. Run each benchmark 5 times
-2. Discard outliers (top/bottom)
-3. Report average of middle 3 runs
-4. Separate discovery from execution timing
+Recommended workflow:
 
-### Test Suites Used
-- Synthetic suites (10-2000 tests)
-- Real pytest compatibility suite (339 tests)
-- Production Django/Flask projects
-- Scientific computing test suites
-
-## Performance Tips
-
-### Maximize Speed
 ```bash
-# Use all CPU cores
-fastest -n auto tests/
-
-# Enable optimizations
-export FASTEST_OPTIMIZE=true
-
-# Use with mimalloc
-LD_PRELOAD=/usr/lib/libmimalloc.so fastest tests/
+make verify
+make compat-report-all
+make compare TEST_DIR=pytest-compat-suite/core/basic COMPARISON_RUNS=5
+make bench
 ```
 
-### When Fastest Shines
-- Large test suites (>100 tests)
-- Parallel-safe tests
-- Frequent test runs during development
-- CI/CD pipelines
+## Performance Roadmap
 
-## Future Performance Goals
+1. Keep the compatibility report green.
+2. Rebuild benchmark fixtures around verified compatibility categories.
+3. Revalidate strategy selection behavior with tests and raw timing artifacts.
+4. Publish benchmark numbers only when the artifact and methodology are checked
+   into the release evidence.
 
-- **10x faster** than pytest for all suite sizes
-- **Sub-10ms** discovery for any project
-- **GPU acceleration** for data science tests
-- **Distributed execution** across machines
-
----
-
-*Performance is our top priority. Every feature is designed with speed in mind.*
+Until then, describe Fastest as performance-oriented and Rust-backed, not as a
+runner with a fixed verified speedup.

@@ -78,12 +78,10 @@ impl SmartCoverage {
         let mut covered_lines = 0;
         let mut files = HashMap::new();
 
-        for result in results {
-            if let Ok(file_cov) = result {
-                total_lines += file_cov.lines_total;
-                covered_lines += file_cov.lines_covered.len() as u32;
-                files.insert(file_cov.file_path.clone(), file_cov);
-            }
+        for file_cov in results.into_iter().flatten() {
+            total_lines += file_cov.lines_total;
+            covered_lines += file_cov.lines_covered.len() as u32;
+            files.insert(file_cov.file_path.clone(), file_cov);
         }
 
         let coverage_percent = if total_lines > 0 {

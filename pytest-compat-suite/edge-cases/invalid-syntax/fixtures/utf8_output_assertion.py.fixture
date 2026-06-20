@@ -1,0 +1,30 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""Test that UTF-8 characters work properly in test output"""
+
+def test_utf8_simple():
+    """Test simple UTF-8 characters"""
+    print("Hello 🌍 World! Testing UTF-8: ñ, ü, ß, 中文, 日本語, 한글")
+    assert True
+
+def test_utf8_in_assertion_error():
+    """Test UTF-8 in assertion errors"""
+    value = "café ☕"
+    assert value == "tea 🍵", f"Expected tea but got {value}"
+
+def test_utf8_emojis():
+    """Test various emojis and special characters"""
+    emojis = "🚀 🐍 ✅ ❌ 🔥 💯 🎉 🌟"
+    print(f"Testing emojis: {emojis}")
+    assert "🚀" in emojis
+
+def test_utf8_in_variables():
+    """Test UTF-8 in variable names and values"""
+    café = "coffee"
+    naïve = "simple"
+    print(f"Variables: café={café}, naïve={naïve}")
+    assert café == "coffee"
+
+if __name__ == "__main__":
+    test_utf8_simple()
+    print("✅ UTF-8 test passed!")

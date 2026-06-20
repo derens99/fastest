@@ -84,7 +84,7 @@ impl CoveragePlugin {
         // Import coverage module
         let coverage_module = PyModule::import(py, "coverage")
             .map_err(|_| PyErr::new::<pyo3::exceptions::PyImportError, _>(
-                "coverage module not found. Install with: pip install coverage"
+                "coverage module not found. Install with: uv add coverage"
             ))?;
         
         // Create coverage instance

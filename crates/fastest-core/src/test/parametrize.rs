@@ -6,6 +6,8 @@ use rustpython_parser::Parse;
 use serde_json::Value;
 use std::collections::HashMap;
 
+type ParametrizeInfo = (Vec<String>, Vec<ParamSet>, Option<Vec<String>>);
+
 /// Represents a parametrized test case
 #[derive(Debug, Clone)]
 pub struct ParametrizedTest {
@@ -23,9 +25,7 @@ pub struct ParamSet {
 }
 
 /// Parse parametrize decorator and extract parameter information
-pub fn parse_parametrize_decorator(
-    decorator: &str,
-) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+pub fn parse_parametrize_decorator(decorator: &str) -> Option<ParametrizeInfo> {
     // Remove @ prefix if present and extract the call expression
     let cleaned = decorator.trim_start_matches('@');
 
@@ -58,25 +58,21 @@ pub fn parse_parametrize_decorator(
 }
 
 /// Parse parametrize decorator from AST expression
-pub fn parse_parametrize_expr(
-    expr: &ast::Expr,
-) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+pub fn parse_parametrize_expr(expr: &ast::Expr) -> Option<ParametrizeInfo> {
     match expr {
         ast::Expr::Call(call) => parse_parametrize_call(call),
         _ => None,
     }
 }
 
-fn parse_parametrize_call(
-    call: &ast::ExprCall,
-) -> Option<(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)> {
+fn parse_parametrize_call(call: &ast::ExprCall) -> Option<ParametrizeInfo> {
     // Check if it's a parametrize call
     if !is_parametrize_call(&call.func) {
         return None;
     }
 
     // Extract parameter names (first argument)
-    let param_names = call.args.get(0).and_then(extract_param_names)?;
+    let param_names = call.args.first().and_then(extract_param_names)?;
 
     // Extract parameter values (second argument)
     let values = call.args.get(1)?;
@@ -175,28 +171,58 @@ fn parse_param_values(
     ids: &Option<Vec<String>>,
 ) -> Option<Vec<ParamSet>> {
     match expr {
-        ast::Expr::List(list) => {
-            let mut param_sets = Vec::new();
-
-            for (idx, item) in list.elts.iter().enumerate() {
-                let mut param_set = parse_single_param_set(item, param_names.len())?;
-
-                // Apply overall id if no specific id
-                if param_set.id.is_none() {
-                    if let Some(ids_vec) = ids {
-                        if let Some(id) = ids_vec.get(idx) {
-                            param_set.id = Some(id.clone());
-                        }
-                    }
-                }
-
-                param_sets.push(param_set);
-            }
-
-            Some(param_sets)
-        }
+        ast::Expr::List(list) => parse_param_sequence(list.elts.iter(), param_names.len(), ids),
+        ast::Expr::Tuple(tuple) => parse_param_sequence(tuple.elts.iter(), param_names.len(), ids),
+        ast::Expr::Call(call) if param_names.len() == 1 => parse_range_param_sets(call, ids),
         _ => None,
     }
+}
+
+fn parse_param_sequence<'a, I>(
+    items: I,
+    expected_params: usize,
+    ids: &Option<Vec<String>>,
+) -> Option<Vec<ParamSet>>
+where
+    I: IntoIterator<Item = &'a ast::Expr>,
+{
+    let mut param_sets = Vec::new();
+
+    for (idx, item) in items.into_iter().enumerate() {
+        let mut param_set = parse_single_param_set(item, expected_params)?;
+
+        if param_set.id.is_none() {
+            if let Some(ids_vec) = ids {
+                if let Some(id) = ids_vec.get(idx) {
+                    param_set.id = Some(id.clone());
+                }
+            }
+        }
+
+        param_sets.push(param_set);
+    }
+
+    Some(param_sets)
+}
+
+fn parse_range_param_sets(
+    call: &ast::ExprCall,
+    ids: &Option<Vec<String>>,
+) -> Option<Vec<ParamSet>> {
+    let values = expand_range_call(call)?;
+
+    Some(
+        values
+            .into_iter()
+            .enumerate()
+            .map(|(idx, value)| ParamSet {
+                id: ids.as_ref().and_then(|ids_vec| ids_vec.get(idx).cloned()),
+                values: vec![value],
+                marks: Vec::new(),
+                is_xfail: false,
+            })
+            .collect(),
+    )
 }
 
 fn parse_single_param_set(expr: &ast::Expr, expected_params: usize) -> Option<ParamSet> {
@@ -298,6 +324,8 @@ fn extract_marks(expr: &ast::Expr) -> Vec<String> {
             let s = expr_to_string(expr);
             if s.contains("xfail") {
                 vec!["xfail".to_string()]
+            } else if s.contains("skip") {
+                vec!["skip".to_string()]
             } else {
                 vec![]
             }
@@ -310,14 +338,13 @@ fn ast_expr_to_json(expr: &ast::Expr) -> Value {
         ast::Expr::Constant(c) => constant_to_json(&c.value),
         ast::Expr::List(list) => Value::Array(list.elts.iter().map(ast_expr_to_json).collect()),
         ast::Expr::Tuple(tuple) => Value::Array(tuple.elts.iter().map(ast_expr_to_json).collect()),
+        ast::Expr::Set(set) => set_to_json(set.elts.iter().map(ast_expr_to_json).collect()),
         ast::Expr::Dict(dict) => {
             let mut map = serde_json::Map::new();
             for (key_expr, value_expr) in dict.keys.iter().zip(&dict.values) {
-                if let Some(key) = key_expr {
-                    if let ast::Expr::Constant(c) = key {
-                        if let ast::Constant::Str(s) = &c.value {
-                            map.insert(s.clone(), ast_expr_to_json(value_expr));
-                        }
+                if let Some(ast::Expr::Constant(c)) = key_expr {
+                    if let ast::Constant::Str(s) = &c.value {
+                        map.insert(s.clone(), ast_expr_to_json(value_expr));
                     }
                 }
             }
@@ -343,6 +370,12 @@ fn ast_expr_to_json(expr: &ast::Expr) -> Value {
                 Value::Null
             }
         }
+        ast::Expr::BinOp(binop) => evaluate_string_repetition(binop)
+            .map(Value::String)
+            .unwrap_or_else(|| Value::String(expr_to_string(expr))),
+        ast::Expr::Call(call) => {
+            parse_static_call(call).unwrap_or_else(|| Value::String(expr_to_string(expr)))
+        }
         _ => Value::String(expr_to_string(expr)),
     }
 }
@@ -357,13 +390,200 @@ fn constant_to_json(constant: &ast::Constant) -> Value {
                 Value::String(i.to_string())
             }
         }
-        ast::Constant::Float(f) => serde_json::Number::from_f64(*f)
-            .map(Value::Number)
-            .unwrap_or(Value::Null),
+        ast::Constant::Float(f) => float_to_json(*f),
         ast::Constant::Bool(b) => Value::Bool(*b),
         ast::Constant::None => Value::Null,
         _ => Value::Null,
     }
+}
+
+fn parse_static_call(call: &ast::ExprCall) -> Option<Value> {
+    parse_float_call(call).or_else(|| parse_set_call(call))
+}
+
+fn parse_float_call(call: &ast::ExprCall) -> Option<Value> {
+    if expr_to_string(&call.func) != "float" || !call.keywords.is_empty() {
+        return None;
+    }
+
+    if call.args.is_empty() {
+        return Some(float_to_json(0.0));
+    }
+
+    if call.args.len() != 1 {
+        return None;
+    }
+
+    let value = match &call.args[0] {
+        ast::Expr::Constant(c) => match &c.value {
+            ast::Constant::Str(s) => parse_float_literal(s)?,
+            ast::Constant::Int(i) => i.to_string().parse::<f64>().ok()?,
+            ast::Constant::Float(f) => *f,
+            _ => return None,
+        },
+        ast::Expr::UnaryOp(_) => match ast_expr_to_json(&call.args[0]) {
+            Value::Number(number) => number.as_f64()?,
+            _ => return None,
+        },
+        _ => return None,
+    };
+
+    Some(float_to_json(value))
+}
+
+fn parse_float_literal(value: &str) -> Option<f64> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "inf" | "+inf" | "infinity" | "+infinity" => Some(f64::INFINITY),
+        "-inf" | "-infinity" => Some(f64::NEG_INFINITY),
+        "nan" | "+nan" | "-nan" => Some(f64::NAN),
+        other => other.parse::<f64>().ok(),
+    }
+}
+
+fn float_to_json(value: f64) -> Value {
+    if value.is_nan() {
+        special_float_json("nan")
+    } else if value == f64::INFINITY {
+        special_float_json("inf")
+    } else if value == f64::NEG_INFINITY {
+        special_float_json("-inf")
+    } else {
+        serde_json::Number::from_f64(value)
+            .map(Value::Number)
+            .unwrap_or(Value::Null)
+    }
+}
+
+fn special_float_json(kind: &str) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "__fastest_float__".to_string(),
+        Value::String(kind.to_string()),
+    );
+    Value::Object(map)
+}
+
+fn parse_set_call(call: &ast::ExprCall) -> Option<Value> {
+    if expr_to_string(&call.func) != "set" || !call.keywords.is_empty() {
+        return None;
+    }
+
+    if call.args.is_empty() {
+        return Some(set_to_json(Vec::new()));
+    }
+
+    if call.args.len() != 1 {
+        return None;
+    }
+
+    match &call.args[0] {
+        ast::Expr::List(list) => Some(set_to_json(
+            list.elts.iter().map(ast_expr_to_json).collect(),
+        )),
+        ast::Expr::Tuple(tuple) => Some(set_to_json(
+            tuple.elts.iter().map(ast_expr_to_json).collect(),
+        )),
+        ast::Expr::Set(set) => Some(set_to_json(set.elts.iter().map(ast_expr_to_json).collect())),
+        _ => None,
+    }
+}
+
+fn set_to_json(values: Vec<Value>) -> Value {
+    let mut map = serde_json::Map::new();
+    map.insert("__fastest_set__".to_string(), Value::Array(values));
+    Value::Object(map)
+}
+
+fn expand_range_call(call: &ast::ExprCall) -> Option<Vec<Value>> {
+    if expr_to_string(&call.func) != "range" || !call.keywords.is_empty() {
+        return None;
+    }
+
+    let args: Option<Vec<i64>> = call.args.iter().map(ast_expr_to_i64).collect();
+    let args = args?;
+
+    let (start, stop, step) = match args.as_slice() {
+        [stop] => (0, *stop, 1),
+        [start, stop] => (*start, *stop, 1),
+        [start, stop, step] => (*start, *stop, *step),
+        _ => return None,
+    };
+
+    if step == 0 {
+        return None;
+    }
+
+    let mut values = Vec::new();
+    let mut current = start;
+    while (step > 0 && current < stop) || (step < 0 && current > stop) {
+        values.push(Value::from(current));
+        current = current.saturating_add(step);
+        if values.len() > 100_000 {
+            return None;
+        }
+    }
+
+    Some(values)
+}
+
+fn ast_expr_to_i64(expr: &ast::Expr) -> Option<i64> {
+    match expr {
+        ast::Expr::Constant(c) => match &c.value {
+            ast::Constant::Int(i) => i.to_string().parse::<i64>().ok(),
+            _ => None,
+        },
+        ast::Expr::UnaryOp(unop) => match unop.op {
+            ast::UnaryOp::USub => ast_expr_to_i64(&unop.operand).map(|value| -value),
+            ast::UnaryOp::UAdd => ast_expr_to_i64(&unop.operand),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn evaluate_string_repetition(binop: &ast::ExprBinOp) -> Option<String> {
+    if binop.op != ast::Operator::Mult {
+        return None;
+    }
+
+    if let (Some(text), Some(count)) = (
+        ast_expr_to_string_literal(&binop.left),
+        ast_expr_to_repeat_count(&binop.right),
+    ) {
+        return repeat_string(text, count);
+    }
+
+    if let (Some(count), Some(text)) = (
+        ast_expr_to_repeat_count(&binop.left),
+        ast_expr_to_string_literal(&binop.right),
+    ) {
+        return repeat_string(text, count);
+    }
+
+    None
+}
+
+fn ast_expr_to_string_literal(expr: &ast::Expr) -> Option<String> {
+    match expr {
+        ast::Expr::Constant(c) => match &c.value {
+            ast::Constant::Str(s) => Some(s.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn ast_expr_to_repeat_count(expr: &ast::Expr) -> Option<i64> {
+    ast_expr_to_i64(expr)
+}
+
+fn repeat_string(text: String, count: i64) -> Option<String> {
+    let count = usize::try_from(count.max(0)).ok()?;
+    if count > 100_000 {
+        return None;
+    }
+
+    Some(text.repeat(count))
 }
 
 fn expr_to_string(expr: &ast::Expr) -> String {
@@ -449,7 +669,15 @@ pub fn expand_parametrized_tests(test: &TestItem, decorators: &[String]) -> Resu
         }
 
         if expanded_test.is_xfail {
-            expanded_test.decorators.push("__xfail__=True".to_string());
+            expanded_test.decorators.push(
+                "@pytest.mark.xfail(reason=\"Parametrized case expected failure\")".to_string(),
+            );
+        }
+
+        if case.marks.iter().any(|mark| mark == "skip") {
+            expanded_test
+                .decorators
+                .push("@pytest.mark.skip(reason=\"Parametrized case skipped\")".to_string());
         }
 
         expanded_tests.push(expanded_test);
@@ -464,11 +692,10 @@ struct TestCase {
     indirect_params: Vec<String>,
     id: Option<String>,
     is_xfail: bool,
+    marks: Vec<String>,
 }
 
-fn generate_test_cases(
-    param_info_list: &[(Vec<String>, Vec<ParamSet>, Option<Vec<String>>)],
-) -> Vec<TestCase> {
+fn generate_test_cases(param_info_list: &[ParametrizeInfo]) -> Vec<TestCase> {
     if param_info_list.is_empty() {
         return vec![];
     }
@@ -482,6 +709,7 @@ fn generate_test_cases(
             indirect_params: first_indirect.clone().unwrap_or_default(),
             id: set.id.clone(),
             is_xfail: set.is_xfail,
+            marks: set.marks.clone(),
         })
         .collect();
 
@@ -515,6 +743,7 @@ fn generate_test_cases(
                     indirect_params: merged_indirect,
                     id: set.id.clone().or_else(|| case.id.clone()),
                     is_xfail: case.is_xfail || set.is_xfail,
+                    marks: merge_marks(&case.marks, &set.marks),
                 });
             }
         }
@@ -523,6 +752,16 @@ fn generate_test_cases(
     }
 
     cases
+}
+
+fn merge_marks(left: &[String], right: &[String]) -> Vec<String> {
+    let mut marks = left.to_vec();
+    for mark in right {
+        if !marks.contains(mark) {
+            marks.push(mark.clone());
+        }
+    }
+    marks
 }
 
 fn create_params_map(names: &[String], values: &[Value]) -> HashMap<String, Value> {
@@ -565,11 +804,16 @@ fn format_value(value: &Value) -> String {
         Value::Number(n) => n.to_string(),
         Value::Bool(b) => if *b { "True" } else { "False" }.to_string(),
         Value::Null => "None".to_string(),
-        Value::Array(arr) => {
-            let items: Vec<_> = arr.iter().map(format_value).collect();
-            format!("{}", items.join("_"))
+        Value::Array(arr) => arr.iter().map(format_value).collect::<Vec<_>>().join("_"),
+        Value::Object(map) => {
+            if let Some(Value::String(kind)) = map.get("__fastest_float__") {
+                kind.replace('-', "neg_")
+            } else if map.contains_key("__fastest_set__") {
+                "set".to_string()
+            } else {
+                "object".to_string()
+            }
         }
-        Value::Object(_) => "object".to_string(),
     }
 }
 
@@ -626,6 +870,40 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_range_call_values() {
+        let decorator = r#"@pytest.mark.parametrize("number", range(3))"#;
+        let result = parse_parametrize_decorator(decorator);
+        assert!(result.is_some());
+
+        let (names, param_sets, _ids) = result.unwrap();
+
+        assert_eq!(names, vec!["number"]);
+        assert_eq!(param_sets.len(), 3);
+        assert_eq!(param_sets[0].values, vec![Value::from(0)]);
+        assert_eq!(param_sets[1].values, vec![Value::from(1)]);
+        assert_eq!(param_sets[2].values, vec![Value::from(2)]);
+    }
+
+    #[test]
+    fn test_parse_safe_static_expression_values() {
+        let decorator = r#"@pytest.mark.parametrize("value", ["a" * 3, float("inf"), set()])"#;
+        let result = parse_parametrize_decorator(decorator);
+        assert!(result.is_some());
+
+        let (_names, param_sets, _ids) = result.unwrap();
+
+        assert_eq!(param_sets[0].values, vec![Value::from("aaa")]);
+        assert_eq!(
+            param_sets[1].values,
+            vec![serde_json::json!({ "__fastest_float__": "inf" })]
+        );
+        assert_eq!(
+            param_sets[2].values,
+            vec![serde_json::json!({ "__fastest_set__": [] })]
+        );
+    }
+
+    #[test]
     fn test_expand_simple() {
         let test = TestItem {
             id: "test_module::test_func".to_string(),
@@ -635,14 +913,47 @@ mod tests {
             line_number: Some(1),
             is_async: false,
             class_name: None,
-            decorators: vec!["pytest.mark.parametrize(\"x\", [1, 2])".to_string()],
-            fixture_deps: vec![],
+            decorators: vec!["pytest.mark.parametrize(\"x\", [1, 2])".to_string()].into(),
+            fixture_deps: vec![].into(),
             is_xfail: false,
+            indirect_params: HashMap::new(),
         };
 
         let expanded = expand_parametrized_tests(&test, &test.decorators).unwrap();
         assert_eq!(expanded.len(), 2);
         assert_eq!(expanded[0].id, "test_module::test_func[1]");
         assert_eq!(expanded[1].id, "test_module::test_func[2]");
+    }
+
+    #[test]
+    fn test_expand_pytest_param_marks() {
+        let test = TestItem {
+            id: "test_module::test_func".to_string(),
+            path: std::path::PathBuf::from("test.py"),
+            name: "test_func".to_string(),
+            function_name: "test_func".to_string(),
+            line_number: Some(1),
+            is_async: false,
+            class_name: None,
+            decorators: vec![
+                r#"pytest.mark.parametrize("x", [pytest.param(1, marks=pytest.mark.skip(reason="skip")), pytest.param(2, marks=pytest.mark.xfail)])"#.to_string(),
+            ]
+            .into(),
+            fixture_deps: vec![].into(),
+            is_xfail: false,
+            indirect_params: HashMap::new(),
+        };
+
+        let expanded = expand_parametrized_tests(&test, &test.decorators).unwrap();
+
+        assert_eq!(expanded.len(), 2);
+        assert!(expanded[0]
+            .decorators
+            .iter()
+            .any(|decorator| decorator.starts_with("@pytest.mark.skip")));
+        assert!(expanded[1]
+            .decorators
+            .iter()
+            .any(|decorator| decorator.starts_with("@pytest.mark.xfail")));
     }
 }

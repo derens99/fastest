@@ -1,4 +1,5 @@
 """Tests with decorators to test AST parser capabilities."""
+
 import pytest
 import asyncio
 
@@ -9,11 +10,14 @@ def test_skipped():
     assert False
 
 
-@pytest.mark.parametrize("x,y,expected", [
-    (1, 2, 3),
-    (2, 3, 5),
-    (10, 5, 15),
-])
+@pytest.mark.parametrize(
+    "x,y,expected",
+    [
+        (1, 2, 3),
+        (2, 3, 5),
+        (10, 5, 15),
+    ],
+)
 def test_parametrized(x, y, expected):
     """Test with parametrize decorator."""
     assert x + y == expected
@@ -24,23 +28,24 @@ def test_parametrized(x, y, expected):
 def test_multiple_decorators():
     """Test with multiple decorators."""
     import time
+
     time.sleep(0.1)
     assert True
 
 
 class TestDecoratedClass:
     """Test class with decorated methods."""
-    
+
     @pytest.fixture
     def setup_data(self):
         """Fixture method."""
         return {"key": "value"}
-    
+
     @pytest.mark.xfail(reason="Expected to fail")
     def test_expected_failure(self):
         """This test is expected to fail."""
         assert 1 == 2
-    
+
     @pytest.mark.skipif(True, reason="Conditional skip")
     def test_conditional_skip(self):
         """Conditionally skipped test."""
@@ -60,4 +65,4 @@ async def test_async_with_decorator():
 @pytest.mark.parametrize("n", [1, 2, 3])
 def test_nested_decorators(n):
     """Test with nested decorators."""
-    assert n > 0 
+    assert n > 0

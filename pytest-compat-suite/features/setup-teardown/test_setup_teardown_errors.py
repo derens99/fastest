@@ -16,6 +16,7 @@ def teardown_module(module):
     calls_made.append('teardown_module')
 
 
+@pytest.mark.xfail(reason="Intentional setup_class failure")
 class TestSetupFailure:
     """Test class where setup fails"""
     
@@ -36,6 +37,7 @@ class TestSetupFailure:
         pytest.fail("This test should not execute")
 
 
+@pytest.mark.xfail(reason="Intentional teardown_class failure", raises=RuntimeError)
 class TestTeardownFailure:
     """Test class where teardown fails"""
     
@@ -73,7 +75,8 @@ class TestMethodSetupFailure:
         """This test should run normally"""
         calls_made.append('test_normal')
         assert True
-    
+
+    @pytest.mark.xfail(reason="Intentional setup_method failure", raises=RuntimeError)
     def test_with_failing_setup(self):
         """This test should not run due to setup_method failure"""
         calls_made.append('test_with_failing_setup_body')
@@ -96,6 +99,7 @@ class TestExceptionInTest:
         """Teardown should still be called even if test fails"""
         calls_made.append(f'teardown_for_{method.__name__}')
     
+    @pytest.mark.xfail(reason="Intentional test failure", raises=ValueError)
     def test_that_fails(self):
         """Test that raises an exception"""
         calls_made.append('test_that_fails')

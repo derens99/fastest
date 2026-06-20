@@ -7,6 +7,10 @@ import sys
 import os
 from pathlib import Path
 
+pytestmark = pytest.mark.xfail(
+    reason="Intentional failing examples used to inspect error reporting"
+)
+
 
 class TestAssertionIntrospection:
     """Test assertion introspection features."""

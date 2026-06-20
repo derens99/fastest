@@ -28,4 +28,4 @@ if tests:
         if result.error:
             print(f"  Error: {result.error}")
     except Exception as e:
-        print(f"  Error running test: {e}") 
+        print(f"  Error running test: {e}")

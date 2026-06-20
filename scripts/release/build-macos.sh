@@ -4,12 +4,18 @@
 set -e
 
 VERSION="${1:-0.2.0}"
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 echo "Building Fastest v$VERSION for macOS..."
 echo "Repository root: $REPO_ROOT"
 
 cd "$REPO_ROOT"
+
+if [ -z "${PYO3_PYTHON:-}" ]; then
+    PYO3_PYTHON="$(command -v python3.12 2>/dev/null || command -v python3)"
+fi
+export PYO3_PYTHON
+echo "Using PyO3 Python: ${PYO3_PYTHON}"
 
 # Detect current architecture
 ARCH=$(uname -m)
@@ -50,4 +56,4 @@ echo "3. Upload both files"
 echo ""
 echo "To test the binary locally:"
 echo "tar -xzf $ASSET_NAME.tar.gz"
-echo "./fastest --version"
+echo "./fastest version"

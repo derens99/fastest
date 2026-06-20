@@ -7,6 +7,7 @@ def test_normal_pass():
     assert True
 
 
+@pytest.mark.xfail(reason="Intentional failing control case")
 def test_normal_fail():
     """Normal test that fails"""
     assert False, "This test fails"

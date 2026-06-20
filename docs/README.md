@@ -1,18 +1,21 @@
 # Fastest Documentation
 
-Welcome to the Fastest documentation! Fastest is a blazing-fast Python test runner built in Rust that's designed to be a drop-in replacement for pytest.
+Welcome to the Fastest documentation. Fastest is a Rust-backed Python test
+runner focused on pytest-style discovery and execution. It is under active
+compatibility work and should be validated suite by suite before replacing
+pytest in a project.
 
 ## 🚀 Quick Start
 
 ```bash
 # Install fastest
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 
 # Run your tests  
 fastest tests/
 
-# Or migrate from pytest
-fastest --help  # See all pytest-compatible options
+# Inspect supported and experimental options
+fastest --help
 ```
 
 ## 📚 Documentation
@@ -42,44 +45,36 @@ fastest --help  # See all pytest-compatible options
 - **[Changelog](reference/changelog.md)** - Release history
 - **[Roadmap](reference/roadmap.md)** - Future plans
 
-## 🎯 Key Benefits
+## 🎯 Current Strengths
 
-- **⚡ 3.9x faster** than pytest (validated on real test suites)
-- **🔄 91% pytest compatibility** (validated with comprehensive tests)
-- **🚀 Intelligent execution** with automatic strategy selection
-- **💾 Smart caching** for instant test discovery
-- **🔧 Built in Rust** for maximum performance
+- **Rust CLI and execution engine**
+- **Discovery for functions, classes, async tests, and parametrized tests**
+- **Common fixture and marker support**
+- **Passing project Rust and Python test gates**
+- **Compatibility suites** for feature-by-feature validation
+- **Rust implementation** with performance work tracked through benchmark artifacts
 
-## 📊 Performance Highlights
+## 📊 Current Verification
 
-**Real-world validation with 749 tests:**
-- **3.9x faster** than pytest overall
-- **5,700 tests/second** peak throughput
-- **0.13-0.23 seconds** for full test suite
+Current local gates include:
 
-| Strategy | Test Range | Performance |
-|----------|------------|-------------|
-| InProcess | ≤20 tests | 45 tests/sec |
-| HybridBurst | 21-100 tests | 180-250 tests/sec |
-| WorkStealing | >100 tests | 5,700 tests/sec |
+| Gate | Result |
+|------|--------|
+| Rust workspace tests | Passing |
+| Python project tests | Passing |
+| `make compat-report-all` | All discovered compatibility categories pass with expected skips/xfails |
 
-## 🎯 pytest Compatibility
-
-**91% compatibility** validated with comprehensive test suite:
-- ✅ All test types (functions, classes, async)
-- ✅ Fixtures (all scopes, autouse, yield)
-- ✅ Markers (skip, xfail, custom)
-- ✅ Parametrization
-- ✅ Setup/teardown methods
-- ✅ Plugin system
-- ✅ Most pytest plugins
+Older fixed-speedup and percentage-compatibility claims are being replaced with
+generated compatibility and benchmark reports. The source of truth is the
+[roadmap](reference/roadmap.md).
 
 ## 🤝 Community
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/fastest/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/fastest/discussions)  
+- **Issues**: [GitHub Issues](https://github.com/derens99/fastest/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/derens99/fastest/discussions)
 - **Contributing**: See [Contributing Guide](development/contributing.md)
 
 ---
 
-*Ready to make your tests blazing fast? [Get started now!](getting-started/quickstart.md)*
+Start with the [quickstart](getting-started/quickstart.md), then validate your
+suite against the compatibility notes in the [roadmap](reference/roadmap.md).

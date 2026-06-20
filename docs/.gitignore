@@ -1,2 +1,9 @@
 # Internal documentation
-internal/ 
+internal/
+
+# Generated benchmark artifacts
+benchmark_results.md
+benchmark_results.json
+images/performance_comparison.*
+images/performance_summary.*
+images/scaling_analysis.*

@@ -72,11 +72,9 @@ impl DependencyTracker {
 
         let results = futures::future::join_all(parse_futures).await;
 
-        for result in results {
-            if let Ok(dependencies) = result {
-                for dep in dependencies {
-                    self.add_dependency(dep).await?;
-                }
+        for dependencies in results.into_iter().flatten() {
+            for dep in dependencies {
+                self.add_dependency(dep).await?;
             }
         }
 

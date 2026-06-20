@@ -15,7 +15,9 @@
 use anyhow::{anyhow, Context};
 use cranelift::prelude::*;
 use cranelift_codegen::settings::OptLevel;
-use cranelift_jit::{JITBuilder, JITModule};
+#[cfg(target_arch = "x86_64")]
+use cranelift_jit::JITBuilder;
+use cranelift_jit::JITModule;
 use cranelift_module::{Linkage, Module};
 use pyo3::prelude::*;
 use pyo3::types::PyModule;
@@ -167,6 +169,12 @@ lazy_static! {
     ];
 }
 
+impl Default for SIMDPatternAnalyzer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SIMDPatternAnalyzer {
     /// Create new SIMD pattern analyzer with pre-compiled patterns
     pub fn new() -> Self {
@@ -234,7 +242,7 @@ impl SIMDPatternAnalyzer {
             match mat.pattern().as_usize() {
                 0 => return TestPattern::SimpleAssertion(true), // "assert True"
                 1 => return TestPattern::SimpleAssertion(false), // "assert False"
-                2 | 3 | 4 | 5 | 6 => return TestPattern::ArithmeticAssertion, // Math patterns
+                2..=6 => return TestPattern::ArithmeticAssertion, // Math patterns
                 7 => {
                     // Generic "assert " - need deeper analysis
                     return self.analyze_complex_assertion(test_bytes);
@@ -405,41 +413,52 @@ pub struct AnalysisStats {
 impl NativeTestExecutor {
     /// 🚀 Create revolutionary native test executor with SIMD acceleration
     pub fn new() -> Result<Self> {
-        // Initialize Cranelift JIT builder with optimal settings
-        let jit_builder =
-            JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| {
-                fastest_core::Error::Execution(format!("Failed to create JIT builder: {}", e))
-            })?;
+        #[cfg(not(target_arch = "x86_64"))]
+        {
+            Err(fastest_core::Error::Execution(
+                "Native JIT is only supported on x86_64 in the current Cranelift configuration"
+                    .to_string(),
+            ))
+        }
 
-        // Enable all optimizations for maximum performance
-        let jit_module = JITModule::new(jit_builder);
+        #[cfg(target_arch = "x86_64")]
+        {
+            // Initialize Cranelift JIT builder with optimal settings
+            let jit_builder =
+                JITBuilder::new(cranelift_module::default_libcall_names()).map_err(|e| {
+                    fastest_core::Error::Execution(format!("Failed to create JIT builder: {}", e))
+                })?;
 
-        // Initialize Cranelift compilation context
-        let function_builder_context = FunctionBuilderContext::new();
-        let ctx = jit_module.make_context();
+            // Enable all optimizations for maximum performance
+            let jit_module = JITModule::new(jit_builder);
 
-        // 🚀 Initialize revolutionary SIMD pattern analyzer
-        let simd_pattern_analyzer = SIMDPatternAnalyzer::new();
+            // Initialize Cranelift compilation context
+            let function_builder_context = FunctionBuilderContext::new();
+            let ctx = jit_module.make_context();
 
-        // 📈 Pre-allocate cache with optimized capacity
-        let compiled_cache = AHashMap::with_capacity(10000);
+            // 🚀 Initialize revolutionary SIMD pattern analyzer
+            let simd_pattern_analyzer = SIMDPatternAnalyzer::new();
 
-        // 🔥 Initialize arena allocator for zero GC pressure
-        let arena = Bump::with_capacity(1024 * 1024); // 1MB arena
+            // 📈 Pre-allocate cache with optimized capacity
+            let compiled_cache = AHashMap::with_capacity(10000);
 
-        eprintln!("🚀 Revolutionary NativeTestExecutor initialized with SIMD acceleration");
+            // 🔥 Initialize arena allocator for zero GC pressure
+            let arena = Bump::with_capacity(1024 * 1024); // 1MB arena
 
-        Ok(Self {
-            jit_module,
-            function_builder_context,
-            ctx,
-            stats: TranspilationStats::default(),
-            compiled_cache,
-            simd_pattern_analyzer,
-            arena,
-            optimization_level: OptLevel::Speed,
-            legacy_ast_analyzer: ASTAnalyzer::new(),
-        })
+            eprintln!("🚀 Revolutionary NativeTestExecutor initialized with SIMD acceleration");
+
+            Ok(Self {
+                jit_module,
+                function_builder_context,
+                ctx,
+                stats: TranspilationStats::default(),
+                compiled_cache,
+                simd_pattern_analyzer,
+                arena,
+                optimization_level: OptLevel::Speed,
+                legacy_ast_analyzer: ASTAnalyzer::new(),
+            })
+        }
     }
 
     /// Set JIT optimization level for performance tuning
@@ -465,7 +484,7 @@ impl NativeTestExecutor {
         if let Some(cached_test) = self.compiled_cache.get(&content_hash) {
             if cached_test.content_hash == content_hash {
                 self.stats.cache_hits += 1;
-                return Ok(self.execute_cached_native_fast(cached_test)?);
+                return self.execute_cached_native_fast(cached_test);
             }
         }
 
@@ -1175,7 +1194,7 @@ impl ASTAnalyzer {
             self.analysis_stats.cache_hits += 1;
             // TODO: Re-evaluate what ASTAnalysis needs with real AST parsing
             return Ok(ASTAnalysis {
-                pattern: cached_pattern.clone(),
+                pattern: *cached_pattern,
                 complexity_score: Self::calculate_complexity_from_ast(None), // Needs AST
                 variables: vec![],  // TODO: Populate from AST
                 operations: vec![], // TODO: Populate from AST
@@ -1195,8 +1214,7 @@ impl ASTAnalyzer {
                 // Return a default complex pattern or an error
                 // For now, let's assume any parse error means it's complex and not JIT-able by current standards
                 let pattern = TestPattern::Complex;
-                self.pattern_cache
-                    .insert(test_code.to_string(), pattern.clone());
+                self.pattern_cache.insert(test_code.to_string(), pattern);
                 return Ok(ASTAnalysis {
                     pattern,
                     complexity_score: u16::MAX, // Max complexity for parse errors
@@ -1209,8 +1227,7 @@ impl ASTAnalyzer {
         };
 
         let pattern = self.recognize_pattern_from_ast(&python_ast, test_id);
-        self.pattern_cache
-            .insert(test_code.to_string(), pattern.clone()); // Cache the derived pattern
+        self.pattern_cache.insert(test_code.to_string(), pattern); // Cache the derived pattern
         self.analysis_stats.patterns_recognized += 1;
 
         let analysis_time = start_time.elapsed();
@@ -1251,9 +1268,9 @@ impl ASTAnalyzer {
                     rustpython_parser::ast::Expr::Constant(const_expr) => {
                         match &const_expr.value {
                             rustpython_parser::ast::Constant::Bool(b) => {
-                                return TestPattern::SimpleAssertion(*b); // Store the boolean value
+                                TestPattern::SimpleAssertion(*b) // Store the boolean value
                             }
-                            _ => return TestPattern::Complex,
+                            _ => TestPattern::Complex,
                         }
                     }
                     rustpython_parser::ast::Expr::Compare(compare_expr) => {
@@ -1290,7 +1307,7 @@ impl ASTAnalyzer {
                             }
                             return TestPattern::ComparisonAssertion;
                         }
-                        return TestPattern::Complex;
+                        TestPattern::Complex
                     }
                     _ => TestPattern::Complex,
                 }
@@ -1308,22 +1325,12 @@ impl ASTAnalyzer {
         1 // Dummy low complexity for now
     }
     fn extract_variables_from_ast(&self, ast_option: Option<&py_ast::Suite>) -> Vec<String> {
-        if ast_option.is_none() {
-            vec![]
-        }
-        // Placeholder
-        else {
-            vec![]
-        }
+        let _ = ast_option;
+        Vec::new()
     }
     fn extract_operations_from_ast(&self, ast_option: Option<&py_ast::Suite>) -> Vec<String> {
-        if ast_option.is_none() {
-            vec![]
-        }
-        // Placeholder
-        else {
-            vec![]
-        }
+        let _ = ast_option;
+        Vec::new()
     }
     fn estimate_instructions_from_ast(ast_option: Option<&py_ast::Suite>) -> usize {
         if ast_option.is_none() {
@@ -1335,13 +1342,8 @@ impl ASTAnalyzer {
         } // Dummy low instruction count
     }
     fn can_vectorize_from_ast(&self, ast_option: Option<&py_ast::Suite>) -> bool {
-        if ast_option.is_none() {
-            false
-        }
-        // Placeholder
-        else {
-            false
-        }
+        let _ = ast_option;
+        false
     }
 
     // Old string-based methods - to be removed or fully replaced by AST versions
@@ -1385,6 +1387,7 @@ impl Default for NativeTestExecutor {
 mod tests {
     use super::*;
 
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_native_jit_simple_assertion() {
         let mut executor = NativeTestExecutor::new().unwrap();
@@ -1395,10 +1398,11 @@ mod tests {
             function_name: "test_simple".to_string(),
             line_number: Some(1),
             class_name: None,
-            decorators: vec![],
+            decorators: vec![].into(),
             is_async: false,
             is_xfail: false,
-            fixture_deps: vec![],
+            fixture_deps: vec![].into(),
+            indirect_params: Default::default(),
         };
 
         let result = executor
@@ -1409,6 +1413,7 @@ mod tests {
         assert!(result.speedup_factor > 1.0);
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_arithmetic_compilation() {
         let mut executor = NativeTestExecutor::new().unwrap();
@@ -1419,10 +1424,11 @@ mod tests {
             function_name: "test_arithmetic".to_string(),
             line_number: Some(1),
             class_name: None,
-            decorators: vec![],
+            decorators: vec![].into(),
             is_async: false,
             is_xfail: false,
-            fixture_deps: vec![],
+            fixture_deps: vec![].into(),
+            indirect_params: Default::default(),
         };
 
         let result = executor
@@ -1450,6 +1456,7 @@ mod tests {
         assert_eq!(analysis.pattern, TestPattern::ComparisonAssertion);
     }
 
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn test_cache_performance() {
         let mut executor = NativeTestExecutor::new().unwrap();
@@ -1460,10 +1467,11 @@ mod tests {
             function_name: "test_cached".to_string(),
             line_number: Some(1),
             class_name: None,
-            decorators: vec![],
+            decorators: vec![].into(),
             is_async: false,
             is_xfail: false,
-            fixture_deps: vec![],
+            fixture_deps: vec![].into(),
+            indirect_params: Default::default(),
         };
 
         // First execution should compile

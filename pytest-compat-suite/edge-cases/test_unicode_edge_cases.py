@@ -146,7 +146,7 @@ class TestΜΕΓΑΛΑ_μικρά:
     ("¿", "inverted question"),
     ("¡", "inverted exclamation"),
     ("«»", "guillemets"),
-    ("„"", "German quotes"),
+    ("„“", "German quotes"),
     ("「」", "Japanese quotes"),
     ("《》", "Chinese quotes"),
 ])

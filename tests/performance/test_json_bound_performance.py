@@ -19,24 +19,26 @@ import time
 def large_json_data():
     """Fixture that creates large JSON data structure"""
     return {
-        "test_metadata": {
-            "test_id": f"performance_test_{i}",
-            "execution_time": 0.001 * i,
-            "status": "passed" if i % 2 == 0 else "failed", 
-            "output": f"Test output for iteration {i}" * 10,
-            "error": None if i % 2 == 0 else f"Error message {i}",
-            "fixtures": [f"fixture_{j}" for j in range(10)],
-            "parameters": {f"param_{k}": k * 2 for k in range(20)},
-            "nested_data": {
-                "level_1": {
-                    "level_2": {
-                        "level_3": {
-                            "data": [{"id": m, "value": m * 3} for m in range(50)]
+        "test_metadata": [
+            {
+                "test_id": f"performance_test_{i}",
+                "execution_time": 0.001 * i,
+                "status": "passed" if i % 2 == 0 else "failed",
+                "output": f"Test output for iteration {i}" * 10,
+                "error": None if i % 2 == 0 else f"Error message {i}",
+                "fixtures": [f"fixture_{j}" for j in range(10)],
+                "parameters": {f"param_{k}": k * 2 for k in range(20)},
+                "nested_data": {
+                    "level_1": {
+                        "level_2": {
+                            "level_3": {
+                                "data": [{"id": m, "value": m * 3} for m in range(50)]
+                            }
                         }
                     }
                 }
-            }
-        } for i in range(100)
+            } for i in range(100)
+        ]
     }
 
 
@@ -74,13 +76,13 @@ def test_json_serialization_heavy(large_json_data, data_size):
     """Test with heavy JSON serialization - benefits from SIMD JSON"""
     # Simulate processing that involves JSON serialization
     subset = large_json_data["test_metadata"][:data_size]
-    
+
     # Multiple JSON operations (this gets accelerated by SIMD JSON)
     for item in subset:
         json_str = json.dumps(item)
         parsed = json.loads(json_str)
         assert parsed["test_id"] == item["test_id"]
-        
+
         # Nested JSON operations
         nested_json = json.dumps(item["nested_data"])
         nested_parsed = json.loads(nested_json)
@@ -93,10 +95,10 @@ def test_fixture_cache_simulation(complex_test_results, complexity_level, iterat
     """Test simulating fixture cache operations - benefits from SIMD JSON in cache.rs"""
     # Simulate fixture caching operations that use JSON serialization
     cache_data = {}
-    
+
     for i in range(iterations):
         test_result = complex_test_results["suite_results"][i * complexity_level]
-        
+
         # Simulate cache serialization (this uses SIMD JSON in actual implementation)
         cache_key = f"fixture_cache_{test_result['test_name']}_{complexity_level}"
         cache_data[cache_key] = {
@@ -109,7 +111,7 @@ def test_fixture_cache_simulation(complex_test_results, complexity_level, iterat
                 "output_length": len(test_result["output"])
             }
         }
-    
+
     # Verify cache integrity
     assert len(cache_data) == iterations
     for key, value in cache_data.items():
@@ -124,7 +126,7 @@ def test_worker_protocol_simulation(large_json_data, worker_id, message_count):
     """Test simulating worker protocol communication - benefits from SIMD JSON in runtime.rs"""
     # Simulate worker protocol messages that use JSON serialization
     messages = []
-    
+
     for i in range(message_count):
         # Simulate worker protocol message (this uses SIMD JSON in actual implementation)
         message = {
@@ -146,15 +148,15 @@ def test_worker_protocol_simulation(large_json_data, worker_id, message_count):
             },
             "timestamp": time.time() + i
         }
-        
+
         # Simulate JSON serialization/deserialization in worker protocol
         serialized = json.dumps(message)
         deserialized = json.loads(serialized)
-        
+
         assert deserialized["worker_id"] == worker_id
         assert deserialized["sequence"] == i
         messages.append(deserialized)
-    
+
     # Verify all messages processed correctly
     assert len(messages) == message_count
     assert all(msg["worker_id"] == worker_id for msg in messages)
@@ -165,13 +167,13 @@ def test_parallel_execution_simulation(complex_test_results, parallel_workers):
     """Test simulating parallel execution coordination - benefits from SIMD JSON in parallel.rs"""
     # Simulate parallel worker coordination with JSON messages
     worker_results = {}
-    
+
     results_per_worker = len(complex_test_results["suite_results"]) // parallel_workers
-    
+
     for worker_id in range(parallel_workers):
         start_idx = worker_id * results_per_worker
         end_idx = start_idx + results_per_worker
-        
+
         worker_data = {
             "worker_id": worker_id,
             "assigned_tests": complex_test_results["suite_results"][start_idx:end_idx],
@@ -188,13 +190,13 @@ def test_parallel_execution_simulation(complex_test_results, parallel_workers):
                 } for i in range(min(10, results_per_worker))
             ]
         }
-        
+
         # Simulate JSON serialization in parallel coordination
         serialized_worker_data = json.dumps(worker_data)
         parsed_worker_data = json.loads(serialized_worker_data)
-        
+
         worker_results[worker_id] = parsed_worker_data
-    
+
     # Verify parallel coordination data
     assert len(worker_results) == parallel_workers
     total_tests = sum(len(data["assigned_tests"]) for data in worker_results.values())
@@ -206,7 +208,7 @@ def test_deep_nested_json_processing():
     # Create deeply nested structure that stresses JSON processing
     deep_structure = {"level_0": {}}
     current = deep_structure["level_0"]
-    
+
     for level in range(1, 20):
         current[f"level_{level}"] = {
             "data": [{"id": i, "value": i * level} for i in range(10)],
@@ -219,7 +221,7 @@ def test_deep_nested_json_processing():
         if level < 19:
             current[f"level_{level}"][f"level_{level + 1}"] = {}
             current = current[f"level_{level}"][f"level_{level + 1}"]
-    
+
     # Multiple JSON operations on deep structure
     for _ in range(50):
         serialized = json.dumps(deep_structure)
@@ -246,13 +248,13 @@ def test_json_array_processing():
             } for i in range(200)
         ]
     }
-    
+
     # Process arrays with JSON operations
     for key, array in large_arrays.items():
         serialized = json.dumps(array)
         parsed = json.loads(serialized)
         assert len(parsed) == len(array)
-        
+
         # Additional processing
         if isinstance(array[0], dict):
             for item in parsed:

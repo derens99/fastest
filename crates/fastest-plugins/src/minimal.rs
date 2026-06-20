@@ -13,6 +13,12 @@ pub struct HookArgs {
     args: HashMap<String, Value>,
 }
 
+impl Default for HookArgs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HookArgs {
     pub fn new() -> Self {
         Self {
@@ -29,6 +35,12 @@ impl HookArgs {
 /// Simplified plugin manager
 pub struct PluginManager {
     plugins: Arc<RwLock<Vec<Box<dyn Plugin>>>>,
+}
+
+impl Default for PluginManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginManager {
@@ -75,6 +87,12 @@ pub struct PluginManagerBuilder {
     load_conftest: bool,
     plugin_dirs: Vec<std::path::PathBuf>,
     disabled_plugins: Vec<String>,
+}
+
+impl Default for PluginManagerBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PluginManagerBuilder {

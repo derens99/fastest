@@ -12,8 +12,9 @@ Thank you for your interest in contributing to Fastest! This guide will help you
 
 ### Prerequisites
 - Rust 1.70+ (install via [rustup](https://rustup.rs/))
-- Python 3.8+ 
-- maturin (`pip install maturin`)
+- Python 3.8+
+- uv
+- maturin (`uv tool install maturin`)
 
 ### Building
 ```bash
@@ -25,7 +26,7 @@ maturin develop
 
 # Run tests
 cargo test
-python -m pytest tests/
+uv run pytest tests/
 ```
 
 ## Code Guidelines
@@ -68,4 +69,4 @@ python -m pytest tests/
 
 ## Questions?
 
-Feel free to open a discussion or reach out in issues! 
+Feel free to open a discussion or reach out in issues!

@@ -6,6 +6,11 @@ import pytest
 from typing import List, Dict, Any, Optional
 
 
+pytestmark = pytest.mark.xfail(
+    reason="Intentional failing examples used to inspect assertion output"
+)
+
+
 class TestBasicAssertions:
     """Test basic assertion introspection."""
     

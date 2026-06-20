@@ -228,12 +228,13 @@ struct EnhancedPythonWorker {
 impl EnhancedPythonWorker {
     #[allow(dead_code)]
     fn spawn(worker_id: usize, config: &RuntimeConfig) -> Result<Self> {
-        let mut child = Command::new(&*PYTHON_CMD)
+        let mut child = Command::new(PYTHON_CMD)
             .args(["-u", "-c", &Self::worker_code(config)])
             .envs([
                 ("PYTHONUNBUFFERED", "1"),
                 ("PYTHONDONTWRITEBYTECODE", "1"),
                 ("PYTHONHASHSEED", "0"),
+                ("PYTHONIOENCODING", "utf-8"),
                 ("FASTEST_WORKER_ID", &worker_id.to_string()),
             ])
             .stdin(Stdio::piped())
@@ -279,14 +280,13 @@ impl EnhancedPythonWorker {
             return Err(anyhow!("Worker {} closed connection", self.worker_id));
         }
 
-        let response: RuntimeResponse =
-            simd_json::from_str(&response_line.trim()).map_err(|e| {
-                anyhow!(
-                    "Failed to parse response from worker {}: {}",
-                    self.worker_id,
-                    e
-                )
-            })?;
+        let response: RuntimeResponse = simd_json::from_str(response_line.trim()).map_err(|e| {
+            anyhow!(
+                "Failed to parse response from worker {}: {}",
+                self.worker_id,
+                e
+            )
+        })?;
 
         Ok(response)
     }
@@ -1030,8 +1030,8 @@ impl PythonRuntime {
 
         // Check decorators for fixture dependencies
         for decorator in &test.decorators {
-            if decorator.starts_with("__fixtures__=") {
-                if let Ok(fixture_list) = simd_json::from_str::<Vec<String>>(&decorator[13..]) {
+            if let Some(fixture_payload) = decorator.strip_prefix("__fixtures__=") {
+                if let Ok(fixture_list) = simd_json::from_str::<Vec<String>>(fixture_payload) {
                     fixtures.extend(fixture_list);
                 }
             }
@@ -1068,11 +1068,18 @@ impl PythonRuntime {
     fn prepare_test_execution_data(&self, test: &TestItem) -> TestExecutionData {
         // Parse test ID to extract module and function
         let parts: Vec<&str> = test.id.split("::").collect();
-        let (module, function) = match parts.len() {
-            1 => (parts[0], test.function_name.clone()),
-            2 => (parts[0], parts[1].to_string()),
-            3 => (parts[0], format!("{}::{}", parts[1], parts[2])),
-            _ => (parts[0], parts[1..].join("::")),
+        let module = if parts.is_empty() {
+            test.id.as_str()
+        } else {
+            // Extract the module path (before the first ::)
+            parts[0]
+        };
+
+        // Use the preserved function_name from TestItem which has the original Unicode
+        let function = if let Some(class_name) = &test.class_name {
+            format!("{}::{}", class_name, test.function_name)
+        } else {
+            test.function_name.clone()
         };
 
         // Extract fixtures (simplified)
@@ -1185,7 +1192,7 @@ impl PythonRuntime {
     pub fn cleanup_fixtures(&self, scope: FixtureScope, scope_id: &str) -> Result<()> {
         // Send cleanup command to all workers
         for worker in &self.pool.workers {
-            if let Err(e) = worker.cleanup_fixtures(scope.clone(), scope_id) {
+            if let Err(e) = worker.cleanup_fixtures(scope, scope_id) {
                 if self.config.verbose {
                     eprintln!(
                         "Warning: Failed to cleanup fixtures on worker {}: {}",

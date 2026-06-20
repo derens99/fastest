@@ -1,5 +1,12 @@
 import pytest
 
+
+@pytest.fixture
+def value(request):
+    """Fixture used by indirect parametrization cases."""
+    return request.param
+
+
 # Test with complex parameter types
 @pytest.mark.parametrize("data,expected", [
     ([1, 2, 3], 6),
@@ -45,6 +52,4 @@ def test_special_chars(text, expected):
 # Test indirect parametrization (fixture-based)
 @pytest.mark.parametrize("value", [10, 20, 30], indirect=True)
 def test_indirect(value):
-    # Note: indirect parametrization requires fixture support
-    # For now, this will use the value directly
     assert value > 0

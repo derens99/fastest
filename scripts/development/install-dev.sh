@@ -18,6 +18,12 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
+if [ -z "${PYO3_PYTHON:-}" ]; then
+    PYO3_PYTHON="$(command -v python3.12 2>/dev/null || command -v python3)"
+fi
+export PYO3_PYTHON
+echo "🐍 Using PyO3 Python: ${PYO3_PYTHON}"
+
 # Build the project
 echo "📦 Building fastest in release mode..."
 cargo build --release --package fastest-cli

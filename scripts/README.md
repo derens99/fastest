@@ -15,18 +15,18 @@ scripts/
 ## 📊 Benchmarking Scripts (`benchmarks/`)
 
 ### `official.py` ⭐
-**The definitive performance benchmark** - generates official results for publication.
+**Benchmark artifact generator** - compares Fastest and pytest and records the environment for release review.
 
 **Usage:**
 ```bash
-# Full benchmark suite (for releases)
-python scripts/benchmarks/official.py
+# Full benchmark suite
+uv run python scripts/benchmarks/official.py
 
 # Quick benchmark (for development)
-python scripts/benchmarks/official.py --quick
+uv run python scripts/benchmarks/official.py --quick --output-dir target/benchmark-artifacts/quick
 
 # Custom output directory
-python scripts/benchmarks/official.py --output-dir results/
+uv run python scripts/benchmarks/official.py --output-dir results/
 ```
 
 **Features:**
@@ -34,18 +34,17 @@ python scripts/benchmarks/official.py --output-dir results/
 - Realistic test patterns
 - Detailed timing breakdowns
 - System information capture
-- Publication-ready reports
+- Markdown and JSON artifacts for review (`benchmark_results.md` and `benchmark_results.json`)
 
 ### `charts.py` ⭐  
-**Professional visualization** - creates publication-ready performance charts.
+**Benchmark visualization** - creates charts from benchmark artifacts.
 
 **Usage:**
 ```bash
 # Generate all charts
-python scripts/benchmarks/charts.py
+uv run python scripts/benchmarks/charts.py
 
-# Specific chart type
-python scripts/benchmarks/charts.py --type speedup
+# Charts are generated from the latest benchmark result files
 ```
 
 **Outputs:**
@@ -59,13 +58,28 @@ python scripts/benchmarks/charts.py --type speedup
 **Usage:**
 ```bash
 # Compare with local tests
-python scripts/benchmarks/compare.py --test-dir tests/
+uv run python scripts/benchmarks/compare.py tests/
 
 # Compare specific features
-python scripts/benchmarks/compare.py --features fixtures,markers
+uv run python scripts/benchmarks/compare.py pytest-compat-suite/features/fixtures/
 ```
 
 ## 🔧 Development Scripts (`development/`)
+
+### `compatibility_report.py`
+**Compatibility suite reporter** - runs selected `pytest-compat-suite/`
+directories through Fastest and writes a machine-readable JSON report.
+
+**Usage:**
+```bash
+make compat-report COMPAT_SUITES="core/basic features/fixtures"
+make compat-report-all
+
+uv run python scripts/development/compatibility_report.py \
+  --fastest-binary target/debug/fastest \
+  --json-output target/compatibility-report.json \
+  core/basic features/fixtures
+```
 
 ### `install-dev.sh`
 **Local development installation** - builds and installs Fastest for testing.
@@ -131,27 +145,27 @@ python scripts/benchmarks/compare.py --features fixtures,markers
 
 ## 🔧 Utility Scripts (`utils/`)
 
-### `setup-test-repos.sh`
+### `setup_test_repos.sh`
 **Test repository setup** - clones real-world projects for testing.
 
 **Usage:**
 ```bash
-./scripts/utils/setup-test-repos.sh
+./scripts/utils/setup_test_repos.sh
 ```
 
 ## 🏃 Quick Start
 
 ### Running Benchmarks
 ```bash
-# Official benchmark
-cargo build --release
-python scripts/benchmarks/official.py
+# Benchmark artifact generation
+PYO3_PYTHON=$(command -v python3.12 || command -v python3) cargo build --release
+uv run python scripts/benchmarks/official.py
 
 # Generate charts
-python scripts/benchmarks/charts.py
+uv run python scripts/benchmarks/charts.py
 
 # Compare with pytest
-python scripts/benchmarks/compare.py
+uv run python scripts/benchmarks/compare.py
 ```
 
 ### Development Setup
@@ -191,14 +205,14 @@ Feature test scripts have been moved to the main test directory:
 # GitHub Actions example
 - name: Run Benchmarks
   run: |
-    cargo build --release
-    python scripts/benchmarks/official.py --quick
-    python scripts/benchmarks/charts.py
+    PYO3_PYTHON=$(command -v python3.12 || command -v python3) cargo build --release
+    uv run python scripts/benchmarks/official.py --quick --output-dir target/benchmark-artifacts/quick
+    uv run python scripts/benchmarks/charts.py
 ```
 
 ## 📁 Output Locations
 
-- **Benchmark Results**: `benchmarks/` directory
+- **Benchmark Results**: `target/benchmark-artifacts/quick/`
 - **Charts**: `docs/images/` directory
 - **Documentation**: `docs/performance/` directory
 

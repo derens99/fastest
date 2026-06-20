@@ -118,7 +118,7 @@ where
         // Read to buffer for SIMD processing
         let mut buffer = Vec::with_capacity(1024);
         reader.read_to_end(&mut buffer)?;
-        
+
         if buffer.len() > 64 {
             match simd_json::from_slice(&mut buffer) {
                 Ok(value) => {
@@ -129,13 +129,13 @@ where
                     // Fallback
                     FALLBACK_OPS.fetch_add(1, Ordering::Relaxed);
                     let s = std::str::from_utf8(&buffer)
-                        .map_err(|e| crate::Error::Serialization(e.to_string()))?;
+                        .map_err(|e| crate::Error::Discovery(format!("Invalid UTF-8: {}", e)))?;
                     return Ok(serde_json::from_str(s)?);
                 }
             }
         }
     }
-    
+
     FALLBACK_OPS.fetch_add(1, Ordering::Relaxed);
     Ok(serde_json::from_reader(reader)?)
 }
@@ -182,7 +182,7 @@ where
             }
         }
     }
-    
+
     FALLBACK_OPS.fetch_add(1, Ordering::Relaxed);
     serde_json::to_writer(writer, value)?;
     Ok(())
@@ -224,14 +224,14 @@ where
 mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
-    
+
     #[derive(Debug, PartialEq, Serialize, Deserialize)]
     struct TestStruct {
         id: u32,
         name: String,
         values: Vec<i32>,
     }
-    
+
     #[test]
     fn test_simd_roundtrip() {
         let data = TestStruct {
@@ -239,19 +239,19 @@ mod tests {
             name: "test".to_string(),
             values: vec![1, 2, 3, 4, 5],
         };
-        
+
         let json = to_string(&data).unwrap();
         let parsed: TestStruct = from_str(&json).unwrap();
         assert_eq!(data, parsed);
     }
-    
+
     #[test]
     fn test_simd_stats() {
         let initial = get_stats();
-        
+
         let _ = to_string(&"test").unwrap();
         let _ = from_str::<String>("\"test\"").unwrap();
-        
+
         let after = get_stats();
         assert!(after.0 + after.1 >= initial.0 + initial.1 + 2);
     }

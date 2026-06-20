@@ -34,6 +34,12 @@ pub struct UpdateChecker {
     current_version: String,
 }
 
+impl Default for UpdateChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UpdateChecker {
     pub fn new() -> Self {
         Self {
@@ -203,7 +209,7 @@ impl UpdateChecker {
     fn download_file(&self, url: &str, temp_dir: &Path, verbose: bool) -> Result<PathBuf> {
         let filename = url
             .split('/')
-            .last()
+            .next_back()
             .ok_or_else(|| anyhow!("Invalid URL: {}", url))?;
         let output_path = temp_dir.join(filename);
 

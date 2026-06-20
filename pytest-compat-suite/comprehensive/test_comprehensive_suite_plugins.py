@@ -63,10 +63,11 @@ def test_mocker_patch(mocker):
 def test_mocker_spy(mocker):
     """Test mocker.spy functionality"""
     # Spy on a real function
+    expected = os.path.join("a", "b")
     spy = mocker.spy(os.path, 'join')
-    
+
     result = os.path.join("a", "b")
-    assert result == os.path.join("a", "b")
+    assert result == expected
     spy.assert_called_once_with("a", "b")
 
 
@@ -284,6 +285,7 @@ def complex_plugin_fixture(request, tmp_path):
     data.clear()
 
 
+@pytest.mark.skipif(not MOCK_AVAILABLE, reason="pytest-mock not available")
 def test_complex_plugin_scenario(complex_plugin_fixture, mocker, capsys):
     """Test combining multiple plugin features"""
     # Use multiple plugin-provided fixtures

@@ -1,20 +1,22 @@
 # Quickstart Guide
 
-Get up and running with Fastest in 5 minutes!
+Get a small pytest-style suite running with Fastest. Fastest is still
+experimental, so validate your own suite before replacing pytest in a workflow.
 
 ## 🎯 Prerequisites
 
 - Python 3.8 or higher
+- A Fastest binary built or installed for your platform
 - 5 minutes of your time
 
 ## ⚡ 1-Minute Install
 
 ```bash
 # macOS/Linux
-curl -LsSf https://raw.githubusercontent.com/yourusername/fastest/main/install.sh | sh
+curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 
 # Windows (PowerShell)
-iwr -useb https://raw.githubusercontent.com/yourusername/fastest/main/install.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/derens99/fastest/main/install.ps1 | iex
 ```
 
 ## 🏃 First Test Run
@@ -57,16 +59,20 @@ fastest test_example.py
 
 ## 🚀 Key Features Demo
 
-### Parallel Execution (Default)
+### Worker Option
 
 ```bash
-# Fastest automatically uses optimal parallelization
+# Run tests with the current compatibility-first execution path
 fastest tests/
 
 # Control worker count
-fastest -n 4 tests/  # Use 4 workers
-fastest -n auto tests/  # Auto-detect (default)
+fastest -n 4 tests/
+fastest -n auto tests/
 ```
+
+The worker option is accepted by the CLI, but current verified behavior is
+compatibility-first. Revalidated performance strategy work is tracked in the
+[roadmap](../reference/roadmap.md).
 
 ### Test Filtering
 
@@ -145,22 +151,23 @@ Run with:
 fastest test_user.py -v
 ```
 
-## 📊 Performance Comparison
+## 📊 Compatibility And Performance Checks
 
-See the speed difference:
+Before comparing performance, verify correctness for the suite you care about:
 
 ```bash
-# Time with pytest
-time pytest tests/
+# Project gate from this repository
+make verify
 
-# Time with fastest
-time fastest tests/
+# Full compatibility baseline from this repository
+make compat-report-all
 ```
 
-Typical results:
-- **pytest**: 2.5 seconds for 100 tests
-- **fastest**: 0.4 seconds for 100 tests
-- **Speedup**: 6x faster! 🚀
+For local comparisons, use the benchmark scripts and keep the raw output:
+
+```bash
+make compare TEST_DIR=pytest-compat-suite/core/basic
+```
 
 ## 🎆 What's Next?
 
@@ -172,11 +179,12 @@ Typical results:
 
 ## 👜 Quick Tips
 
-- Fastest is a drop-in replacement for pytest
-- Most pytest plugins work out of the box
+- Treat Fastest as an experimental pytest-style runner.
+- Validate compatibility suite by suite before replacing pytest.
 - Use `fastest --help` to see all options
 - File an issue if something doesn't work as expected
 
 ---
 
-**Ready to make your tests blazing fast? You're all set! 🎉**
+**Next step:** run your own suite with Fastest and compare the result against
+pytest before relying on it in CI.

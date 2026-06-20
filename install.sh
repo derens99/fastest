@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ⚡ Fastest installer script
 # The blazing fast Python test runner with intelligent performance optimization
-# 
-# Usage: 
+#
+# Usage:
 #   curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh
 #   curl -LsSf https://raw.githubusercontent.com/derens99/fastest/main/install.sh | sh -s -- --version v0.1.0
 #
@@ -53,7 +53,7 @@ trap cleanup EXIT
 detect_platform() {
     local os
     local arch
-    
+
     # Detect OS
     case "$(uname -s)" in
         Linux*)     os="unknown-linux-gnu";;
@@ -61,14 +61,14 @@ detect_platform() {
         CYGWIN*|MINGW*|MSYS*) os="pc-windows-msvc";;
         *)          error "Unsupported OS: $(uname -s)"; exit 1;;
     esac
-    
+
     # Detect architecture
     case "$(uname -m)" in
         x86_64|amd64) arch="x86_64";;
         aarch64|arm64) arch="aarch64";;
         *)          error "Unsupported architecture: $(uname -m)"; exit 1;;
     esac
-    
+
     echo "${arch}-${os}"
 }
 
@@ -78,7 +78,7 @@ get_latest_version() {
     local latest_version=$(curl -s "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null | \
         grep '"tag_name"' | \
         sed -E 's/.*"tag_name"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-    
+
     if [[ -n "$latest_version" ]]; then
         echo "$latest_version"
     else
@@ -86,7 +86,7 @@ get_latest_version() {
         local manifest_version=$(curl -s "https://raw.githubusercontent.com/${REPO}/main/.github/version.json" 2>/dev/null | \
             grep '"latest"' | head -1 | \
             sed -E 's/.*"latest"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
-        
+
         if [[ -n "$manifest_version" ]]; then
             echo "v${manifest_version}"
         else
@@ -100,9 +100,9 @@ get_latest_version() {
 install_fastest() {
     local platform="$1"
     local version="${2:-$(get_latest_version)}"
-    
+
     info "Installing fastest ${version} for ${platform}..."
-    
+
     # Convert platform to asset naming convention
     local asset_platform=""
     case "$platform" in
@@ -113,7 +113,7 @@ install_fastest() {
         x86_64-pc-windows-msvc) asset_platform="x86_64-pc-windows-msvc";;
         *) error "Unsupported platform: $platform"; exit 1;;
     esac
-    
+
     # Construct download URL
     local binary_name="fastest"
     local archive_ext="tar.gz"
@@ -121,11 +121,11 @@ install_fastest() {
         binary_name="fastest.exe"
         archive_ext="zip"
     fi
-    
+
     # Note: upload-rust-binary-action uses the format: fastest-$tag-$target
     local url="https://github.com/${REPO}/releases/download/${version}/fastest-${version}-${asset_platform}.${archive_ext}"
     local archive_path="${TEMP_DIR}/fastest.${archive_ext}"
-    
+
     # Download
     info "Downloading from ${url}..."
     if ! curl -LsSf "$url" -o "$archive_path"; then
@@ -133,7 +133,7 @@ install_fastest() {
         error "URL: ${url}"
         exit 1
     fi
-    
+
     # Extract
     info "Extracting archive..."
     cd "$TEMP_DIR"
@@ -142,15 +142,15 @@ install_fastest() {
     else
         tar -xzf "$archive_path"
     fi
-    
+
     # Create install directory if it doesn't exist
     mkdir -p "$INSTALL_DIR"
-    
+
     # Install binary
     info "Installing to ${INSTALL_DIR}/${binary_name}..."
     mv "$binary_name" "${INSTALL_DIR}/"
     chmod +x "${INSTALL_DIR}/${binary_name}"
-    
+
     # Verify installation
     if "${INSTALL_DIR}/${binary_name}" --help >/dev/null 2>&1; then
         success "fastest installed successfully!"
@@ -173,7 +173,7 @@ check_path() {
 add_to_path() {
     local dir="$1"
     local shell_config=""
-    
+
     # Detect shell configuration file
     if [[ -n "$BASH_VERSION" ]]; then
         if [[ -f "$HOME/.bashrc" ]]; then
@@ -186,7 +186,7 @@ add_to_path() {
     elif [[ -f "$HOME/.profile" ]]; then
         shell_config="$HOME/.profile"
     fi
-    
+
     if [[ -n "$shell_config" ]]; then
         echo "" >> "$shell_config"
         echo "# Added by fastest installer" >> "$shell_config"
@@ -215,21 +215,21 @@ show_banner() {
 # Verify installation
 verify_installation() {
     local binary_path="$1"
-    
+
     info "Verifying installation..."
-    
+
     # Test basic functionality
     if ! "$binary_path" --version >/dev/null 2>&1; then
         error "Installation verification failed: --version command failed"
         return 1
     fi
-    
+
     # Test help command
     if ! "$binary_path" --help >/dev/null 2>&1; then
         error "Installation verification failed: --help command failed"
         return 1
     fi
-    
+
     success "Installation verified successfully!"
     return 0
 }
@@ -252,26 +252,26 @@ show_post_install() {
     echo ""
     echo "📚 Learn More:"
     echo "  • GitHub: https://github.com/${REPO}"
-    echo "  • Roadmap: https://github.com/${REPO}/blob/main/ROADMAP.md"
+    echo "  • Roadmap: https://github.com/${REPO}/blob/main/docs/reference/roadmap.md"
     echo "  • Benchmarks: https://github.com/${REPO}/tree/main/benchmarks"
 }
 
 # Main installation flow
 main() {
     show_banner
-    
+
     # Check for curl
     if ! command -v curl >/dev/null 2>&1; then
         error "curl is required but not installed"
         error "Please install curl and try again"
         exit 1
     fi
-    
+
     # Detect platform
     local platform
     platform=$(detect_platform)
     info "Detected platform: ${platform}"
-    
+
     # Parse arguments
     local version="${VERSION}"
     while [[ $# -gt 0 ]]; do
@@ -316,28 +316,28 @@ main() {
                 ;;
         esac
     done
-    
+
     # Install
     install_fastest "$platform" "$version"
-    
+
     # Verify installation
     local binary_name="fastest"
     if [[ "$platform" == *"windows"* ]]; then
         binary_name="fastest.exe"
     fi
-    
+
     if ! verify_installation "${INSTALL_DIR}/${binary_name}"; then
         exit 1
     fi
-    
+
     # Check PATH
     if ! check_path "$INSTALL_DIR"; then
         warning "${INSTALL_DIR} is not in your PATH"
         add_to_path "$INSTALL_DIR"
     fi
-    
+
     show_post_install
 }
 
 # Run main function
-main "$@" 
+main "$@"

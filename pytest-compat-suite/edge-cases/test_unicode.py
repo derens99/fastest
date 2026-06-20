@@ -63,7 +63,7 @@ def test_mixed_params(user, город):
 ], ids=["multiplication", "pi", "sum", "sqrt"])
 def test_math_unicode(equation):
     """Test with mathematical unicode symbols"""
-    assert "=" in equation
+    assert "=" in equation or "≈" in equation
 
 # Test class with unicode in various places
 class Test文字エンコーディング:

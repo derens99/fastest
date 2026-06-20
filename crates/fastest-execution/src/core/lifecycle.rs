@@ -41,6 +41,12 @@ pub struct LifecycleManager {
     setup_classes: HashSet<String>,
 }
 
+impl Default for LifecycleManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LifecycleManager {
     /// Create a new lifecycle manager
     pub fn new() -> Self {
@@ -187,6 +193,12 @@ impl LifecycleManager {
 /// This will be called from the Python worker to coordinate setup/teardown
 pub struct PythonLifecycleCoordinator {
     manager: LifecycleManager,
+}
+
+impl Default for PythonLifecycleCoordinator {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl PythonLifecycleCoordinator {

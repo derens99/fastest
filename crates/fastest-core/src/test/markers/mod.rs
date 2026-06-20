@@ -88,7 +88,7 @@ impl BuiltinMarker {
                         .kwargs
                         .get("reason")
                         .and_then(|v| v.as_str())
-                        .or_else(|| marker.args.get(0).and_then(|v| v.as_str()))
+                        .or_else(|| marker.args.first().and_then(|v| v.as_str()))
                         .unwrap_or("Skipped")
                         .to_string();
                     return Some(reason);
@@ -96,7 +96,7 @@ impl BuiltinMarker {
                 "skipif" => {
                     // For skipif, we need to evaluate the condition
                     // For now, check if first arg is a string that looks like a condition
-                    if let Some(condition) = marker.args.get(0).and_then(|v| v.as_str()) {
+                    if let Some(condition) = marker.args.first().and_then(|v| v.as_str()) {
                         // TODO: Properly evaluate Python condition
                         // For now, handle some common cases
                         if should_skip_condition(condition) {
@@ -126,7 +126,7 @@ impl BuiltinMarker {
                     .kwargs
                     .get("reason")
                     .and_then(|v| v.as_str())
-                    .or_else(|| marker.args.get(0).and_then(|v| v.as_str()))
+                    .or_else(|| marker.args.first().and_then(|v| v.as_str()))
                     .map(|s| s.to_string());
                 return Some(reason.unwrap_or_else(|| "Expected to fail".to_string()));
             }
@@ -240,9 +240,9 @@ fn split_args(args: &str) -> Vec<String> {
     let mut in_quotes = false;
     let mut quote_char = ' ';
     let mut paren_depth = 0;
-    let mut chars = args.chars().peekable();
+    let chars = args.chars().peekable();
 
-    while let Some(ch) = chars.next() {
+    for ch in chars {
         match ch {
             '"' | '\'' if paren_depth == 0 => {
                 if !in_quotes {

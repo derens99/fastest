@@ -9,12 +9,28 @@ pub fn generate_fixture_aware_worker_code(verbose: bool) -> String {
 
     format!(
         r#"
+# -*- coding: utf-8 -*-
 import sys
 import os
+
+# Ensure UTF-8 encoding for all operations
+if sys.version_info[0] >= 3:
+    import locale
+    import codecs
+    # Set UTF-8 as default encoding for stdout/stderr
+    if hasattr(sys.stdout, 'buffer'):
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer)
+    if hasattr(sys.stderr, 'buffer'):
+        sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer)
+
+# Set PYTHONIOENCODING environment variable
+os.environ['PYTHONIOENCODING'] = 'utf-8'
+
 import inspect
 import asyncio
 import importlib
 import functools
+import platform
 import tempfile
 import pathlib
 import queue
@@ -28,21 +44,119 @@ from time import perf_counter as perf
 try:
     import pytest
 except ImportError:
-    # Define minimal skip/xfail support if pytest not available
-    class pytest:
-        @staticmethod
-        def skip(reason=""):
-            raise SkipTest(reason)
-        
-        @staticmethod
-        def xfail(reason=""):
-            raise XFailTest(reason)
-    
     class SkipTest(Exception):
         pass
-    
+
     class XFailTest(Exception):
         pass
+
+    import types
+
+    def _format_expected_exception(expected_exception):
+        if isinstance(expected_exception, tuple):
+            return " or ".join(exc.__name__ for exc in expected_exception)
+        return expected_exception.__name__
+
+    class _RaisesContext:
+        def __init__(self, expected_exception, match=None):
+            self.expected_exception = expected_exception
+            self.match = match
+            self.value = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, _traceback):
+            if exc_type is None:
+                raise AssertionError("DID NOT RAISE " + _format_expected_exception(self.expected_exception))
+            if not issubclass(exc_type, self.expected_exception):
+                return False
+            self.value = exc_value
+            if self.match is not None:
+                import re
+                message = str(exc_value)
+                if re.search(self.match, message) is None:
+                    raise AssertionError(
+                        "Regex pattern did not match.\n Regex: "
+                        + repr(self.match)
+                        + "\n Input: "
+                        + repr(message)
+                    )
+            return True
+
+    class _FixtureFunctionMarker:
+        def __init__(self, scope='function', params=None, autouse=False, ids=None):
+            self.scope = scope
+            self.params = params
+            self.autouse = autouse
+            self.ids = ids
+
+    class _Mark:
+        def __getattr__(self, _name):
+            def marker(*args, **_kwargs):
+                if len(args) == 1 and callable(args[0]) and not _kwargs:
+                    return args[0]
+
+                def decorator(func):
+                    return func
+
+                return decorator
+
+            return marker
+
+        def parametrize(self, *_args, **_kwargs):
+            def decorator(func):
+                return func
+
+            return decorator
+
+    def _skip(reason=""):
+        raise SkipTest(reason)
+
+    def _xfail(reason=""):
+        raise XFailTest(reason)
+
+    def _raises(expected_exception, match=None, **_kwargs):
+        return _RaisesContext(expected_exception, match=match)
+
+    def _param(*values, **_kwargs):
+        if len(values) == 1:
+            return values[0]
+        return tuple(values)
+
+    def _hook_decorator(*args, **kwargs):
+        def decorator(func):
+            func.pytest_hook_options = kwargs
+            return func
+
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return decorator(args[0])
+        return decorator
+
+    def _fixture(func=None, *, scope='function', params=None, autouse=False, ids=None, **_kwargs):
+        def decorator(inner_func):
+            inner_func._pytestfixturefunction = _FixtureFunctionMarker(
+                scope=scope,
+                params=params,
+                autouse=autouse,
+                ids=ids,
+            )
+            return inner_func
+
+        if callable(func):
+            return decorator(func)
+        return decorator
+
+    pytest = types.ModuleType('pytest')
+    pytest.skip = _skip
+    pytest.xfail = _xfail
+    pytest.raises = _raises
+    pytest.param = _param
+    pytest.fixture = _fixture
+    pytest.hookimpl = _hook_decorator
+    pytest.hookspec = _hook_decorator
+    pytest.mark = _Mark()
+    sys.modules['pytest'] = pytest
 
 # Debug flag from parent
 DEBUG = {verbose_str}
@@ -80,7 +194,7 @@ class ClassLifecycleManager:
         self.setup_order = []  # Track setup order for reverse teardown
         self.current_class_path = None
         self.current_class = None
-        
+
     def register_class(self, class_path, cls):
         """Register a class and track its state"""
         if class_path not in self.active_classes:
@@ -91,14 +205,16 @@ class ClassLifecycleManager:
                 'test_count': 0,
                 'tests_run': 0
             }}
-    
+        elif cls is not None and self.active_classes[class_path]['cls'] is None:
+            self.active_classes[class_path]['cls'] = cls
+
     def setup_class(self, class_path, cls):
         """Setup a class if not already done"""
         self.register_class(class_path, cls)
-        
+
         if self.active_classes[class_path]['setup']:
             return  # Already setup
-        
+
         if hasattr(cls, 'setup_class'):
             try:
                 debug_print(f"Calling setup_class for {{class_path}}")
@@ -106,49 +222,51 @@ class ClassLifecycleManager:
                     cls.setup_class()
                 else:
                     cls.setup_class(cls)
-                
+
                 self.active_classes[class_path]['setup'] = True
                 self.setup_order.append(class_path)
             except Exception as e:
                 debug_print(f"setup_class failed for {{class_path}}: {{e}}")
                 raise
-    
+
     def increment_test_count(self, class_path):
         """Increment expected test count for a class"""
+        if class_path not in self.active_classes:
+            self.register_class(class_path, None)
         if class_path in self.active_classes:
             self.active_classes[class_path]['test_count'] += 1
-    
+
     def mark_test_run(self, class_path):
         """Mark that a test has been run for this class"""
         if class_path in self.active_classes:
             self.active_classes[class_path]['tests_run'] += 1
-    
+
     def should_teardown_class(self, class_path):
         """Check if all tests for a class have been run"""
         if class_path not in self.active_classes:
             return False
-        
+
         state = self.active_classes[class_path]
-        return (state['setup'] and not state['teardown'] and 
-                state['test_count'] > 0 and 
+        return (state['setup'] and not state['teardown'] and
+                state['test_count'] > 0 and
                 state['tests_run'] >= state['test_count'])
-    
+
     def teardown_class(self, class_path, force=False):
         """Teardown a class if all tests are complete or forced"""
         if class_path not in self.active_classes:
             return
-        
+
         state = self.active_classes[class_path]
-        
+
         # Skip if not setup or already torn down
         if not state['setup'] or state['teardown']:
             return
-        
+
         # Check if we should teardown (all tests run or forced)
         if not force and not self.should_teardown_class(class_path):
             debug_print(f"Skipping teardown for {{class_path}}: {{state['tests_run']}}/{{state['test_count']}} tests run")
             return
-        
+
         cls = state['cls']
         if hasattr(cls, 'teardown_class'):
             try:
@@ -157,18 +275,18 @@ class ClassLifecycleManager:
                     cls.teardown_class()
                 else:
                     cls.teardown_class(cls)
-                
+
                 state['teardown'] = True
             except Exception as e:
                 debug_print(f"teardown_class failed for {{class_path}}: {{e}}")
                 # Don't re-raise to allow other teardowns to proceed
-    
+
     def transition_to_class(self, new_class_path, new_cls):
         """Handle transition between classes"""
         # Don't do anything if staying in same class
         if self.current_class_path == new_class_path:
             return
-        
+
         # If transitioning away from a class, check if we should teardown
         if self.current_class_path:
             # Only teardown if all tests have been run
@@ -176,16 +294,18 @@ class ClassLifecycleManager:
                 self.teardown_class(self.current_class_path)
                 # Also teardown class-scoped fixtures
                 teardown_fixtures('class', class_path=self.current_class_path)
-        
-        # Setup new class if needed
+
+        # Register the next class, but do not call setup_class here. Setup must
+        # run inside execute_test_with_fixtures so setup failures become normal
+        # test outcomes instead of aborting the whole batch.
         if new_class_path:
-            self.setup_class(new_class_path, new_cls)
+            self.register_class(new_class_path, new_cls)
             self.current_class_path = new_class_path
             self.current_class = new_cls
         else:
             self.current_class_path = None
             self.current_class = None
-    
+
     def teardown_all_classes(self):
         """Teardown all remaining classes in reverse setup order"""
         for class_path in reversed(self.setup_order):
@@ -207,6 +327,73 @@ _setup_state = {{
 }}
 
 # Marker extraction and handling functions
+def split_marker_arguments(args_str):
+    """Split marker arguments on top-level commas only."""
+    parts = []
+    current = []
+    depth = 0
+    quote = None
+    escaped = False
+
+    for char in args_str:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+
+        if char == '\\':
+            current.append(char)
+            escaped = True
+            continue
+
+        if quote:
+            current.append(char)
+            if char == quote:
+                quote = None
+            continue
+
+        if char in ('"', "'"):
+            quote = char
+            current.append(char)
+            continue
+
+        if char in '([{{':
+            depth += 1
+            current.append(char)
+            continue
+
+        if char in ')]}}':
+            depth = max(0, depth - 1)
+            current.append(char)
+            continue
+
+        if char == ',' and depth == 0:
+            part = ''.join(current).strip()
+            if part:
+                parts.append(part)
+            current = []
+            continue
+
+        current.append(char)
+
+    part = ''.join(current).strip()
+    if part:
+        parts.append(part)
+
+    return parts
+
+def is_marker_keyword_argument(part):
+    if '=' not in part:
+        return False
+    key = part.split('=', 1)[0].strip()
+    return key.isidentifier()
+
+def clean_marker_argument(value):
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        return value[1:-1]
+    return value
+
 def extract_markers(decorators):
     """Extract markers from decorator strings"""
     markers = []
@@ -223,7 +410,7 @@ def extract_markers(decorators):
                 marker_str = decorator.replace('mark.', '')
             else:
                 continue
-            
+
             # Parse marker name and arguments
             if '(' in marker_str:
                 name = marker_str[:marker_str.index('(')]
@@ -233,23 +420,70 @@ def extract_markers(decorators):
                 kwargs = {{}}
                 if args_str:
                     # Very simplified parsing - handles basic cases
-                    if '=' in args_str:
+                    if any(is_marker_keyword_argument(part) for part in split_marker_arguments(args_str)):
                         # Has kwargs
-                        parts = args_str.split(',')
+                        parts = split_marker_arguments(args_str)
                         for part in parts:
                             part = part.strip()
-                            if '=' in part:
+                            if is_marker_keyword_argument(part):
                                 key, val = part.split('=', 1)
-                                kwargs[key.strip()] = val.strip().strip('"\'')
+                                kwargs[key.strip()] = clean_marker_argument(val)
                             else:
-                                args.append(part.strip().strip('"\''))
+                                args.append(clean_marker_argument(part))
                     else:
                         # Just args
-                        args = [arg.strip().strip('"\'') for arg in args_str.split(',')]
+                        args = [clean_marker_argument(arg) for arg in split_marker_arguments(args_str)]
                 markers.append({{'name': name, 'args': args, 'kwargs': kwargs}})
             else:
                 markers.append({{'name': marker_str, 'args': [], 'kwargs': {{}}}})
     return markers
+
+def marker_bool(value):
+    """Convert simple marker keyword values to bools."""
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in ('true', '1', 'yes')
+
+def evaluate_marker_condition(condition):
+    """Evaluate common pytest marker conditions in the test process."""
+    condition = str(condition).strip()
+    if condition in ('True', 'true', '1'):
+        return True
+    if condition in ('False', 'false', '0'):
+        return False
+
+    try:
+        return bool(eval(
+            condition,
+            {{'__builtins__': {{}}}},
+            {{'os': os, 'platform': platform, 'sys': sys}},
+        ))
+    except Exception as e:
+        debug_print(f"Could not evaluate marker condition {{condition!r}}: {{e}}")
+
+    return False
+
+def exception_matches_expected(exc, expected):
+    """Check xfail(raises=...) by exception class name."""
+    if not expected:
+        return True
+
+    expected_names = expected
+    if not isinstance(expected_names, (list, tuple)):
+        expected_names = [expected_names]
+
+    exc_type = type(exc)
+    actual_names = {{
+        exc_type.__name__,
+        f"{{exc_type.__module__}}.{{exc_type.__name__}}",
+    }}
+
+    for expected_name in expected_names:
+        clean_name = str(expected_name).strip().strip('"\'')
+        if clean_name in actual_names or clean_name.endswith('.' + exc_type.__name__):
+            return True
+
+    return False
 
 def check_skip_markers(markers):
     """Check if test should be skipped based on markers"""
@@ -263,46 +497,52 @@ def check_skip_markers(markers):
             else:
                 return 'Skipped'
         elif marker['name'] == 'skipif':
-            # For now, simple condition evaluation
-            # TODO: Implement proper Python expression evaluation
             if marker['args']:
                 condition = marker['args'][0]
-                # Handle some common conditions
-                if condition in ('True', 'true', '1'):
+                if evaluate_marker_condition(condition):
                     reason = marker['kwargs'].get('reason') or marker['args'][1] if len(marker['args']) > 1 else 'Conditional skip'
                     return reason
-                # Platform checks
-                if 'sys.platform' in condition:
-                    import sys
-                    if 'win32' in condition and sys.platform == 'win32':
-                        return marker['kwargs'].get('reason', 'Skipped on Windows')
-                    elif 'darwin' in condition and sys.platform == 'darwin':
-                        return marker['kwargs'].get('reason', 'Skipped on macOS')
-                    elif 'linux' in condition and sys.platform == 'linux':
-                        return marker['kwargs'].get('reason', 'Skipped on Linux')
+    return None
+
+def get_xfail_info(markers):
+    """Return xfail marker metadata or None if no active xfail applies."""
+    for marker in markers:
+        if marker['name'] != 'xfail':
+            continue
+
+        args = marker.get('args', [])
+        kwargs = marker.get('kwargs', {{}})
+
+        if args and not evaluate_marker_condition(args[0]):
+            return None
+
+        reason = kwargs.get('reason')
+        if not reason and args:
+            reason = args[0]
+
+        return {{
+            'reason': reason or 'Expected to fail',
+            'strict': marker_bool(kwargs.get('strict', False)),
+            'raises': kwargs.get('raises'),
+        }}
+
     return None
 
 def check_xfail_markers(markers):
     """Check if test is expected to fail"""
-    for marker in markers:
-        if marker['name'] == 'xfail':
-            # Get reason from kwargs or first arg
-            if 'reason' in marker['kwargs']:
-                return marker['kwargs']['reason']
-            elif marker['args']:
-                return marker['args'][0]
-            else:
-                return 'Expected to fail'
+    xfail_info = get_xfail_info(markers)
+    if xfail_info:
+        return xfail_info['reason']
     return None
 
 def setup_module_if_needed(module_name):
     """Execute setup_module if it exists and hasn't been called yet"""
     if module_name in _setup_state['modules'] and _setup_state['modules'][module_name]['setup_done']:
         return
-    
+
     if module_name not in module_cache:
         return
-    
+
     mod = module_cache[module_name]
     if hasattr(mod, 'setup_module'):
         try:
@@ -318,10 +558,10 @@ def teardown_module_if_needed(module_name):
     """Execute teardown_module if it exists and setup was called"""
     if module_name not in _setup_state['modules'] or not _setup_state['modules'][module_name]['setup_done']:
         return
-    
+
     if _setup_state['modules'][module_name].get('teardown_done', False):
         return
-    
+
     mod = module_cache.get(module_name)
     if mod and hasattr(mod, 'teardown_module'):
         try:
@@ -345,9 +585,12 @@ def setup_method_if_needed(instance, method_name):
     """Execute setup_method if it exists"""
     if hasattr(instance, 'setup_method'):
         try:
-            # setup_method takes the method as parameter
             method = getattr(instance, method_name)
-            instance.setup_method(method)
+            setup = instance.setup_method
+            if len(inspect.signature(setup).parameters) == 0:
+                setup()
+            else:
+                setup(method)
         except Exception as e:
             debug_print(f"setup_method failed: {{e}}")
             raise
@@ -356,9 +599,12 @@ def teardown_method_if_needed(instance, method_name):
     """Execute teardown_method if it exists"""
     if hasattr(instance, 'teardown_method'):
         try:
-            # teardown_method takes the method as parameter
             method = getattr(instance, method_name)
-            instance.teardown_method(method)
+            teardown = instance.teardown_method
+            if len(inspect.signature(teardown).parameters) == 0:
+                teardown()
+            else:
+                teardown(method)
         except Exception as e:
             debug_print(f"teardown_method failed: {{e}}")
 
@@ -370,9 +616,32 @@ class FixtureRequest:
         self.class_name = class_name
         self.module_name = module_name
         self.param = None
+        self.instance = None
         self._fixture_values = {{}}
         self._finalizers = []
         self.fixturenames = []  # List of fixture names used by this test
+        class Cache:
+            def __init__(self):
+                self._values = {{}}
+
+            def get(self, key, default=None):
+                return self._values.get(key, default)
+
+            def set(self, key, value):
+                self._values[key] = value
+
+        class Config:
+            def __init__(self):
+                self.workerinput = {{
+                    'workerid': 'master',
+                    'testrunuid': 'local',
+                }}
+                self.cache = Cache()
+
+            def getoption(self, name, default=None):
+                return default
+
+        self.config = Config()
         # Create a simple node object for compatibility
         class Node:
             def __init__(self, nodeid, name, module):
@@ -380,32 +649,36 @@ class FixtureRequest:
                 self.name = name
                 self.module = module
                 self._markers = []
-            
+
             def iter_markers(self, name=None):
                 """Iterate over markers"""
                 if name:
                     return [m for m in self._markers if m.name == name]
                 return self._markers
-            
+
+            def get_closest_marker(self, name, default=None):
+                markers = self.iter_markers(name)
+                return markers[-1] if markers else default
+
             def add_marker(self, marker):
                 """Add a marker to the node"""
                 self._markers.append(marker)
-        
+
         self.node = Node(node_id, test_name, module_name)
         self.fixturename = None  # Will be set when requesting fixtures
         self.scope = 'function'  # Default scope
-    
+
     def getfixturevalue(self, name):
         """Get fixture value by name"""
         if name in self._fixture_values:
             return self._fixture_values[name]
         # Execute fixture and cache result
         return execute_fixture(name, self)
-    
+
     def addfinalizer(self, finalizer):
         """Add finalizer function"""
         self._finalizers.append(finalizer)
-    
+
     def _finalize(self):
         """Execute all finalizers in reverse order"""
         for finalizer in reversed(self._finalizers):
@@ -435,15 +708,15 @@ def execute_fixture(fixture_name, request):
     # Check if it's a built-in fixture
     if fixture_name in BUILTIN_FIXTURES:
         return BUILTIN_FIXTURES[fixture_name](request)
-    
+
     # Look up fixture definition
     if fixture_name not in _fixture_registry:
         raise ValueError(f"Fixture '{{fixture_name}}' not found")
-    
+
     fixture_func = _fixture_registry[fixture_name]
     fixture_meta = _fixture_metadata.get(fixture_name, {{}})
     scope = fixture_meta.get('scope', 'function')
-    
+
     # If the fixture is wrapped by pytest, unwrap it
     if hasattr(fixture_func, '__wrapped__'):
         # This is a pytest-wrapped fixture, get the original function
@@ -451,21 +724,21 @@ def execute_fixture(fixture_name, request):
         while hasattr(original_func, '__wrapped__'):
             original_func = original_func.__wrapped__
         fixture_func = original_func
-    
+
     # Check cache based on scope
     cache_key = get_fixture_scope_key(fixture_name, scope, request)
     if cache_key in active_fixtures:
         debug_print(f"Using cached fixture '{{fixture_name}}' (scope={{scope}})")
         return active_fixtures[cache_key]['value']
-    
+
     debug_print(f"Executing fixture '{{fixture_name}}' (scope={{scope}})")
-    
+
     # Get fixture dependencies
     sig = inspect.signature(fixture_func)
     kwargs = {{}}
-    
+
     debug_print(f"Fixture '{{fixture_name}}' has parameters: {{list(sig.parameters.keys())}}")
-    
+
     for param_name in sig.parameters:
         if param_name == 'self':
             # Skip self parameter for class methods
@@ -480,10 +753,10 @@ def execute_fixture(fixture_name, request):
             kwargs[param_name] = execute_fixture(param_name, request)
         else:
             debug_print(f"WARNING: Unknown fixture dependency '{{param_name}}' for fixture '{{fixture_name}}'")
-    
+
     # Handle parametrized fixtures and indirect parametrization
     params = fixture_meta.get('params', [])
-    
+
     # Check if this fixture is being used for indirect parametrization
     if hasattr(request, '_indirect_params') and fixture_name in request._indirect_params:
         # This fixture is being parametrized indirectly
@@ -498,7 +771,7 @@ def execute_fixture(fixture_name, request):
             # We'll need to iterate through params in the test runner
             # For now, just use the first parameter
             request.param = params[0] if params else None
-    
+
     # Execute fixture
     try:
         # Check if this is a class method fixture
@@ -506,11 +779,11 @@ def execute_fixture(fixture_name, request):
             # Bind the method to the instance
             instance = request._test_instance
             bound_method = fixture_func.__get__(instance, instance.__class__)
-            
+
             # Filter out 'self' from kwargs if present
             if 'self' in kwargs:
                 del kwargs['self']
-                
+
             if fixture_meta.get('is_async', False):
                 result = asyncio.run(bound_method(**kwargs))
             else:
@@ -527,7 +800,14 @@ def execute_fixture(fixture_name, request):
                     raise
             else:
                 result = fixture_func(**kwargs)
-        
+
+        # Real pytest fixture decorators can hide async metadata from Fastest's
+        # parser. If calling the unwrapped fixture produced a coroutine, resolve
+        # it here so async fixture values match pytest behavior.
+        if inspect.iscoroutine(result):
+            debug_print(f"Awaiting coroutine fixture result for '{{fixture_name}}'")
+            result = asyncio.run(result)
+
         # Handle generator fixtures (yield)
         if inspect.isgeneratorfunction(fixture_func) or inspect.isasyncgenfunction(fixture_func):
             gen = result
@@ -550,7 +830,7 @@ def execute_fixture(fixture_name, request):
             }}
             teardown_stack.append((cache_key, scope))
             return result
-            
+
     except Exception as e:
         debug_print(f"Error executing fixture '{{fixture_name}}': {{e}}")
         raise
@@ -558,12 +838,12 @@ def execute_fixture(fixture_name, request):
 def teardown_fixtures(scope, request=None, class_path=None):
     """Teardown fixtures for a given scope"""
     debug_print(f"Tearing down fixtures for scope: {{scope}}, class_path: {{class_path}}")
-    
+
     # Determine which fixtures to teardown
     to_teardown = []
     scope_order = ['session', 'package', 'module', 'class', 'function']
     scope_idx = scope_order.index(scope)
-    
+
     for cache_key, fixture_scope in reversed(teardown_stack):
         fixture_data = active_fixtures.get(cache_key)
         if fixture_data:
@@ -577,7 +857,7 @@ def teardown_fixtures(scope, request=None, class_path=None):
                         to_teardown.append(cache_key)
                 else:
                     to_teardown.append(cache_key)
-    
+
     # Teardown in reverse order
     for cache_key in to_teardown:
         fixture_data = active_fixtures.get(cache_key)
@@ -590,7 +870,7 @@ def teardown_fixtures(scope, request=None, class_path=None):
                 pass  # Normal completion
             except Exception as e:
                 debug_print(f"Teardown error for {{cache_key}}: {{e}}")
-        
+
         # Remove from active fixtures
         active_fixtures.pop(cache_key, None)
         if (cache_key, fixture_data['scope']) in teardown_stack:
@@ -601,10 +881,33 @@ def builtin_tmp_path(request):
     """Built-in tmp_path fixture"""
     return pathlib.Path(tempfile.mkdtemp())
 
+def builtin_tmpdir_factory(request):
+    """Built-in tmpdir_factory fixture"""
+    class TmpdirFactory:
+        def __init__(self):
+            self._base = pathlib.Path(tempfile.mkdtemp())
+
+        def mktemp(self, basename):
+            path = self._base / str(basename)
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+
+    return TmpdirFactory()
+
+def builtin_cache(request):
+    """Built-in cache fixture"""
+    return request.config.cache
+
+def builtin_event_loop(request):
+    """Built-in event_loop fixture"""
+    loop = asyncio.new_event_loop()
+    request.addfinalizer(loop.close)
+    return loop
+
 def builtin_capsys(request):
     """Built-in capsys fixture"""
     global _capturing_output, _original_stderr
-    
+
     class CaptureFixture:
         def __init__(self):
             self._stdout = StringIO()
@@ -618,7 +921,7 @@ def builtin_capsys(request):
             global _capturing_output, _original_stderr
             _capturing_output = True
             _original_stderr = self._old_stderr
-        
+
         def readouterr(self):
             # Get captured output
             out = self._stdout.getvalue()
@@ -628,14 +931,14 @@ def builtin_capsys(request):
             self._stdout.truncate()
             self._stderr.seek(0)
             self._stderr.truncate()
-            
+
             class Result:
                 def __init__(self, out, err):
                     self.out = out
                     self.err = err
-            
+
             return Result(out, err)
-        
+
         def _restore(self):
             """Restore original stdout/stderr"""
             sys.stdout = self._old_stdout
@@ -644,7 +947,7 @@ def builtin_capsys(request):
             global _capturing_output, _original_stderr
             _capturing_output = False
             _original_stderr = None
-    
+
     capture = CaptureFixture()
     # Register finalizer to ensure cleanup
     request.addfinalizer(capture._restore)
@@ -657,7 +960,7 @@ def builtin_monkeypatch(request):
             self._setattr = []
             self._setenv = []
             self._delenv = []
-        
+
         def setattr(self, target, name, value):
             if isinstance(target, str):
                 parts = target.split('.')
@@ -666,17 +969,17 @@ def builtin_monkeypatch(request):
                     obj = getattr(obj, part)
                 target = obj
                 name = parts[-1]
-            
+
             old_value = getattr(target, name, None)
             self._setattr.append((target, name, old_value))
             setattr(target, name, value)
-        
+
         def setenv(self, name, value):
             import os
             old_value = os.environ.get(name)
             self._setenv.append((name, old_value))
             os.environ[name] = str(value)
-        
+
         def delenv(self, name, raising=True):
             import os
             old_value = os.environ.get(name)
@@ -685,7 +988,7 @@ def builtin_monkeypatch(request):
                 del os.environ[name]
             elif raising:
                 raise KeyError(name)
-        
+
         def undo(self):
             import os
             for target, name, value in reversed(self._setattr):
@@ -693,17 +996,17 @@ def builtin_monkeypatch(request):
                     delattr(target, name)
                 else:
                     setattr(target, name, value)
-            
+
             for name, value in reversed(self._setenv):
                 if value is None:
                     os.environ.pop(name, None)
                 else:
                     os.environ[name] = value
-            
+
             for name, value in reversed(self._delenv):
                 if value is not None:
                     os.environ[name] = value
-    
+
     mp = MonkeyPatch()
     request.addfinalizer(mp.undo)
     return mp
@@ -718,42 +1021,92 @@ def builtin_request(request):
 def builtin_mocker(request):
     """Basic mocker fixture implementation"""
     import unittest.mock
-    
+
+    class PatchProxy:
+        def __init__(self, mocker):
+            self._mocker = mocker
+
+        def __call__(self, target, *args, **kwargs):
+            patcher = unittest.mock.patch(target, *args, **kwargs)
+            return self._mocker._start_patch(patcher)
+
+        def object(self, target, name, *args, **kwargs):
+            patcher = unittest.mock.patch.object(target, name, *args, **kwargs)
+            return self._mocker._start_patch(patcher)
+
     class MockerFixture:
         def __init__(self):
             self._patches = []
-        
-        def patch(self, target, **kwargs):
-            """Create a patch"""
-            patcher = unittest.mock.patch(target, **kwargs)
+            self._mocks = []
+            self.patch = PatchProxy(self)
+            request.addfinalizer(self.stopall)
+
+        def _start_patch(self, patcher):
             mock = patcher.start()
             self._patches.append(patcher)
-            request.addfinalizer(patcher.stop)
             return mock
-        
-        def Mock(self, **kwargs):
+
+        def _track_mock(self, mock):
+            self._mocks.append(mock)
+            return mock
+
+        def Mock(self, *args, **kwargs):
             """Create a Mock object"""
-            return unittest.mock.Mock(**kwargs)
-        
-        def MagicMock(self, **kwargs):
+            return self._track_mock(unittest.mock.Mock(*args, **kwargs))
+
+        def MagicMock(self, *args, **kwargs):
             """Create a MagicMock object"""
-            return unittest.mock.MagicMock(**kwargs)
-        
+            return self._track_mock(unittest.mock.MagicMock(*args, **kwargs))
+
+        def AsyncMock(self, *args, **kwargs):
+            """Create an AsyncMock object"""
+            return self._track_mock(unittest.mock.AsyncMock(*args, **kwargs))
+
+        def PropertyMock(self, *args, **kwargs):
+            """Create a PropertyMock object"""
+            return self._track_mock(unittest.mock.PropertyMock(*args, **kwargs))
+
+        def mock_open(self, *args, **kwargs):
+            """Create a mock_open helper"""
+            return self._track_mock(unittest.mock.mock_open(*args, **kwargs))
+
         def spy(self, obj, name):
             """Create a spy by wrapping the original method"""
             original = getattr(obj, name)
             mock = self.Mock(wraps=original)
             patcher = unittest.mock.patch.object(obj, name, mock)
-            patcher.start()
-            self._patches.append(patcher)
-            request.addfinalizer(patcher.stop)
+            self._start_patch(patcher)
             return mock
-    
+
+        def stub(self, name=None):
+            """Create a generic stub mock"""
+            return self.Mock(name=name)
+
+        def resetall(self):
+            """Reset all mocks created by this fixture"""
+            for mock in self._mocks:
+                if hasattr(mock, 'reset_mock'):
+                    mock.reset_mock()
+
+        def stopall(self):
+            """Stop all active patches"""
+            for patcher in reversed(self._patches):
+                try:
+                    patcher.stop()
+                except RuntimeError:
+                    pass
+            self._patches.clear()
+
     return MockerFixture()
 
 
 BUILTIN_FIXTURES = {{
     'tmp_path': builtin_tmp_path,
+    'tmpdir': builtin_tmp_path,
+    'tmp_path_factory': builtin_tmpdir_factory,
+    'tmpdir_factory': builtin_tmpdir_factory,
+    'cache': builtin_cache,
+    'event_loop': builtin_event_loop,
     'capsys': builtin_capsys,
     'monkeypatch': builtin_monkeypatch,
     'request': builtin_request,
@@ -784,12 +1137,12 @@ def ensure_path_cached(filepath):
     """Cache-aware path management"""
     if filepath in path_cache:
         return
-    
+
     parent_dir = os.path.dirname(filepath)
     if parent_dir and parent_dir not in sys.path:
         sys.path.insert(0, parent_dir)
         path_cache.add(parent_dir)
-    
+
     # Project virtual environment detection
     detected_venv = detect_project_venv_from_path(filepath)
     if detected_venv:
@@ -808,33 +1161,94 @@ def detect_project_venv_from_path(filepath):
         current = os.path.dirname(current)
     return None
 
+def get_module_cache_key(module_name, module_path=None):
+    if module_path:
+        return os.path.abspath(module_path)
+    return module_name
+
+def make_file_module_name(module_name, module_path):
+    abs_path = os.path.abspath(module_path)
+    suffix = ''.join(ch if ch.isalnum() else '_' for ch in abs_path)
+    return '_fastest_file_' + suffix + '_' + module_name
+
+def safe_import_module(module_name, module_path=None):
+    """Import a module with proper UTF-8 encoding support."""
+    try:
+        # For Python 3, ensure the source file is read with UTF-8 encoding
+        if module_path and sys.version_info[0] >= 3:
+            import importlib.util
+            abs_path = os.path.abspath(module_path)
+            module_key = get_module_cache_key(module_name, abs_path)
+            if module_key in module_cache:
+                return module_cache[module_key]
+
+            file_module_name = make_file_module_name(module_name, abs_path)
+            spec = importlib.util.spec_from_file_location(file_module_name, abs_path)
+            if spec and spec.loader:
+                # Create module
+                module = importlib.util.module_from_spec(spec)
+                previous_module = sys.modules.get(file_module_name)
+                sys.modules[file_module_name] = module
+
+                # Load with UTF-8 encoding
+                try:
+                    spec.loader.exec_module(module)
+                except SyntaxError as e:
+                    # If we get a syntax error, it might be encoding-related
+                    # Try to load the source manually with UTF-8
+                    if os.path.exists(abs_path):
+                        with open(abs_path, 'r', encoding='utf-8') as f:
+                            source = f.read()
+
+                        # Compile and execute
+                        code = compile(source, abs_path, 'exec')
+                        exec(code, module.__dict__)
+                except Exception:
+                    if previous_module is None:
+                        sys.modules.pop(file_module_name, None)
+                    else:
+                        sys.modules[file_module_name] = previous_module
+                    raise
+
+                module_cache[module_key] = module
+                return module
+
+        # Fallback to standard import
+        return importlib.import_module(module_name)
+    except Exception as e:
+        debug_print(f"Failed to import module {{module_name}}: {{e}}")
+        # If all else fails, try standard import
+        return importlib.import_module(module_name)
+
 def get_cached_function(module_name, func_name, filepath=None):
     """Ultra-fast function caching with optimized loading"""
-    cache_key = f"{{module_name}}.{{func_name}}"
-    
+    module_key = get_module_cache_key(module_name, filepath)
+    cache_key = f"{{module_key}}.{{func_name}}"
+
     if cache_key in fn_cache:
         return fn_cache[cache_key]
-    
+
     try:
         if filepath:
             ensure_path_cached(filepath)
-        
+
         # Get cached module or import
-        if module_name in module_cache:
-            mod = module_cache[module_name]
+        if module_key in module_cache:
+            mod = module_cache[module_key]
         else:
-            mod = importlib.import_module(module_name)
-            module_cache[module_name] = mod
-        
+            # Use safe import with UTF-8 support
+            mod = safe_import_module(module_name, filepath)
+            module_cache[module_key] = mod
+
         # Handle class methods
         if '::' in func_name:
             class_name, method_name = func_name.split('::', 1)
             cls = getattr(mod, class_name)
-            
+
             # Setup class if needed using the new lifecycle management
-            class_path = f"{{module_name}}.{{class_name}}"
+            class_path = f"{{module_key}}.{{class_name}}"
             setup_class_if_needed(class_path, cls)
-            
+
             # Instantiate class
             try:
                 instance = cls()
@@ -848,14 +1262,14 @@ def get_cached_function(module_name, func_name, filepath=None):
                         instance = cls()
                 except Exception:
                     instance = object.__new__(cls)
-            
+
             # Call setUp if exists
             if hasattr(instance, 'setUp'):
                 try:
                     instance.setUp()
                 except Exception:
                     pass
-            
+
             func = getattr(instance, method_name)
             fn_cache[cache_key] = (func, instance)
             return func, instance
@@ -863,22 +1277,35 @@ def get_cached_function(module_name, func_name, filepath=None):
             func = getattr(mod, func_name)
             fn_cache[cache_key] = func
             return func, None
-            
+
     except Exception as e:
         raise ImportError(f"Failed to load {{module_name}}.{{func_name}}: {{str(e)}}")
+
+def restore_fastest_param_value(value):
+    """Restore non-JSON Python values encoded by the Rust parametrize parser."""
+    if isinstance(value, dict):
+        keys = set(value.keys())
+        if keys == {{'__fastest_float__'}}:
+            return float(value['__fastest_float__'])
+        if keys == {{'__fastest_set__'}}:
+            return set(restore_fastest_param_value(item) for item in value['__fastest_set__'])
+        return {{key: restore_fastest_param_value(inner) for key, inner in value.items()}}
+    if isinstance(value, list):
+        return [restore_fastest_param_value(item) for item in value]
+    return value
 
 def parse_parametrize_args(test_id):
     """Parse parametrize arguments from test ID"""
     if '[' not in test_id or ']' not in test_id:
         return []
-    
+
     start = test_id.find('[')
     end = test_id.rfind(']')
     if start == -1 or end == -1 or start >= end:
         return []
-    
+
     param_str = test_id[start + 1:end]
-    
+
     # Handle different formats
     if '-' in param_str and ',' not in param_str:
         raw_params = param_str.split('-')
@@ -886,12 +1313,12 @@ def parse_parametrize_args(test_id):
         raw_params = param_str.split(',')
     else:
         raw_params = [param_str]
-    
+
     # Convert to Python types
     params = []
     for param in raw_params:
         param = param.strip()
-        
+
         if param.lower() == 'none':
             params.append(None)
         elif param.lower() == 'true':
@@ -910,7 +1337,7 @@ def parse_parametrize_args(test_id):
                     params.append(param)
             except ValueError:
                 params.append(param)
-    
+
     return params
 
 def is_async_function(func):
@@ -935,28 +1362,28 @@ def extract_assertion_details(exc, func, kwargs):
                 return {{'formatted': result, 'enhanced': True}}
         except Exception:
             pass
-    
+
     # Fallback to original implementation
     import traceback
     import ast
     import inspect
-    
+
     try:
         # Get the traceback
         tb = exc.__traceback__
-        
+
         # Find the frame where the assertion happened
         while tb and tb.tb_next:
             frame = tb.tb_frame
             if frame.f_code.co_name == func.__name__:
                 break
             tb = tb.tb_next
-        
+
         if not tb:
             return None
-            
+
         frame = tb.tb_frame
-        
+
         # Try to get the source code
         try:
             source_lines = inspect.getsourcelines(func)[0]
@@ -964,11 +1391,11 @@ def extract_assertion_details(exc, func, kwargs):
             line_no = tb.tb_lineno - func.__code__.co_firstlineno
             if 0 <= line_no < len(source_lines):
                 failed_line = source_lines[line_no].strip()
-                
+
                 # Parse the assertion to extract values
                 if failed_line.startswith('assert '):
                     assertion_code = failed_line[7:]  # Remove 'assert '
-                    
+
                     # Try to evaluate parts of the assertion
                     details = {{
                         'assertion': assertion_code,
@@ -976,13 +1403,13 @@ def extract_assertion_details(exc, func, kwargs):
                         'line': tb.tb_lineno,
                         'function': func.__name__
                     }}
-                    
+
                     # Extract local variables from the frame
                     local_vars = frame.f_locals.copy()
                     # Remove function arguments to focus on assertion values
                     for arg in kwargs:
                         local_vars.pop(arg, None)
-                    
+
                     # Try to parse and evaluate the assertion
                     try:
                         tree = ast.parse(assertion_code, mode='eval')
@@ -996,7 +1423,7 @@ def extract_assertion_details(exc, func, kwargs):
                                     details['values'][left_code] = repr(left_val)
                                 except:
                                     pass
-                            
+
                             # Get right side (first comparator)
                             if tree.body.comparators:
                                 right_code = ast.get_source_segment(assertion_code, tree.body.comparators[0])
@@ -1006,7 +1433,7 @@ def extract_assertion_details(exc, func, kwargs):
                                         details['values'][right_code] = repr(right_val)
                                     except:
                                         pass
-                            
+
                             # Store comparison operator
                             if tree.body.ops:
                                 op = tree.body.ops[0]
@@ -1025,18 +1452,18 @@ def extract_assertion_details(exc, func, kwargs):
                         for var_name, var_value in frame.f_locals.items():
                             if var_name in assertion_code:
                                 details['values'][var_name] = repr(var_value)
-                    
+
                     # Add any relevant local variables
                     if local_vars:
-                        details['locals'] = {{k: repr(v) for k, v in local_vars.items() 
+                        details['locals'] = {{k: repr(v) for k, v in local_vars.items()
                                             if not k.startswith('_')}}
-                    
+
                     return details
         except:
             pass
     except:
         pass
-    
+
     return None
 
 
@@ -1045,50 +1472,50 @@ def format_assertion_error(details):
     # If we have enhanced formatting, use it directly
     if isinstance(details, dict) and details.get('enhanced') and 'formatted' in details:
         return details['formatted']
-    
+
     # Original formatting
     lines = []
-    
+
     # Main assertion line
     lines.append(f"Assertion failed: assert {{details['assertion']}}")
-    
+
     # Show values
     if details.get('values'):
         lines.append("Where:")
         for expr, value in details['values'].items():
             lines.append(f"    {{expr}} = {{value}}")
-    
+
     # Show comparison if available
     if 'operator' in details and len(details['values']) == 2:
         values = list(details['values'].values())
         if len(values) == 2:
             lines.append(f"    {{values[0]}} {{details['operator']}} {{values[1]}} is False")
-    
+
     # Show local variables if any
     if details.get('locals'):
         lines.append("Local variables:")
         for name, value in details['locals'].items():
             lines.append(f"    {{name}} = {{value}}")
-    
+
     # Add location info
     lines.append(f"    at {{details['function']}}:{{details['line']}}")
-    
+
     return "\n".join(lines)
 
 def load_conftest_modules(test_path):
     """Load all conftest.py modules in the directory hierarchy"""
     import os
-    
+
     conftest_modules = []
     current_dir = os.path.dirname(os.path.abspath(test_path))
-    
+
     # Walk up the directory tree looking for conftest.py files
     while current_dir and current_dir != os.path.dirname(current_dir):
         conftest_path = os.path.join(current_dir, 'conftest.py')
         if os.path.exists(conftest_path):
             # Convert path to module name
             module_name = f"conftest_{{current_dir.replace(os.sep, '_').replace(':', '')}}"
-            
+
             # Import the conftest module
             try:
                 import importlib.util
@@ -1100,10 +1527,10 @@ def load_conftest_modules(test_path):
                     debug_print(f"Loaded conftest.py from {{conftest_path}}")
             except Exception as e:
                 debug_print(f"Failed to load conftest.py from {{conftest_path}}: {{e}}")
-        
+
         # Move up one directory
         current_dir = os.path.dirname(current_dir)
-    
+
     # Return in reverse order (root conftest first)
     return list(reversed(conftest_modules))
 
@@ -1111,7 +1538,7 @@ def load_conftest_modules(test_path):
 def scan_module_for_fixtures(module):
     """Scan a module for fixture definitions"""
     debug_print(f"Scanning module {{module.__name__}} for fixtures")
-    
+
     # First try to import pytest in the module's context
     if hasattr(module, 'pytest'):
         pytest_module = module.pytest
@@ -1121,19 +1548,19 @@ def scan_module_for_fixtures(module):
         except ImportError:
             debug_print("pytest not available, using basic fixture detection")
             pytest_module = None
-    
+
     fixture_count = 0
     for name in dir(module):
         if name.startswith('_'):
             continue
         obj = getattr(module, name)
-        
+
         # Check if it's a fixture
         is_fixture = False
         fixture_metadata = {{}}
-        
+
         # Method 1: Check for pytest fixture markers
-        if hasattr(obj, '_pytestfixturefunction'):
+        if (inspect.isfunction(obj) or inspect.ismethod(obj)) and hasattr(obj, '_pytestfixturefunction'):
             debug_print(f"Found pytest fixture marker on {{name}}")
             is_fixture = True
             fixture_info = obj._pytestfixturefunction
@@ -1144,7 +1571,7 @@ def scan_module_for_fixtures(module):
                 'ids': getattr(fixture_info, 'ids', None),
             }}
         # Method 2: Check if function has fixture decorator via __name__ attribute
-        elif hasattr(obj, '__name__') and hasattr(obj, '__dict__'):
+        elif inspect.isfunction(obj) or inspect.ismethod(obj):
             # Check if this is a decorated function (look for wrapper attributes)
             if hasattr(obj, '__wrapped__'):
                 # This might be a fixture
@@ -1153,13 +1580,13 @@ def scan_module_for_fixtures(module):
                 if hasattr(obj, 'fixture'):
                     fixture_metadata = obj.fixture
                 else:
-                    fixture_metadata = {}
+                    fixture_metadata = {{}}
         # Method 3: Check if name matches common fixture patterns and is callable
         elif callable(obj) and (
-            name.endswith('_fixture') or 
+            name.endswith('_fixture') or
             name.startswith('fixture_') or
             name in ['tmp_path', 'capsys', 'monkeypatch', 'request', 'tmpdir',
-                     'simple_fixture', 'dependent_fixture', 'nested_dependent', 
+                     'simple_fixture', 'dependent_fixture', 'nested_dependent',
                      'class_fixture', 'module_fixture', 'session_fixture',
                      'yield_fixture', 'yield_with_dependency', 'parametrized_fixture',
                      'parametrized_with_ids', 'fixture_with_request', 'fixture_with_finalizer',
@@ -1171,7 +1598,7 @@ def scan_module_for_fixtures(module):
             # Infer metadata from function signature and name
             sig = inspect.signature(obj)
             params = list(sig.parameters.keys())
-            
+
             # Basic scope inference
             if 'session' in name:
                 scope = 'session'
@@ -1181,14 +1608,14 @@ def scan_module_for_fixtures(module):
                 scope = 'class'
             else:
                 scope = 'function'
-                
+
             fixture_metadata = {{
                 'scope': scope,
                 'params': None,
                 'autouse': False,
                 'ids': None,
             }}
-        
+
         if is_fixture:
             _fixture_registry[name] = obj
             # Check if the original wrapped function is async
@@ -1208,23 +1635,23 @@ def scan_module_for_fixtures(module):
             }}
             debug_print(f"Registered fixture: {{name}} (scope={{_fixture_metadata[name]['scope']}}, async={{is_async}})")
             fixture_count += 1
-    
+
     debug_print(f"Found {{fixture_count}} fixtures in module {{module.__name__}}")
 
 def scan_class_for_fixtures(cls, module_name, class_name):
     """Scan a test class for fixture methods"""
     debug_print(f"Scanning class {{class_name}} for fixtures")
-    
+
     for name in dir(cls):
         if name.startswith('_'):
             continue
-        
+
         obj = getattr(cls, name)
-        
+
         # Check if it's a fixture method
         is_fixture = False
         fixture_metadata = {{}}
-        
+
         # Check for pytest fixture markers
         if hasattr(obj, '_pytestfixturefunction'):
             is_fixture = True
@@ -1235,7 +1662,7 @@ def scan_class_for_fixtures(cls, module_name, class_name):
                 'autouse': getattr(fixture_info, 'autouse', False),
                 'ids': getattr(fixture_info, 'ids', None),
             }}
-        
+
         if is_fixture:
             # Create a unique name for class fixtures
             fixture_key = f"{{class_name}}.{{name}}"
@@ -1256,11 +1683,11 @@ def execute_test_with_fixtures(test_data):
     """Execute a test with full fixture support and marker handling"""
     debug_print(f"Starting test execution for: {{test_data['id']}}")
     start = perf()
-    
+
     # Check for markers first
     decorators = test_data.get('decorators', [])
     markers = extract_markers(decorators)
-    
+
     # Check if test should be skipped
     skip_reason = check_skip_markers(markers)
     if skip_reason:
@@ -1272,43 +1699,46 @@ def execute_test_with_fixtures(test_data):
             'duration': duration,
             'error': None
         }}
-    
+
     # Check if test is expected to fail
-    xfail_reason = check_xfail_markers(markers)
-    is_xfail = xfail_reason is not None
-    
+    xfail_info = get_xfail_info(markers)
+    xfail_reason = xfail_info['reason'] if xfail_info else None
+    is_xfail = xfail_info is not None
+
     # Initialize variables to None in case of errors
     instance = None
     request = None
-    
+
     try:
         # Get the test module and scan for fixtures
-        if test_data['module'] not in module_cache:
+        module_key = get_module_cache_key(test_data['module'], test_data.get('path'))
+        if module_key not in module_cache:
             ensure_path_cached(test_data.get('path'))
-            mod = importlib.import_module(test_data['module'])
-            module_cache[test_data['module']] = mod
-            
+            # Use safe import with UTF-8 support
+            mod = safe_import_module(test_data['module'], test_data.get('path'))
+            module_cache[module_key] = mod
+
             # Load and scan conftest.py modules
             if test_data.get('path'):
                 conftest_modules = load_conftest_modules(test_data['path'])
                 for conftest_mod in conftest_modules:
                     scan_module_for_fixtures(conftest_mod)
-            
+
             # Scan the test module itself
             scan_module_for_fixtures(mod)
         else:
-            mod = module_cache[test_data['module']]
-        
+            mod = module_cache[module_key]
+
         # If this is a class method test, also scan the class for fixtures
         if test_data.get('class_name'):
             class_name = test_data['class_name']
             if hasattr(mod, class_name):
                 cls = getattr(mod, class_name)
                 scan_class_for_fixtures(cls, test_data['module'], class_name)
-        
+
         # Call module setup if needed
-        setup_module_if_needed(test_data['module'])
-        
+        setup_module_if_needed(module_key)
+
         # Create request object
         request = FixtureRequest(
             node_id=test_data['id'],
@@ -1316,7 +1746,7 @@ def execute_test_with_fixtures(test_data):
             class_name=test_data.get('class_name'),
             module_name=test_data['module']
         )
-        
+
         # Add markers to the request.node object
         for marker in markers:
             # Create a simple marker object
@@ -1326,38 +1756,42 @@ def execute_test_with_fixtures(test_data):
                 'kwargs': marker['kwargs']
             }})()
             request.node.add_marker(marker_obj)
-        
+
         # Get test function
         debug_print(f"Getting test function: {{test_data['module']}}.{{test_data['function']}}")
         try:
             fn_result = get_cached_function(
-                test_data['module'], 
-                test_data['function'], 
+                test_data['module'],
+                test_data['function'],
                 test_data.get('path')
             )
         except BaseException as get_func_exc:
             debug_print(f"Exception getting function: {{type(get_func_exc).__name__}}: {{get_func_exc}}")
             raise
-        
+
         if isinstance(fn_result, tuple):
             func, instance = fn_result
         else:
             func = fn_result
             instance = None
-        
+
+        request.instance = instance
+        if instance is not None:
+            request._test_instance = instance
+
         # Get function signature
         sig = inspect.signature(func)
         all_params = list(sig.parameters.keys())
-        
+
         # Remove 'self' if it's a method
         if 'self' in all_params:
             all_params.remove('self')
-        
+
         # Parse parametrize arguments
         # First, try to extract parameters from decorators (new method)
         param_dict = {{}}
         indirect_params = []
-        
+
         if 'decorators' in test_data:
             for decorator in test_data['decorators']:
                 if decorator.startswith('__params__='):
@@ -1365,7 +1799,7 @@ def execute_test_with_fixtures(test_data):
                     params_json = decorator[len('__params__='):]
                     try:
                         import json
-                        param_dict = json.loads(params_json)
+                        param_dict = restore_fastest_param_value(json.loads(params_json))
                         debug_print("Extracted parameters from decorator: " + str(param_dict))
                     except Exception as e:
                         debug_print("Failed to parse parameters: " + str(e))
@@ -1378,33 +1812,33 @@ def execute_test_with_fixtures(test_data):
                         debug_print("Extracted indirect parameters: " + str(indirect_params))
                     except Exception as e:
                         debug_print("Failed to parse indirect parameters: " + str(e))
-        
+
         # If no parameters found in decorators, fall back to parsing from test ID
         if param_dict:
             parametrize_args = []
         else:
             parametrize_args = parse_parametrize_args(test_data['id'])
-        
+
         # Build kwargs with fixtures
         kwargs = {{}}
-        
+
         # Handle parametrized arguments first
         if param_dict:
             # Separate direct and indirect parameters
             direct_params = {{k: v for k, v in param_dict.items() if k not in indirect_params}}
             indirect_param_values = {{k: v for k, v in param_dict.items() if k in indirect_params}}
-            
+
             # Set direct parameters
             for param_name, param_value in direct_params.items():
                 if param_name in all_params:
                     kwargs[param_name] = param_value
                     debug_print("Setting " + str(param_name) + " = " + str(param_value) + " (direct parameter)")
-            
+
             # Store indirect parameter values in request for fixtures to access
             if indirect_param_values:
                 request._indirect_params = indirect_param_values
                 debug_print("Storing indirect parameters in request: " + str(indirect_param_values))
-            
+
             # Mark fixture candidates - include indirect parameters as they need fixture handling
             fixture_candidates = [p for p in all_params if p not in direct_params]
         elif parametrize_args:
@@ -1414,7 +1848,7 @@ def execute_test_with_fixtures(test_data):
             fixture_candidates = all_params[len(parametrize_args):]
         else:
             fixture_candidates = all_params
-        
+
         # Execute autouse fixtures first (before other fixtures)
         # Find all autouse fixtures that should apply to this test
         autouse_fixtures = []
@@ -1435,7 +1869,7 @@ def execute_test_with_fixtures(test_data):
                         autouse_fixtures.append(fixture_name)
                 elif scope in ['module', 'session', 'package']:
                     autouse_fixtures.append(fixture_name)
-        
+
         # Execute all autouse fixtures
         for fixture_name in autouse_fixtures:
             debug_print(f"Executing autouse fixture: {{fixture_name}}")
@@ -1462,7 +1896,7 @@ def execute_test_with_fixtures(test_data):
                 if "missing" in str(e) and "required positional argument" in str(e):
                     # For now, continue but log it prominently
                     debug_print(f"WARNING: Autouse fixture {{fixture_name}} has unresolved dependencies")
-        
+
         # Execute fixtures for remaining parameters
         for param_name in fixture_candidates:
             if param_name in BUILTIN_FIXTURES or param_name in _fixture_registry:
@@ -1477,30 +1911,35 @@ def execute_test_with_fixtures(test_data):
                         request._test_instance = instance
                     kwargs[param_name] = execute_fixture(class_fixture_key, request)
                     request.fixturenames.append(param_name)
-        
+
         # Execute setup_method if instance method
         if instance:
             setup_method_if_needed(instance, test_data['function'].split('::')[-1])
-        
+
         # Execute test
         # Check if we're using capsys fixture - if so, don't redirect output
         using_capsys = 'capsys' in kwargs
-        
+
         debug_print(f"Test function {{func.__name__}} is async: {{is_async_function(func)}}")
-        
+
         try:
             if is_async_function(func):
                 import asyncio
+                event_loop = kwargs.get('event_loop')
                 if using_capsys:
                     # Don't redirect output when using capsys
-                    if hasattr(asyncio, 'Runner'):  # Python 3.11+
+                    if event_loop is not None:
+                        event_loop.run_until_complete(func(**kwargs))
+                    elif hasattr(asyncio, 'Runner'):  # Python 3.11+
                         with asyncio.Runner() as runner:
                             runner.run(func(**kwargs))
                     else:
                         asyncio.run(func(**kwargs))
                 else:
                     with _null_redirect(), _null_redirect():
-                        if hasattr(asyncio, 'Runner'):  # Python 3.11+
+                        if event_loop is not None:
+                            event_loop.run_until_complete(func(**kwargs))
+                        elif hasattr(asyncio, 'Runner'):  # Python 3.11+
                             with asyncio.Runner() as runner:
                                 runner.run(func(**kwargs))
                         else:
@@ -1518,10 +1957,10 @@ def execute_test_with_fixtures(test_data):
             # Check if this is a skip/xfail exception raised during test execution
             exc_type = type(test_exc).__name__
             exc_module = type(test_exc).__module__ if hasattr(type(test_exc), '__module__') else ''
-            
+
             # Note: debug_print won't work here if we're inside _null_redirect()
             # So we'll just re-raise and let the outer handler deal with it
-            
+
             # Always re-raise the exception to be handled by the outer exception handler
             # The outer handler will properly convert skip/xfail exceptions to results
             raise test_exc
@@ -1529,31 +1968,39 @@ def execute_test_with_fixtures(test_data):
             # Execute teardown_method if instance method
             if instance:
                 teardown_method_if_needed(instance, test_data['function'].split('::')[-1])
-        
+
         # Teardown function-scoped fixtures
         teardown_fixtures('function', request)
-        
+
         # Execute request finalizers
         request._finalize()
-        
+
         duration = perf() - start
-        
+
         # If test was xfail but passed, it's an xpass
         if is_xfail:
+            if xfail_info.get('strict'):
+                return {{
+                    'id': test_data['id'],
+                    'outcome': 'failed',
+                    'duration': duration,
+                    'error': f"XPASS(strict): {{xfail_reason or 'Expected failure'}}",
+                    'error_details': None
+                }}
             return {{
                 'id': test_data['id'],
                 'outcome': 'xpassed',
                 'duration': duration,
                 'error': None
             }}
-        
+
         return {{
             'id': test_data['id'],
             'outcome': 'passed',
             'duration': duration,
             'error': None
         }}
-        
+
     except BaseException as e:
         debug_print(f"OUTER EXCEPTION HANDLER: Caught {{type(e).__name__}}: {{e}}")
         # Execute teardown_method if instance method (even on failure)
@@ -1562,33 +2009,33 @@ def execute_test_with_fixtures(test_data):
                 teardown_method_if_needed(instance, test_data['function'].split('::')[-1])
             except:
                 pass  # Don't let teardown failures mask the original error
-        
+
         # Teardown on failure
         if request:
             teardown_fixtures('function', request)
-        
+
         duration = perf() - start
-        
+
         # Enhanced error reporting with assertion introspection
         error_msg = str(e)
         error_details = None
-        
+
         if isinstance(e, AssertionError):
             # Try to extract more information from the assertion
             error_details = extract_assertion_details(e, func, kwargs)
             if error_details:
                 error_msg = format_assertion_error(error_details)
-        
+
         # Handle pytest skip exceptions
         # Check for the actual pytest exception types and the _pytest outcomes module
         exception_type = type(e).__name__
         exception_module = type(e).__module__ if hasattr(type(e), '__module__') else ''
-        
+
         debug_print(f"Exception caught: type={{exception_type}}, module={{exception_module}}, str={{str(e)}}")
-        
+
         # pytest uses 'Skipped' from _pytest.outcomes module
-        if (exception_type in ('Skipped', 'SkipTest', 'SkipException') or 
-            hasattr(e, '_pytest_skip') or 
+        if (exception_type in ('Skipped', 'SkipTest', 'SkipException') or
+            hasattr(e, '_pytest_skip') or
             '_pytest.outcomes' in exception_module):
             # Extract skip reason - pytest stores it in msg attribute
             skip_reason = str(e) if str(e) else "Skipped"
@@ -1604,9 +2051,9 @@ def execute_test_with_fixtures(test_data):
             }}
             debug_print(f"Returning skip result: {{result}}")
             return result
-        
+
         # Handle pytest xfail exceptions
-        if (exception_type in ('XFailed', 'XFailTest', 'XFailException', 'Failed') or 
+        if (exception_type in ('XFailed', 'XFailTest', 'XFailException', 'Failed') or
             hasattr(e, '_pytest_xfail')):
             xfail_reason = str(e) if str(e) else "Expected failure"
             if hasattr(e, 'msg'):
@@ -1618,9 +2065,17 @@ def execute_test_with_fixtures(test_data):
                 'duration': duration,
                 'error': None
             }}
-        
+
         # If test was marked as xfail but failed normally, it's still xfail
         if is_xfail:
+            if not exception_matches_expected(e, xfail_info.get('raises')):
+                return {{
+                    'id': test_data['id'],
+                    'outcome': 'failed',
+                    'duration': duration,
+                    'error': error_msg,
+                    'error_details': error_details
+                }}
             return {{
                 'id': test_data['id'],
                 'outcome': 'xfailed',
@@ -1628,7 +2083,7 @@ def execute_test_with_fixtures(test_data):
                 'duration': duration,
                 'error': error_msg
             }}
-        
+
         # Normal failure
         return {{
             'id': test_data['id'],
@@ -1645,65 +2100,67 @@ execute_single_test_ultra_fast = execute_test_with_fixtures
 def execute_tests_ultra_fast(tests_list):
     """Ultra-fast execution of multiple tests with proper class teardown"""
     results = []
-    
+
     # First pass: count tests per class for proper teardown timing
     class_test_counts = {{}}
     for test_data in tests_list:
         if test_data.get('class_name'):
-            class_path = f"{{test_data['module']}}.{{test_data['class_name']}}"
+            module_key = get_module_cache_key(test_data['module'], test_data.get('path'))
+            class_path = f"{{module_key}}.{{test_data['class_name']}}"
             class_test_counts[class_path] = class_test_counts.get(class_path, 0) + 1
-    
+
     # Register expected test counts with lifecycle manager
     for class_path, count in class_test_counts.items():
         for _ in range(count):
             _class_lifecycle.increment_test_count(class_path)
-    
+
     try:
         for test_data in tests_list:
             # Handle class transitions using the lifecycle manager
             if test_data.get('class_name'):
-                new_class_path = f"{{test_data['module']}}.{{test_data['class_name']}}"
-                
+                module_key = get_module_cache_key(test_data['module'], test_data.get('path'))
+                new_class_path = f"{{module_key}}.{{test_data['class_name']}}"
+
                 # Get the class object
                 new_class = None
-                if test_data['module'] in module_cache:
-                    mod = module_cache[test_data['module']]
+                if module_key in module_cache:
+                    mod = module_cache[module_key]
                     if hasattr(mod, test_data['class_name']):
                         new_class = getattr(mod, test_data['class_name'])
-                
+
                 # Let the lifecycle manager handle the transition
                 _class_lifecycle.transition_to_class(new_class_path, new_class)
-                
+
                 # Mark that we're running a test for this class
                 _class_lifecycle.mark_test_run(new_class_path)
             else:
                 # Moving to a module-level test
                 _class_lifecycle.transition_to_class(None, None)
-            
+
             debug_print(f"About to execute test: {{test_data['id']}}")
             result = execute_test_with_fixtures(test_data)
             debug_print(f"Test execution returned: {{result}}")
             results.append(result)
             debug_print(f"Successfully appended result for: {{test_data['id']}}")
-        
+
         debug_print(f"All tests executed successfully, returning {{len(results)}} results")
     except BaseException as e:
         # If any exception occurs during batch execution (e.g., module-level skip),
         # we need to handle it gracefully
         debug_print(f"Exception during batch execution: {{type(e).__name__}}: {{e}}")
-        
+
         # Check if this is a skip exception at module/collection level
         exception_type = type(e).__name__
         exception_module = type(e).__module__ if hasattr(type(e), '__module__') else ''
-        
-        if (exception_type in ('Skipped', 'SkipTest', 'SkipException') or 
-            hasattr(e, '_pytest_skip') or 
+
+        if (exception_type in ('Skipped', 'SkipTest', 'SkipException') or
+            hasattr(e, '_pytest_skip') or
             '_pytest.outcomes' in exception_module):
             # Module-level skip - mark all remaining tests as skipped
             skip_reason = str(e) if str(e) else "Skipped"
             if hasattr(e, 'msg'):
                 skip_reason = e.msg
-                
+
             debug_print(f"Module-level skip detected: {{skip_reason}}")
             # Don't re-raise - we've already handled the skip properly in the individual test
             # The exception was caught here because it bubbled up from execute_test_with_fixtures
@@ -1714,7 +2171,7 @@ def execute_tests_ultra_fast(tests_list):
         # Teardown all remaining classes using the lifecycle manager
         debug_print("Final teardown of all active classes")
         _class_lifecycle.teardown_all_classes()
-    
+
     return results
 
 def execute_tests_burst_optimized(batch_tests, micro_threads=2):
@@ -1723,30 +2180,30 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
     import queue
     from concurrent.futures import ThreadPoolExecutor, as_completed
     import multiprocessing
-    
+
     results = []
     test_queue = queue.Queue()
     result_queue = queue.Queue()
-    
+
     # Add all tests to the queue
     for test in batch_tests:
         test_queue.put(test)
-    
+
     # Thread-local storage for module cache to avoid conflicts
     thread_local = threading.local()
-    
+
     def worker_thread():
         """Worker thread that processes tests from the queue"""
         # Each thread maintains its own module cache
         if not hasattr(thread_local, 'module_cache'):
             thread_local.module_cache = {{}}
-        
+
         while True:
             try:
                 test = test_queue.get(timeout=0.1)
             except queue.Empty:
                 break
-                
+
             # Execute the test with minimal overhead
             start_time = perf()
             result = {{
@@ -1760,7 +2217,7 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                 'stdout': '',
                 'stderr': ''
             }}
-            
+
             try:
                 # Fast path for module loading - use thread-local cache
                 module_name = test['module']
@@ -1771,12 +2228,12 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                         test_dir = os.path.dirname(test_path)
                         if test_dir not in sys.path:
                             sys.path.insert(0, test_dir)
-                    
+
                     # Import module
                     thread_local.module_cache[module_name] = importlib.import_module(module_name)
-                
+
                 mod = thread_local.module_cache[module_name]
-                
+
                 # Get the test function/method
                 func = None
                 if '::' in test['function']:
@@ -1792,14 +2249,14 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                     func_name = test['function']
                     if hasattr(mod, func_name):
                         func = getattr(mod, func_name)
-                
+
                 if func is None:
                     raise AttributeError(f"Test function not found: {{test['function']}}")
-                
+
                 # Check markers for skip/xfail
                 decorators = test.get('decorators', [])
                 markers = extract_markers(decorators)
-                
+
                 skip_reason = check_skip_markers(markers)
                 if skip_reason:
                     result['outcome'] = 'skipped'
@@ -1807,11 +2264,11 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                     result['passed'] = False
                 else:
                     xfail_reason = check_xfail_markers(markers)
-                    
+
                     # Capture output
                     stdout_capture = StringIO()
                     stderr_capture = StringIO()
-                    
+
                     try:
                         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
                             # Execute test with minimal fixture overhead for burst mode
@@ -1819,7 +2276,7 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                                 asyncio.run(func())
                             else:
                                 func()
-                        
+
                         # Test passed
                         if xfail_reason:
                             result['outcome'] = 'xpassed'
@@ -1827,7 +2284,7 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                         else:
                             result['outcome'] = 'passed'
                             result['passed'] = True
-                            
+
                     except Exception as e:
                         # Test failed
                         if xfail_reason:
@@ -1838,38 +2295,38 @@ def execute_tests_burst_optimized(batch_tests, micro_threads=2):
                             result['outcome'] = 'failed'
                             result['passed'] = False
                             result['error'] = str(e)
-                    
+
                     result['stdout'] = stdout_capture.getvalue()
                     result['stderr'] = stderr_capture.getvalue()
-                
+
             except Exception as e:
                 result['error'] = str(e)
                 result['outcome'] = 'failed'
                 result['passed'] = False
-            
+
             result['duration'] = perf() - start_time
             result_queue.put(result)
             test_queue.task_done()
-    
+
     # Use ThreadPoolExecutor for better thread management
     # For 21-100 tests, use 2-4 threads based on CPU count
     optimal_threads = min(micro_threads, len(batch_tests), multiprocessing.cpu_count())
-    
+
     with ThreadPoolExecutor(max_workers=optimal_threads) as executor:
         # Submit worker threads
         futures = [executor.submit(worker_thread) for _ in range(optimal_threads)]
-        
+
         # Wait for all workers to complete
         for future in as_completed(futures):
             try:
                 future.result()
             except Exception as e:
                 debug_print(f"Worker thread error: {{e}}")
-    
+
     # Collect all results
     while not result_queue.empty():
         results.append(result_queue.get())
-    
+
     return results
 
 # Module teardown support
@@ -1885,14 +2342,14 @@ def perform_global_teardown():
     """Perform all teardowns in reverse order of setup (except session fixtures)"""
     # Get the teardown order (reverse of setup order)
     teardown_items = list(reversed(_setup_state['setup_order']))
-    
+
     for scope_type, identifier in teardown_items:
         if scope_type == 'class':
             # Get the class object
             parts = identifier.split('.')
             module_name = '.'.join(parts[:-1])
             class_name = parts[-1]
-            
+
             if module_name in module_cache:
                 mod = module_cache[module_name]
                 if hasattr(mod, class_name):
@@ -1900,7 +2357,7 @@ def perform_global_teardown():
                     teardown_class_if_needed(identifier, cls)
         elif scope_type == 'module':
             teardown_module_if_needed(identifier)
-    
+
     # Teardown class and module fixtures, but NOT session fixtures
     # Session fixtures should persist for the entire test session
     teardown_fixtures('class')
@@ -1914,7 +2371,7 @@ def get_teardown_order():
 
 def teardown_session_fixtures():
     """Explicitly teardown only session-scoped fixtures
-    
+
     This should only be called at the very end of the test session,
     typically from the Rust executor's Drop implementation.
     """

@@ -2,25 +2,23 @@
 //!
 //! High-performance parsing with:
 //! - Single-pass AST traversal
-//! - Pre-compiled queries for common patterns
 //! - Minimal allocations with string slices
 //! - Efficient data structures
 
 use anyhow::{anyhow, Result};
-use once_cell::sync::Lazy;
 // use parking_lot::RwLock; // Not needed
 // use smallvec::SmallVec; // Not needed
 use std::collections::HashMap;
 use std::path::Path;
 // use std::sync::Arc; // Not needed
-use tree_sitter::{Node, Parser as TSParser, Query};
+use tree_sitter::{Node, Parser as TSParser};
 use unicode_normalization::UnicodeNormalization;
 
 /// Normalize Unicode test names for safe IDs while preserving display names
 pub fn normalize_test_name(name: &str) -> (String, String) {
     // Normalize to NFD (canonical decomposition)
     let normalized = name.nfd().collect::<String>();
-    
+
     // Create safe ID by replacing non-ASCII characters
     let safe_id = normalized
         .chars()
@@ -35,71 +33,9 @@ pub fn normalize_test_name(name: &str) -> (String, String) {
             }
         })
         .collect::<String>();
-    
+
     // Return both safe ID and original display name
     (safe_id, name.to_string())
-}
-
-/// Pre-compiled tree-sitter queries for better performance
-static PYTHON_QUERIES: Lazy<PythonQueries> = Lazy::new(|| {
-    let language = tree_sitter_python::language();
-    
-    PythonQueries {
-        test_functions: Query::new(
-            &language,
-            r#"
-            (function_definition
-              name: (identifier) @name
-              parameters: (parameters)? @params
-            ) @func
-            "#,
-        ).unwrap(),
-        
-        class_definitions: Query::new(
-            &language,
-            r#"
-            (class_definition
-              name: (identifier) @name
-              body: (block) @body
-            ) @class
-            "#,
-        ).unwrap(),
-        
-        decorators: Query::new(
-            &language,
-            r#"
-            (decorated_definition
-              (decorator) @decorator
-              definition: (_) @def
-            )
-            "#,
-        ).unwrap(),
-        
-        fixture_decorator: Query::new(
-            &language,
-            r#"
-            (decorator
-              (call
-                function: [
-                  (identifier) @fixture_name
-                  (attribute
-                    value: (identifier) @module
-                    attribute: (identifier) @fixture_name
-                  )
-                ]
-                (#match? @fixture_name "fixture")
-              )
-            )
-            "#,
-        ).unwrap(),
-    }
-});
-
-struct PythonQueries {
-    test_functions: Query,
-    class_definitions: Query,
-    decorators: Query,
-    fixture_decorator: Query,
 }
 
 /// Optimized test function information
@@ -168,6 +104,13 @@ pub struct FixtureDefinition {
     pub decorators: Vec<String>,
 }
 
+type ParseContentResult = (
+    Vec<FixtureDefinition>,
+    Vec<TestFunction>,
+    ModuleMetadata,
+    HashMap<String, ClassMetadata>,
+);
+
 /// Single-pass visitor for efficient parsing
 struct SinglePassVisitor<'a> {
     content: &'a str,
@@ -189,7 +132,7 @@ impl<'a> SinglePassVisitor<'a> {
             current_class: None,
         }
     }
-    
+
     fn visit_node(&mut self, node: Node<'a>) {
         match node.kind() {
             "module" => self.visit_module(node),
@@ -199,25 +142,25 @@ impl<'a> SinglePassVisitor<'a> {
             _ => self.visit_children(node),
         }
     }
-    
+
     fn visit_children(&mut self, node: Node<'a>) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
             self.visit_node(child);
         }
     }
-    
+
     fn visit_module(&mut self, node: Node<'a>) {
         self.visit_children(node);
     }
-    
+
     fn visit_class(&mut self, node: Node<'a>) {
         if let Some(name_node) = node.child_by_field_name("name") {
             if let Ok(class_name) = name_node.utf8_text(self.content.as_bytes()) {
                 if class_name.starts_with("Test") {
                     let old_class = self.current_class;
                     self.current_class = Some(class_name);
-                    
+
                     // Initialize class metadata
                     let mut metadata = ClassMetadata {
                         name: class_name.to_string(),
@@ -228,19 +171,19 @@ impl<'a> SinglePassVisitor<'a> {
                         has_setup: false,
                         has_teardown: false,
                     };
-                    
+
                     // Visit class body
                     if let Some(body) = node.child_by_field_name("body") {
                         self.visit_class_body(body, &mut metadata);
                     }
-                    
+
                     self.class_metadata.insert(class_name.to_string(), metadata);
                     self.current_class = old_class;
                 }
             }
         }
     }
-    
+
     fn visit_class_body(&mut self, node: Node<'a>, metadata: &mut ClassMetadata) {
         let mut cursor = node.walk();
         for child in node.children(&mut cursor) {
@@ -258,11 +201,11 @@ impl<'a> SinglePassVisitor<'a> {
             }
         }
     }
-    
+
     fn visit_class_method(&mut self, node: Node<'a>, metadata: &mut ClassMetadata) {
         self.visit_class_method_with_decorators(node, metadata, Vec::new());
     }
-    
+
     fn visit_class_method_with_decorators(
         &mut self,
         node: Node<'a>,
@@ -270,10 +213,13 @@ impl<'a> SinglePassVisitor<'a> {
         decorators: Vec<String>,
     ) {
         if let Some(name_node) = node.child_by_field_name("name") {
-            if let Ok(method_name) = name_node.utf8_text(self.content.as_bytes()) {
+            // Manual extraction to handle Unicode correctly
+            let start_byte = name_node.start_byte();
+            let end_byte = name_node.end_byte();
+            if let Some(method_name) = self.content.get(start_byte..end_byte) {
                 let line_number = name_node.start_position().row + 1;
                 let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
-                
+
                 // Check for setup/teardown methods
                 match method_name {
                     "setup_class" => {
@@ -316,6 +262,7 @@ impl<'a> SinglePassVisitor<'a> {
                     "tearDown" => metadata.has_teardown = true,
                     _ if method_name.starts_with("test") => {
                         // It's a test method
+                        eprintln!("[PARSER] Found test method: '{}' in class", method_name);
                         let parameters = self.extract_parameters(node);
                         self.tests.push(TestFunction {
                             name: method_name.to_string(),
@@ -342,14 +289,17 @@ impl<'a> SinglePassVisitor<'a> {
             }
         }
     }
-    
+
     fn visit_function(&mut self, node: Node<'a>, decorators: Option<Vec<String>>) {
         if let Some(name_node) = node.child_by_field_name("name") {
-            if let Ok(func_name) = name_node.utf8_text(self.content.as_bytes()) {
+            // Manual extraction to handle Unicode correctly
+            let start_byte = name_node.start_byte();
+            let end_byte = name_node.end_byte();
+            if let Some(func_name) = self.content.get(start_byte..end_byte) {
                 let line_number = name_node.start_position().row + 1;
                 let is_async = node.child(0).map(|n| n.kind() == "async").unwrap_or(false);
                 let decorators = decorators.unwrap_or_default();
-                
+
                 // Check for module-level setup/teardown
                 match func_name {
                     "setup_module" => {
@@ -372,6 +322,7 @@ impl<'a> SinglePassVisitor<'a> {
                     }
                     _ if func_name.starts_with("test") => {
                         // It's a test function
+                        eprintln!("[PARSER] Found test function: '{}'", func_name);
                         let parameters = self.extract_parameters(node);
                         self.tests.push(TestFunction {
                             name: func_name.to_string(),
@@ -398,7 +349,7 @@ impl<'a> SinglePassVisitor<'a> {
             }
         }
     }
-    
+
     fn visit_decorated(&mut self, node: Node<'a>) {
         let decorators = self.extract_decorators(node);
         if let Some(def) = node.child_by_field_name("definition") {
@@ -407,11 +358,11 @@ impl<'a> SinglePassVisitor<'a> {
             }
         }
     }
-    
+
     fn extract_decorators(&self, node: Node<'a>) -> Vec<String> {
         let mut decorators = Vec::new();
         let mut cursor = node.walk();
-        
+
         for child in node.children(&mut cursor) {
             if child.kind() == "decorator" {
                 if let Ok(text) = child.utf8_text(self.content.as_bytes()) {
@@ -419,26 +370,25 @@ impl<'a> SinglePassVisitor<'a> {
                 }
             }
         }
-        
+
         decorators
     }
-    
+
     fn extract_parameters(&self, node: Node<'a>) -> Vec<String> {
         let mut params = Vec::new();
-        
+
         if let Some(params_node) = node.child_by_field_name("parameters") {
             let mut cursor = params_node.walk();
-            
+
             for child in params_node.children(&mut cursor) {
                 let param_name = match child.kind() {
                     "identifier" => child.utf8_text(self.content.as_bytes()).ok(),
-                    "typed_parameter" | "default_parameter" | "typed_default_parameter" => {
-                        child.child_by_field_name("name")
-                            .and_then(|n| n.utf8_text(self.content.as_bytes()).ok())
-                    }
+                    "typed_parameter" | "default_parameter" | "typed_default_parameter" => child
+                        .child_by_field_name("name")
+                        .and_then(|n| n.utf8_text(self.content.as_bytes()).ok()),
                     _ => None,
                 };
-                
+
                 if let Some(name) = param_name {
                     if name != "self" && name != "cls" {
                         params.push(name.to_string());
@@ -446,10 +396,10 @@ impl<'a> SinglePassVisitor<'a> {
                 }
             }
         }
-        
+
         params
     }
-    
+
     fn create_fixture_from_function(
         &self,
         name: &str,
@@ -459,8 +409,8 @@ impl<'a> SinglePassVisitor<'a> {
     ) -> FixtureDefinition {
         let mut scope = "function".to_string();
         let mut autouse = false;
-        let mut params = Vec::new();
-        
+        let params = Vec::new();
+
         // Parse fixture decorator parameters
         for decorator in &decorators {
             if decorator.contains("fixture") {
@@ -475,7 +425,7 @@ impl<'a> SinglePassVisitor<'a> {
                 }
             }
         }
-        
+
         FixtureDefinition {
             name: name.to_string(),
             line_number,
@@ -486,7 +436,7 @@ impl<'a> SinglePassVisitor<'a> {
             decorators,
         }
     }
-    
+
     fn into_result(self) -> ParseResult {
         ParseResult {
             fixtures: self.fixtures,
@@ -511,7 +461,7 @@ fn extract_string_value(decorator: &str, key: &str) -> Option<String> {
     if let Some(start) = decorator.find(&pattern) {
         let value_start = start + pattern.len();
         let value_part = &decorator[value_start..];
-        
+
         // Handle quoted strings
         if let Some(quote) = value_part.chars().next() {
             if quote == '"' || quote == '\'' {
@@ -534,12 +484,13 @@ impl Parser {
     pub fn new() -> Result<Self> {
         let mut parser = TSParser::new();
         let language = tree_sitter_python::language();
-        parser.set_language(&language)
+        parser
+            .set_language(&language)
             .map_err(|_| anyhow!("Failed to set Python language"))?;
-        
+
         Ok(Self { parser })
     }
-    
+
     /// Parse a file and extract tests and fixtures
     pub fn parse_fixtures_and_tests(
         path: &Path,
@@ -549,24 +500,23 @@ impl Parser {
         let (fixtures, tests, _, _) = parser.parse_content(&content)?;
         Ok((fixtures, tests))
     }
-    
+
     /// Parse content with single-pass traversal
-    pub fn parse_content(
-        &mut self,
-        content: &str,
-    ) -> Result<(
-        Vec<FixtureDefinition>,
-        Vec<TestFunction>,
-        ModuleMetadata,
-        HashMap<String, ClassMetadata>,
-    )> {
-        let tree = self.parser.parse(content, None)
+    pub fn parse_content(&mut self, content: &str) -> Result<ParseContentResult> {
+        let tree = self
+            .parser
+            .parse(content, None)
             .ok_or_else(|| anyhow!("Failed to parse Python content"))?;
-        
+
         let mut visitor = SinglePassVisitor::new(content);
         visitor.visit_node(tree.root_node());
-        
+
         let result = visitor.into_result();
-        Ok((result.fixtures, result.tests, result.module_metadata, result.class_metadata))
+        Ok((
+            result.fixtures,
+            result.tests,
+            result.module_metadata,
+            result.class_metadata,
+        ))
     }
 }

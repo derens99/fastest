@@ -40,9 +40,6 @@ class TestMockerFixture:
     
     def test_mocker_spy(self, mocker):
         """Test mocker.spy functionality."""
-        def original_func(x):
-            return x * 2
-        
         spy = mocker.spy(sys.modules[__name__], 'original_func')
         result = original_func(5)
         

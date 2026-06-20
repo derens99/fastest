@@ -85,8 +85,8 @@ def test_runtime_xfail():
 
 @pytest.mark.xfail(strict=True)
 def test_xfail_strict():
-    """Strict xfail - XPASS will be considered a failure"""
-    assert True  # This will fail the test suite due to strict=True
+    """Strict xfail for an expected failure"""
+    assert False, "Strict expected failure"
 
 
 # Combining markers

@@ -10,8 +10,11 @@ This directory contains comprehensive test suites for validating pytest compatib
 - **`async/`** - Async test support (currently empty, for future use)
 
 ### `features/` - Advanced pytest features
+- **`assertion-introspection/`** - Assertion failure inputs for traceback and introspection work
 - **`fixtures/`** - Fixture system including scopes, dependencies, and conftest
+- **`lifecycle/`** - Setup/teardown and lifecycle edge cases, including failure-path teardown
 - **`markers/`** - Test markers (@pytest.mark.skip, xfail, custom markers)
+- **`parametrization/`** - Legacy/mock parametrization fixtures used by Fastest discovery tests
 - **`parametrize/`** - Parametrization including indirect and complex patterns
 - **`setup-teardown/`** - Setup/teardown methods and session management
 - **`plugins/`** - Plugin system and pytest plugin compatibility
@@ -27,9 +30,14 @@ Complete test suites that validate multiple features working together, including
 - Unicode handling in various contexts
 - Error reporting and failure scenarios
 - Unusual test patterns and edge conditions
+- Invalid syntax fixtures under `edge-cases/invalid-syntax/fixtures/` are stored with a `.fixture` suffix so normal suite runs do not collect them.
 
 ### `examples/` - Example test files
 Simple example tests demonstrating basic usage patterns
+
+### `third-party/` - Installed package smoke tests
+- **`plugins/`** - Narrow smoke coverage for installed third-party pytest plugin
+  packages and the Fastest shim subset that currently supports them
 
 ## Purpose
 
@@ -58,6 +66,9 @@ cargo run -- pytest-compat-suite/comprehensive/
 
 # Test edge cases
 cargo run -- pytest-compat-suite/edge-cases/
+
+# Test the third-party plugin smoke gate
+make plugin-smoke
 ```
 
 ## Adding New Test Files
@@ -69,7 +80,10 @@ When adding new test files:
 4. Document edge cases and expected behavior
 5. Update this README with the new test file
 
+Intentional failing inputs belong here, not under `tests/`. The `tests/`
+directory is reserved for project tests that should pass under normal pytest.
+
 ## See Also
 
-- [Comprehensive Test Results](../docs/COMPREHENSIVE_TEST_RESULTS.md) - Detailed test results and compatibility report
-- [Comprehensive Suite Documentation](../docs/COMPREHENSIVE_SUITE_DETAILS.md) - Implementation details and test patterns
+- [Testing Guide](../docs/development/testing.md) - How to run project and compatibility tests
+- [Architecture](../docs/development/architecture.md) - How discovery and execution are organized

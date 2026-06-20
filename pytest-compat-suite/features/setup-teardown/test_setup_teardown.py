@@ -1,4 +1,6 @@
 """Test file to verify setup/teardown functionality"""
+import unittest
+
 import pytest
 
 # Module-level tracking
@@ -92,7 +94,7 @@ class TestSetupTeardown:
         assert class_state['setup_method_calls'] > 0
 
 
-class TestUnittestStyle:
+class TestUnittestStyle(unittest.TestCase):
     """Test class with unittest-style setUp/tearDown"""
     
     def setUp(self):
@@ -116,6 +118,7 @@ class TestUnittestStyle:
         assert class_state['setup_calls'] > 0
 
 
+@pytest.mark.xfail(reason="Intentional setup failure")
 class TestFailingSetup:
     """Test class where setup fails"""
     

@@ -25,7 +25,7 @@ use crate::{TestOutcome, TestResult};
 
 // Temporary stub implementations until we implement the full types
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DevExperienceConfig {
     #[allow(dead_code)]
     pub enabled: bool,
@@ -33,16 +33,6 @@ pub struct DevExperienceConfig {
     pub debug_enabled: bool,
     #[allow(dead_code)]
     pub enhanced_reporting: bool,
-}
-
-impl Default for DevExperienceConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            debug_enabled: false,
-            enhanced_reporting: false,
-        }
-    }
 }
 
 #[allow(dead_code)]
@@ -139,12 +129,9 @@ impl PluginCompatibilityManager {
 
 /// 🚀 REVOLUTIONARY PERFORMANCE MONITORING AND ADAPTIVE EXECUTION
 /// Real-time system analysis for optimal strategy selection
-
 /// Performance thresholds (dynamically adjusted based on system capabilities)
 const ULTRA_INPROCESS_THRESHOLD: usize = 2000;
-const BURST_EXECUTION_THRESHOLD: usize = 100; // Revolutionary burst execution for 21-100 tests
 const NATIVE_JIT_THRESHOLD: usize = 20; // Reduced to focus on small suites
-const WORK_STEALING_THRESHOLD: usize = 500;
 
 /// System performance profile for adaptive execution
 #[allow(dead_code)]
@@ -534,11 +521,11 @@ impl UltraFastPythonEngine {
         test_count: usize,
         avg_complexity: f32,
         simple_test_ratio: f32,
-        system_profile: &SystemProfile,
+        _system_profile: &SystemProfile,
     ) -> RevolutionaryExecutionStrategy {
         // ALWAYS use InProcess for maximum compatibility
         // This ensures fixtures, parameters, and all pytest features work correctly
-        
+
         // For very small test counts, still try JIT (but it falls back to InProcess anyway)
         if test_count <= NATIVE_JIT_THRESHOLD && simple_test_ratio > 0.8 && avg_complexity < 1.5 {
             return RevolutionaryExecutionStrategy::NativeJIT {
@@ -577,7 +564,7 @@ impl UltraFastPythonEngine {
         if verbose {
             eprintln!("Using safe PyO3 execution (JIT disabled for security)");
         }
-        return self.execute_ultra_inprocess(_py, tests, 1, verbose);
+        self.execute_ultra_inprocess(_py, tests, 1, verbose)
     }
 
     /// 🚀 BURST EXECUTION: Revolutionary strategy for 21-100 tests (eliminates ALL overhead)
@@ -633,10 +620,16 @@ impl UltraFastPythonEngine {
                 } else {
                     test.function_name.clone()
                 };
-                test_dict.set_item("function", function_ref).unwrap();
+                test_dict
+                    .set_item("function", function_ref.clone())
+                    .unwrap();
                 test_dict
                     .set_item("path", test.path.to_str().unwrap())
                     .unwrap();
+
+                if verbose {
+                    eprintln!("   [DEBUG] Test {} -> function: {}", test.id, function_ref);
+                }
 
                 // Include decorators for parametrized tests
                 let decorators_list = PyList::new(py, &test.decorators).unwrap();
@@ -874,10 +867,16 @@ impl UltraFastPythonEngine {
                 } else {
                     test.function_name.clone()
                 };
-                test_dict.set_item("function", function_ref).unwrap();
+                test_dict
+                    .set_item("function", function_ref.clone())
+                    .unwrap();
                 test_dict
                     .set_item("path", test.path.to_str().unwrap())
                     .unwrap();
+
+                if verbose {
+                    eprintln!("   [DEBUG] Test {} -> function: {}", test.id, function_ref);
+                }
 
                 // Include decorators for parametrized tests
                 let decorators_list = PyList::new(py, &test.decorators).unwrap();
@@ -896,11 +895,11 @@ impl UltraFastPythonEngine {
 
         // Execute with maximum performance
         let py_results = execute_tests_fn.call1((py_tests,))?;
-        
+
         if verbose {
             eprintln!("Python execution returned: {:?}", py_results);
         }
-        
+
         let results_list = py_results.downcast::<PyList>()?;
 
         // Convert results back (minimal overhead)
@@ -1871,7 +1870,6 @@ impl UltraFastExecutor {
 
     /// 🗑️ REMOVED: SIMD discovery now automatically integrated in fastest-core
     /// Discovery is always SIMD-accelerated by default
-
     /// Configure adaptive execution settings
     pub fn with_adaptive_execution(mut self, enabled: bool) -> Self {
         self.adaptive_execution = enabled;
@@ -2305,21 +2303,26 @@ impl UltraFastExecutor {
     fn teardown_session_fixtures(&self) -> Result<()> {
         Python::with_gil(|py| {
             // Get the worker module which contains our teardown_session_fixtures function
-            let sys = py.import("sys").map_err(|e| {
-                Error::Execution(format!("Failed to import sys: {}", e))
-            })?;
-            let modules = sys.getattr("modules").map_err(|e| {
-                Error::Execution(format!("Failed to get sys.modules: {}", e))
-            })?;
-            
+            let sys = py
+                .import("sys")
+                .map_err(|e| Error::Execution(format!("Failed to import sys: {}", e)))?;
+            let modules = sys
+                .getattr("modules")
+                .map_err(|e| Error::Execution(format!("Failed to get sys.modules: {}", e)))?;
+
             // Try to get the worker module
             if let Ok(worker_module) = modules.get_item("__main__") {
                 // Call the teardown_session_fixtures function
                 if let Ok(has_func) = worker_module.hasattr("teardown_session_fixtures") {
                     if has_func {
-                        worker_module.call_method0("teardown_session_fixtures").map_err(|e| {
-                            Error::Execution(format!("Failed to call teardown_session_fixtures: {}", e))
-                        })?;
+                        worker_module
+                            .call_method0("teardown_session_fixtures")
+                            .map_err(|e| {
+                                Error::Execution(format!(
+                                    "Failed to call teardown_session_fixtures: {}",
+                                    e
+                                ))
+                            })?;
                         if self.verbose {
                             eprintln!("🧹 Session fixtures torn down successfully");
                         }
@@ -2422,7 +2425,7 @@ fn get_test_function_code(test_item: &TestItem, verbose: bool) -> Result<String>
 
             if current_line_indent > def_line_indent {
                 func_lines.push(line.clone());
-                if line.trim_start().len() > 0 {
+                if !line.trim_start().is_empty() {
                     // Only consider non-empty lines for min_indent
                     function_body_min_indent = Some(
                         function_body_min_indent.map_or(current_line_indent, |min_val| {

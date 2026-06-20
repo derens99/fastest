@@ -19,6 +19,8 @@ use std::time::{Duration, Instant};
 // 🚀 REVOLUTIONARY SIMD JSON OPTIMIZATION (10-20% performance improvement)
 use fastest_core::utils::simd_json;
 
+type CapturedOutput = (String, Vec<String>, Vec<LogEntry>, Option<ExceptionInfo>);
+
 /// Memory usage statistics
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,6 +189,7 @@ impl CaptureManager {
                 ("PYTHONUNBUFFERED", "1"),
                 ("PYTHONDONTWRITEBYTECODE", "1"),
                 ("PYTHONHASHSEED", "0"),
+                ("PYTHONIOENCODING", "utf-8"),
                 ("FASTEST_TEST_ID", test_id),
             ]);
         }
@@ -547,11 +550,7 @@ print("FASTEST_CAPTURE_END")
     }
 
     /// Parse captured output to extract structured data
-    fn parse_captured_output(
-        &self,
-        stdout: &str,
-        _stderr: &str,
-    ) -> Result<(String, Vec<String>, Vec<LogEntry>, Option<ExceptionInfo>)> {
+    fn parse_captured_output(&self, stdout: &str, _stderr: &str) -> Result<CapturedOutput> {
         // Look for our JSON output markers
         if let Some(start) = stdout.find("FASTEST_CAPTURE_START") {
             if let Some(end) = stdout.find("FASTEST_CAPTURE_END") {
@@ -608,7 +607,7 @@ print("FASTEST_CAPTURE_END")
                         let exception = data
                             .get("exception")
                             .and_then(|v| if v.is_null() { None } else { Some(v) })
-                            .and_then(|exc| self.parse_exception_info(exc).ok());
+                            .and_then(|exc| Self::parse_exception_info(exc).ok());
 
                         return Ok((clean_stdout, warnings, logs, exception));
                     }
@@ -624,7 +623,7 @@ print("FASTEST_CAPTURE_END")
     }
 
     /// Parse exception information from JSON
-    fn parse_exception_info(&self, exc_data: &serde_json::Value) -> Result<ExceptionInfo> {
+    fn parse_exception_info(exc_data: &serde_json::Value) -> Result<ExceptionInfo> {
         let exception_type = exc_data
             .get("exception_type")
             .and_then(|v| v.as_str())
@@ -673,7 +672,7 @@ print("FASTEST_CAPTURE_END")
         let cause = exc_data
             .get("cause")
             .and_then(|v| if v.is_null() { None } else { Some(v) })
-            .and_then(|cause_data| self.parse_exception_info(cause_data).ok())
+            .and_then(|cause_data| Self::parse_exception_info(cause_data).ok())
             .map(Box::new);
 
         Ok(ExceptionInfo {

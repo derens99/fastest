@@ -113,7 +113,7 @@ impl MmapTestDatabase {
                     id: test.id.clone(),
                     path: test.path.clone(),
                     function_name: test.function_name.clone(),
-                    line_number: test.line_number,
+                    line_number: test.line_number.map(|n| n as usize),
                     file_hash: Self::calculate_file_hash(&test.path),
                     dependencies,
                     estimated_duration: Duration::from_millis(10 + complexity_score as u64 * 2), // Scale with complexity
@@ -150,7 +150,7 @@ impl MmapTestDatabase {
             test_index.insert(test_meta.id.clone(), i);
             file_groups
                 .entry(test_meta.path.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(test_meta.id.clone());
         }
 
@@ -272,15 +272,15 @@ impl MmapTestDatabase {
 
     /// Extract module name from import statement
     fn extract_import_module(import_line: &str) -> Option<String> {
-        if import_line.starts_with("import ") {
+        if let Some(import_payload) = import_line.strip_prefix("import ") {
             // import module or import module as alias
-            import_line[7..]
+            import_payload
                 .split_whitespace()
                 .next()
                 .map(|s| s.to_string())
-        } else if import_line.starts_with("from ") {
+        } else if let Some(import_payload) = import_line.strip_prefix("from ") {
             // from module import ...
-            let parts: Vec<&str> = import_line[5..].split(" import").collect();
+            let parts: Vec<&str> = import_payload.split(" import").collect();
             if !parts.is_empty() {
                 Some(parts[0].trim().to_string())
             } else {
@@ -310,7 +310,7 @@ impl MmapTestDatabase {
         }
 
         // Cap at 255
-        score.min(255)
+        score
     }
 }
 
@@ -491,6 +491,12 @@ pub struct MassiveExecutionStats {
     pub average_tests_per_second: f64,
 }
 
+impl Default for MassiveParallelExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MassiveParallelExecutor {
     /// Create new massive parallel executor
     pub fn new() -> Self {
@@ -565,7 +571,7 @@ impl MassiveParallelExecutor {
 
         // Group files into process groups
         let files: Vec<_> = file_groups.keys().collect();
-        let files_per_process = (files.len() + num_processes - 1) / num_processes;
+        let files_per_process = files.len().div_ceil(num_processes);
 
         self.process_groups.clear();
 
@@ -645,6 +651,7 @@ impl MassiveParallelExecutor {
         // Spawn subprocess with special flag
         let mut child = Command::new(&current_exe)
             .arg("--massive-parallel-worker")
+            .env("PYTHONIOENCODING", "utf-8")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -673,17 +680,15 @@ impl MassiveParallelExecutor {
         let result_tx_clone = result_tx.clone();
         let stdout_handle = std::thread::spawn(move || {
             let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    if line.starts_with("RESULT:") {
-                        // Parse JSON result
-                        if let Ok(result) = simd_json::from_str::<TestResult>(&line[7..]) {
-                            let _ = result_tx_clone.send(result);
-                        }
-                    } else {
-                        // Regular output (debug info)
-                        eprintln!("[Process {}] {}", subprocess_data.process_id, line);
+            for line in reader.lines().map_while(|line| line.ok()) {
+                if let Some(result_payload) = line.strip_prefix("RESULT:") {
+                    // Parse JSON result
+                    if let Ok(result) = simd_json::from_str::<TestResult>(result_payload) {
+                        let _ = result_tx_clone.send(result);
                     }
+                } else {
+                    // Regular output (debug info)
+                    eprintln!("[Process {}] {}", subprocess_data.process_id, line);
                 }
             }
         });
@@ -697,10 +702,8 @@ impl MassiveParallelExecutor {
         let stderr_handle = std::thread::spawn(move || {
             let reader = BufReader::new(stderr);
             let mut errors = Vec::new();
-            for line in reader.lines() {
-                if let Ok(line) = line {
-                    errors.push(line);
-                }
+            for line in reader.lines().map_while(|line| line.ok()) {
+                errors.push(line);
             }
             errors
         });
@@ -778,10 +781,7 @@ pub fn run_massive_parallel_worker() -> Result<()> {
     // Build test index
     let mut test_index: HashMap<PathBuf, Vec<&TestMetadata>> = HashMap::new();
     for test in &test_metadata {
-        test_index
-            .entry(test.path.clone())
-            .or_insert_with(Vec::new)
-            .push(test);
+        test_index.entry(test.path.clone()).or_default().push(test);
     }
 
     // Execute tests for assigned files

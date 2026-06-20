@@ -69,8 +69,8 @@ pub use infrastructure::{
     TimeoutStatistics, UltraFastTimeoutManager,
 };
 pub use utils::{
-    benchmark_json_performance, init_simd_json, init_simd_json_with_config, is_simd_json_available,
-    SimdJsonConfig, SimdJsonStats,
+    from_slice, from_str, get_stats, initialize_simd, is_simd_available, to_string,
+    to_string_pretty, JsonResult,
 };
 
 // 🧹 REMOVED: Legacy executor wrappers eliminated for cleaner architecture

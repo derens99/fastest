@@ -118,7 +118,7 @@ impl IncrementalTester {
             }
 
             // Smart impact analysis
-            affected_tests.extend(self.analyze_impact(&change).await?);
+            affected_tests.extend(self.analyze_impact(change).await?);
         }
 
         let result: Vec<String> = affected_tests.into_iter().collect();
@@ -211,7 +211,7 @@ impl IncrementalTester {
         let file_path = &change.file_path;
 
         // Python files: analyze imports and dependencies
-        if file_path.extension().map_or(false, |ext| ext == "py") {
+        if file_path.extension().is_some_and(|ext| ext == "py") {
             affected.extend(self.analyze_python_impact(file_path).await?);
         }
 
@@ -221,7 +221,7 @@ impl IncrementalTester {
         }
 
         // Requirements files affect all tests
-        if file_path.file_name().map_or(false, |name| {
+        if file_path.file_name().is_some_and(|name| {
             name.to_string_lossy().contains("requirements")
                 || name == "pyproject.toml"
                 || name == "setup.py"
@@ -258,7 +258,7 @@ impl IncrementalTester {
         for entry in walkdir::WalkDir::new(".")
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().map_or(false, |ext| ext == "py"))
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "py"))
         {
             if let Ok(search_content) = std::fs::read_to_string(entry.path()) {
                 for pattern in &search_patterns {
@@ -308,7 +308,7 @@ impl IncrementalTester {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 let path = e.path();
-                path.extension().map_or(false, |ext| ext == "py") || self.is_config_file(path)
+                path.extension().is_some_and(|ext| ext == "py") || self.is_config_file(path)
             })
         {
             let path = entry.path().to_path_buf();

@@ -80,6 +80,7 @@ class TestExceptionHandling:
     def teardown_class(cls):
         teardown_order.append('TestExceptionHandling')
     
+    @pytest.mark.xfail(reason="Intentional failure used to verify teardown continues")
     def test_exception(self):
         # This should not prevent teardown
         raise ValueError("Test exception")

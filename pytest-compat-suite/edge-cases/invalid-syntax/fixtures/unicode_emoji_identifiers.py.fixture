@@ -1,0 +1,18 @@
+# -*- coding: utf-8 -*-
+"""Test file with Unicode function names to verify PyO3 parser"""
+
+def test_emoji_🚀():
+    """Test with rocket emoji"""
+    assert True
+
+def test_unicode_café():
+    """Test with accented characters"""
+    assert 1 + 1 == 2
+
+def test_chinese_你好():
+    """Test with Chinese characters"""
+    assert "hello" == "hello"
+
+def test_mixed_αβγ_123():
+    """Test with Greek letters and numbers"""
+    assert len("test") == 4

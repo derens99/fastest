@@ -9,10 +9,10 @@ pub mod hooks;
 // pub mod registry;
 // pub mod conftest;
 
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
 
 pub use hooks::{Hook, HookCaller, HookResult};
 // pub use manager::PluginManager;
@@ -30,9 +30,15 @@ impl HookRegistry {
             hooks: HashMap::new(),
         }
     }
-    
+
     pub fn register(&mut self, name: &str, hook: Box<dyn Hook>) {
         self.hooks.entry(name.to_string()).or_default().push(hook);
+    }
+}
+
+impl Default for HookRegistry {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -77,26 +83,26 @@ pub struct PluginConfig {
 pub trait FastestPlugin: Any + Send + Sync {
     /// Get the name of the plugin
     fn name(&self) -> &str;
-    
+
     /// Get the version of the plugin
     fn version(&self) -> Option<&str> {
         None
     }
-    
+
     /// Get the description of the plugin
     fn description(&self) -> Option<&str> {
         None
     }
-    
+
     /// Register hooks with the registry
     fn register_hooks(&self, registry: &mut HookRegistry);
-    
+
     /// Initialize the plugin with configuration
-    fn initialize(&mut self, config: &PluginConfig) -> Result<(), Box<dyn std::error::Error>> {
+    fn initialize(&mut self, _config: &PluginConfig) -> Result<(), Box<dyn std::error::Error>> {
         // Default implementation does nothing
         Ok(())
     }
-    
+
     /// Clean up resources when plugin is unloaded
     fn cleanup(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         // Default implementation does nothing
@@ -112,25 +118,25 @@ pub type PluginResult<T> = Result<T, PluginError>;
 pub enum PluginError {
     #[error("Plugin not found: {0}")]
     PluginNotFound(String),
-    
+
     #[error("Plugin already registered: {0}")]
     PluginAlreadyRegistered(String),
-    
+
     #[error("Failed to load plugin: {0}")]
     LoadError(String),
-    
+
     #[error("Hook execution failed: {0}")]
     HookError(String),
-    
+
     #[error("Invalid plugin configuration: {0}")]
     ConfigError(String),
-    
+
     #[error("Plugin initialization failed: {0}")]
     InitializationError(String),
-    
+
     #[error("Conftest parse error: {0}")]
     ConftestError(String),
-    
+
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -140,12 +146,12 @@ pub enum PluginError {
 macro_rules! define_plugin {
     ($name:ident, $struct_name:ident) => {
         pub struct $struct_name;
-        
+
         impl $crate::plugin::FastestPlugin for $struct_name {
             fn name(&self) -> &str {
                 stringify!($name)
             }
-            
+
             fn register_hooks(&self, registry: &mut $crate::plugin::HookRegistry) {
                 // Plugin implementation registers its hooks here
             }
@@ -156,16 +162,16 @@ macro_rules! define_plugin {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_plugin_source() {
         let package_source = PluginSource::Package("pytest-mock".to_string());
         assert!(matches!(package_source, PluginSource::Package(_)));
-        
+
         let conftest_source = PluginSource::Conftest(PathBuf::from("conftest.py"));
         assert!(matches!(conftest_source, PluginSource::Conftest(_)));
     }
-    
+
     #[test]
     fn test_plugin_config() {
         let config = PluginConfig {
@@ -173,7 +179,7 @@ mod tests {
             args: HashMap::new(),
             options: HashMap::new(),
         };
-        
+
         assert_eq!(config.test_paths.len(), 1);
     }
 }

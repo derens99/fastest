@@ -30,7 +30,7 @@ pub struct UltraFastTimeoutManager {
     config: TimeoutConfig,
     /// Lock-free timeout tracking
     #[allow(dead_code)]
-    timeout_tracker: Arc<LockFreeTimeoutTracker>,
+    timeout_tracker: Box<LockFreeTimeoutTracker>,
     /// SIMD-accelerated batch processor
     #[allow(dead_code)]
     batch_processor: SIMDTimeoutBatchProcessor,
@@ -158,7 +158,7 @@ pub struct TimeoutConfig {
 impl Default for TimeoutConfig {
     fn default() -> Self {
         Self {
-            default_timeout_ns: 10_000_000_000,  // 10 seconds in nanoseconds
+            default_timeout_ns: 10_000_000_000, // 10 seconds in nanoseconds
             async_timeout_ns: 20_000_000_000,   // 20 seconds in nanoseconds
             fixture_timeout_ns: 5_000_000_000,  // 5 seconds in nanoseconds
             adaptive_scaling: true,
@@ -363,7 +363,7 @@ struct TimeoutPerformanceMonitor {
 impl UltraFastTimeoutManager {
     /// Create new ultra-fast timeout manager
     pub fn new(config: TimeoutConfig) -> Self {
-        let timeout_tracker = Arc::new(LockFreeTimeoutTracker::new(config.max_active_timeouts));
+        let timeout_tracker = Box::new(LockFreeTimeoutTracker::new(config.max_active_timeouts));
         let batch_processor = SIMDTimeoutBatchProcessor::new(config.simd_acceleration);
         let adaptive_scaler = AdaptiveTimeoutScaler::new(config.adaptive_scaling);
         let timeout_pools = TimeoutPoolManager::new(config.pool_size);
@@ -864,12 +864,12 @@ pub mod utils {
     pub fn parse_timeout_to_ns(timeout_str: &str) -> Result<u64> {
         let timeout_str = timeout_str.trim().to_lowercase();
 
-        if let Some(seconds_str) = timeout_str.strip_suffix('s') {
-            let seconds: f64 = seconds_str.parse()?;
-            Ok((seconds * 1_000_000_000.0) as u64)
-        } else if let Some(ms_str) = timeout_str.strip_suffix("ms") {
+        if let Some(ms_str) = timeout_str.strip_suffix("ms") {
             let ms: f64 = ms_str.parse()?;
             Ok((ms * 1_000_000.0) as u64)
+        } else if let Some(seconds_str) = timeout_str.strip_suffix('s') {
+            let seconds: f64 = seconds_str.parse()?;
+            Ok((seconds * 1_000_000_000.0) as u64)
         } else if let Some(minutes_str) = timeout_str.strip_suffix('m') {
             let minutes: f64 = minutes_str.parse()?;
             Ok((minutes * 60.0 * 1_000_000_000.0) as u64)
@@ -914,10 +914,11 @@ mod tests {
             function_name: "test_example".to_string(),
             line_number: Some(1),
             class_name: None,
-            decorators: vec![],
+            decorators: vec![].into(),
             is_async: false,
-            fixture_deps: vec![],
+            fixture_deps: vec![].into(),
             is_xfail: false,
+            indirect_params: Default::default(),
         };
 
         let handle = manager.start_timeout_tracking(&test).unwrap();

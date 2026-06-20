@@ -13,10 +13,9 @@ use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 /// Compiled glob patterns for efficient matching
-static GLOB_CACHE: Lazy<parking_lot::RwLock<rustc_hash::FxHashMap<String, Regex>>> = 
+static GLOB_CACHE: Lazy<parking_lot::RwLock<rustc_hash::FxHashMap<String, Regex>>> =
     Lazy::new(|| parking_lot::RwLock::new(rustc_hash::FxHashMap::default()));
 
 /// Main configuration structure - optimized for size and performance
@@ -69,11 +68,21 @@ pub struct Config {
     pub fastest: FastestConfig,
 }
 
-fn default_junit_family() -> String { "xunit2".to_string() }
-fn default_junit_logging() -> String { "no".to_string() }
-fn default_true() -> bool { true }
-fn default_junit_duration() -> String { "total".to_string() }
-fn default_junit_suite() -> String { "pytest".to_string() }
+fn default_junit_family() -> String {
+    "xunit2".to_string()
+}
+fn default_junit_logging() -> String {
+    "no".to_string()
+}
+fn default_true() -> bool {
+    true
+}
+fn default_junit_duration() -> String {
+    "total".to_string()
+}
+fn default_junit_suite() -> String {
+    "pytest".to_string()
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, Default)]
 pub struct FastestConfig {
@@ -97,10 +106,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             testpaths: smallvec::smallvec![PathBuf::from("tests"), PathBuf::from(".")],
-            python_files: smallvec::smallvec![
-                "test_*.py".to_string(), 
-                "*_test.py".to_string()
-            ],
+            python_files: smallvec::smallvec!["test_*.py".to_string(), "*_test.py".to_string()],
             python_classes: smallvec::smallvec!["Test*".to_string()],
             python_functions: smallvec::smallvec!["test_*".to_string()],
             markers: Vec::new(),
@@ -285,24 +291,18 @@ impl Config {
 
                 match key {
                     "testpaths" => {
-                        config.testpaths = value.split_whitespace()
-                            .map(PathBuf::from)
-                            .collect();
+                        config.testpaths = value.split_whitespace().map(PathBuf::from).collect();
                     }
                     "python_files" => {
-                        config.python_files = value.split_whitespace()
-                            .map(String::from)
-                            .collect();
+                        config.python_files = value.split_whitespace().map(String::from).collect();
                     }
                     "python_classes" => {
-                        config.python_classes = value.split_whitespace()
-                            .map(String::from)
-                            .collect();
+                        config.python_classes =
+                            value.split_whitespace().map(String::from).collect();
                     }
                     "python_functions" => {
-                        config.python_functions = value.split_whitespace()
-                            .map(String::from)
-                            .collect();
+                        config.python_functions =
+                            value.split_whitespace().map(String::from).collect();
                     }
                     "markers" => {
                         // Handle multi-line markers
@@ -342,9 +342,8 @@ impl Config {
                         config.minversion = Some(value.to_string());
                     }
                     "required_plugins" => {
-                        config.required_plugins = value.split_whitespace()
-                            .map(String::from)
-                            .collect();
+                        config.required_plugins =
+                            value.split_whitespace().map(String::from).collect();
                     }
                     "cache_dir" => {
                         config.cache_dir = Some(PathBuf::from(value));
@@ -436,30 +435,30 @@ impl Config {
         if !pattern.contains('*') {
             return text == pattern;
         }
-        
+
         // Check cache first
         let cache = GLOB_CACHE.read();
         if let Some(regex) = cache.get(pattern) {
             return regex.is_match(text);
         }
         drop(cache);
-        
+
         // Create regex from glob pattern
         let regex_pattern = pattern
             .split('*')
-            .map(|s| regex::escape(s))
+            .map(regex::escape)
             .collect::<Vec<_>>()
             .join(".*");
-        
+
         let regex_pattern = format!("^{}$", regex_pattern);
-        
+
         if let Ok(regex) = Regex::new(&regex_pattern) {
             let is_match = regex.is_match(text);
-            
+
             // Cache the compiled regex
             let mut cache = GLOB_CACHE.write();
             cache.insert(pattern.to_string(), regex);
-            
+
             is_match
         } else {
             false

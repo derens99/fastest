@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 pub use advanced::{
-    AdvancedFixtureManager, FixtureDefinition, FixtureInstance, 
-    FixtureKey, FixtureRequest, FixtureScope, FixtureValue,
+    AdvancedFixtureManager, FixtureDefinition, FixtureInstance, FixtureKey, FixtureRequest,
+    FixtureScope, FixtureValue,
 };
 pub use builtin::{
     generate_builtin_fixture_code, get_builtin_fixture_metadata, is_builtin_fixture,
@@ -40,6 +40,12 @@ pub struct FixtureExecutor;
 impl FixtureExecutor {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl Default for FixtureExecutor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -107,7 +113,7 @@ impl FixtureManager {
 
         let key = LegacyFixtureKey {
             name: name.to_string(),
-            scope: fixture.scope.clone(),
+            scope: fixture.scope,
             scope_id: self.get_scope_id(test_id, &fixture.scope),
         };
 

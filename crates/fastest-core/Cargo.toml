@@ -13,6 +13,7 @@ thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 simd-json = { version = "0.13", features = ["serde_impl"] }  # 2-3x faster JSON parsing
+pyo3 = { workspace = true, features = ["auto-initialize"] }  # Python introspection for test discovery
 
 # Test discovery and parsing
 walkdir.workspace = true

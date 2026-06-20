@@ -1,36 +1,47 @@
-# Test Scripts
+# Fastest Project Tests
 
-This directory contains scripts for testing and demonstrating the `fastest` extension functionality.
+This directory contains tests for the Fastest project itself. Files here should
+pass under normal pytest. Pytest compatibility fixtures, including intentional
+failure cases and runner input suites, live separately under
+`pytest-compat-suite/`.
 
-## Test Scripts
+## Layout
 
-### test_fastest.py
-Basic test script to verify that the fastest extension is working correctly. It:
-- Displays the version
-- Discovers tests in the current directory
-- Shows the first 5 discovered tests
-- Attempts to run the first test found
+- `tests/compatibility/` - small compatibility checks used by project-level workflows
+- `tests/integration/` - integration coverage for discovery, execution, fixtures, markers, plugins, parsing, and current runner behavior
+- `tests/performance/` - Python suites used to exercise performance-sensitive paths
+- `tests/large_suite/` - generated large-suite inputs for scaling checks
+- `tests/test_*.py` - focused smoke and regression checks
 
-### test_enhanced.py
-Enhanced test script demonstrating newer features of the fastest extension:
-- Pretty-printed test results with status icons
-- Detailed test result information (stdout, stderr, duration)
-- Async test detection
-- Error handling demonstration
+## Common Commands
 
-## Running Tests
-
-To run the test scripts:
+Run Rust workspace checks:
 
 ```bash
-python tests/test_fastest.py
-python tests/test_enhanced.py
+cargo test --workspace
 ```
 
-Make sure `fastest` is installed first:
+Run Fastest against project-level Python tests:
+
 ```bash
-maturin develop
+cargo build --release
+./target/release/fastest tests/
 ```
 
-## Note
-These are demonstration/validation scripts, not the actual unit tests for the fastest extension. The real unit tests would typically be in the Rust codebase under `crates/*/src/` or in a dedicated test directory. 
+Run pytest as a reference runner:
+
+```bash
+uv run pytest tests -q
+```
+
+## Compatibility Suites
+
+Use `pytest-compat-suite/` for broader pytest feature coverage:
+
+```bash
+./target/release/fastest pytest-compat-suite/core/basic/
+./target/release/fastest pytest-compat-suite/features/fixtures/
+./target/release/fastest pytest-compat-suite/edge-cases/
+```
+
+When adding new compatibility examples, put them in `pytest-compat-suite/` rather than this directory unless they directly test Fastest's own tooling.

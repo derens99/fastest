@@ -9,6 +9,12 @@ pub struct FixturePlugin {
     metadata: PluginMetadata,
 }
 
+impl Default for FixturePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FixturePlugin {
     pub fn new() -> Self {
         Self {
@@ -41,6 +47,12 @@ impl Plugin for FixturePlugin {
 #[derive(Debug)]
 pub struct MarkerPlugin {
     metadata: PluginMetadata,
+}
+
+impl Default for MarkerPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MarkerPlugin {
@@ -77,6 +89,12 @@ pub struct ReportingPlugin {
     metadata: PluginMetadata,
 }
 
+impl Default for ReportingPlugin {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ReportingPlugin {
     pub fn new() -> Self {
         Self {
@@ -109,6 +127,12 @@ impl Plugin for ReportingPlugin {
 #[derive(Debug)]
 pub struct CapturePlugin {
     metadata: PluginMetadata,
+}
+
+impl Default for CapturePlugin {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CapturePlugin {

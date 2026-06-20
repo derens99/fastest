@@ -43,14 +43,44 @@ fastest/
 
 ## Running Tests
 
+### Accepted Local Gate
+
+Run the full local verification gate before handing off changes:
+
+```bash
+make verify
+```
+
+This runs formatting/linting, the Rust workspace tests, the Python project
+tests, and the selected compatibility suites through the report harness.
+
+Generate only the compatibility report:
+
+```bash
+make compat-report COMPAT_SUITES="core/basic features/fixtures"
+```
+
+The JSON report is written to `target/compatibility-report.json` by default.
+
+Generate a full baseline without failing on known compatibility gaps:
+
+```bash
+make compat-report-all
+```
+
+The full JSON report is written to `target/compatibility-report-all.json`.
+
 ### Rust Tests
 
 ```bash
+# Set once per shell before Rust commands that compile PyO3 crates
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
+
 # Run all tests
-cargo test
+cargo test --workspace
 
 # Run tests with output
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Run specific test
 cargo test test_name
@@ -65,6 +95,9 @@ cargo test --all-features
 ### Integration Tests
 
 ```bash
+# Set once per shell before Rust commands that compile PyO3 crates
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
+
 # Run integration tests
 cargo test --test integration_test
 
@@ -72,28 +105,21 @@ cargo test --test integration_test
 cargo test --test integration_test -- --nocapture
 ```
 
-### Python Tests
+### Python Project Tests
 
-First, build the release binary:
+Run the project tests under pytest:
 
 ```bash
-cargo build --release
+uv run pytest tests -q
 ```
 
-Then run Python tests:
+### Compatibility Suites
+
+Run selected compatibility suites through Fastest:
 
 ```bash
-# Run all Python tests
-./target/release/fastest tests/
-
-# Run with coverage
-./target/release/fastest tests/ --cov
-
-# Run specific test file
-./target/release/fastest tests/test_basic.py
-
-# Run with verbose output
-./target/release/fastest tests/ -v
+make compat-report COMPAT_SUITES="core/basic features/fixtures"
+make compat-report-all
 ```
 
 ### Coverage
@@ -122,10 +148,10 @@ mod tests {
     fn test_function_name() {
         // Arrange
         let input = "test";
-        
+
         // Act
         let result = function_under_test(input);
-        
+
         // Assert
         assert_eq!(result, expected_value);
     }
@@ -143,9 +169,9 @@ use tempfile::TempDir;
 fn test_cli_command() {
     let temp_dir = TempDir::new().unwrap();
     let test_file = temp_dir.path().join("test_example.py");
-    
+
     std::fs::write(&test_file, "def test_foo(): assert True").unwrap();
-    
+
     Command::cargo_bin("fastest")
         .unwrap()
         .arg(test_file)
@@ -167,10 +193,10 @@ def test_simple():
 
 class TestClass:
     """Test class-based tests."""
-    
+
     def test_method(self):
         assert True
-    
+
     async def test_async_method(self):
         import asyncio
         await asyncio.sleep(0.001)
@@ -218,11 +244,11 @@ act -j clippy
 ### Running Benchmarks
 
 ```bash
-# Run discovery benchmark
-python benchmarks/bench_discovery.py
+# Run maintained benchmark suite
+uv run python scripts/benchmarks/official.py --quick --output-dir target/benchmark-artifacts/quick
 
-# Run with profiling
-python benchmarks/bench_performance.py --profile
+# Compare Fastest with pytest on a suite
+uv run python scripts/benchmarks/compare.py pytest-compat-suite/core/basic --fastest-binary ./target/release/fastest
 ```
 
 ### Writing Benchmarks
@@ -234,14 +260,14 @@ import subprocess
 
 def benchmark_feature():
     start = time.time()
-    
+
     # Run fastest with specific configuration
     result = subprocess.run([
         "./target/release/fastest",
         "tests/",
         "--feature-flag"
     ], capture_output=True)
-    
+
     duration = time.time() - start
     return duration
 
@@ -288,6 +314,9 @@ Test fixtures and sample files are located in:
 ### Rust Tests
 
 ```bash
+# Set once per shell before Rust commands that compile PyO3 crates
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
+
 # Run with backtrace
 RUST_BACKTRACE=1 cargo test
 
@@ -334,4 +363,4 @@ RUST_LOG=debug cargo test
 - Check CI logs for test failures
 - Run with `-v` flag for detailed output
 - Check `/tmp/fastest_debug.py` for generated code
-- Open an issue with reproduction steps 
+- Open an issue with reproduction steps

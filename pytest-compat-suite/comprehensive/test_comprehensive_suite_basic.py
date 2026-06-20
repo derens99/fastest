@@ -14,11 +14,13 @@ def test_simple_pass():
     assert True
 
 
+@pytest.mark.xfail(reason="Intentional failure example")
 def test_simple_fail():
     """Basic failing test"""
     assert False, "This test is expected to fail"
 
 
+@pytest.mark.xfail(reason="Intentional assertion-introspection example")
 def test_with_assertion():
     """Test with detailed assertion"""
     expected = [1, 2, 3]
@@ -116,16 +118,19 @@ def test_exception_message():
 
 
 # Assertion introspection tests
+@pytest.mark.xfail(reason="Intentional assertion-introspection example")
 def test_string_comparison():
     """Test string assertion for introspection"""
     assert "hello world" == "hello worlds"
 
 
+@pytest.mark.xfail(reason="Intentional assertion-introspection example")
 def test_list_comparison():
     """Test list assertion for introspection"""
     assert [1, 2, 3, 4] == [1, 2, 3, 5]
 
 
+@pytest.mark.xfail(reason="Intentional assertion-introspection example")
 def test_dict_comparison():
     """Test dict assertion for introspection"""
     expected = {"a": 1, "b": 2, "c": 3}
@@ -133,6 +138,7 @@ def test_dict_comparison():
     assert actual == expected
 
 
+@pytest.mark.xfail(reason="Intentional assertion-introspection example")
 def test_complex_comparison():
     """Test complex nested structure comparison"""
     expected = {

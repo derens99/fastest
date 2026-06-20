@@ -2,7 +2,7 @@
 
 ## Overview
 
-Fastest is built as a modular Rust workspace with 5 specialized crates, each serving a specific purpose in the test execution pipeline. This architecture enables high performance through separation of concerns and allows for independent optimization of each component.
+Fastest is built as a modular Rust workspace with 5 specialized crates, each serving a specific purpose in the test discovery, execution, compatibility, and CLI pipeline. The current architecture is compatibility-first: performance strategies exist in the codebase, but public performance claims should be tied to fresh benchmark artifacts rather than fixed historical numbers.
 
 ## Crate Structure
 
@@ -36,43 +36,43 @@ TestItem {
 - CLI argument override precedence
 
 **Fixture Management**
-- Full pytest-compatible fixture system
+- pytest-style fixture system covered by the local compatibility suite
 - All scopes: function, class, module, session, package
 - Dependency resolution with cycle detection
 - Yield fixtures with proper teardown
 
 **Parser Infrastructure**
 - Tree-sitter based Python AST parsing
-- Thread-local parser instances for zero allocation
-- Support for all Python test patterns
+- Thread-local parser instances for low parser setup overhead
+- Support for the test patterns covered by the compatibility suite
 
 ### 2. fastest-execution - Execution Engine
 
-The execution crate implements multiple strategies for running tests, automatically selecting the optimal approach based on test count.
+The execution crate contains the verified compatibility execution path plus experimental strategy infrastructure for larger suites. Strategy thresholds and speedups must be revalidated with the benchmark harness before being presented as current behavior.
 
 #### Execution Strategies:
 
-**InProcess Strategy (≤20 tests)**
+**InProcess Strategy**
 - Direct PyO3 execution in Rust process
 - Minimal overhead for small test suites
-- ~45 tests/second
+- Primary compatibility path
 
-**HybridBurst Strategy (21-100 tests)**
+**HybridBurst Strategy**
 - Intelligent threading with work queue
 - Optimized batch processing
-- 180-250 tests/second
+- Requires current benchmark validation before public speed claims
 
-**WorkStealing Strategy (>100 tests)**
+**WorkStealing Strategy**
 - Lock-free parallel execution
 - Zero-contention work distribution
-- Up to 5,700 tests/second
+- Experimental path for large-suite optimization work
 
 #### Key Classes:
 
 **UltraFastExecutor**
-- Automatic strategy selection
+- Strategy selection and execution orchestration
 - Plugin system integration
-- Performance monitoring
+- Result collection and compatibility behavior
 
 **PythonRuntime**
 - Virtual environment detection
@@ -82,7 +82,7 @@ The execution crate implements multiple strategies for running tests, automatica
 **Experimental Features**
 - JIT compilation for simple assertions (disabled for security)
 - Zero-copy IPC using shared memory
-- Arena allocation for reduced memory overhead
+- Arena allocation experiments for reduced memory overhead
 
 ### 3. fastest-advanced - Power Features
 
@@ -95,6 +95,7 @@ Advanced features for enterprise use cases and power users.
 - Multiple report formats (HTML, XML, JSON, LCOV)
 - Incremental coverage tracking
 - Content-based caching with BLAKE3
+- Experimental until covered by focused end-to-end tests
 
 **IncrementalTester**
 - Git-based change detection
@@ -124,7 +125,7 @@ Advanced features for enterprise use cases and power users.
 
 ### 4. fastest-plugins - Extensibility
 
-Complete plugin system with pytest compatibility.
+Plugin scaffolding and compatibility shims for pytest-style behavior covered by the local plugin compatibility suite.
 
 #### Architecture:
 
@@ -150,9 +151,10 @@ trait Plugin {
 4. Conftest.py plugins
 
 **pytest Compatibility**
-- pytest-mock: Mocker fixture implementation
-- pytest-cov: Coverage integration
-- Hook compatibility layer
+- pytest-mock style mocker fixture helpers covered by local tests
+- pytest-cov style coverage integration scaffolding
+- Hook compatibility layer for supported hooks
+- Narrow third-party plugin smoke testing exists, but broad ecosystem claims need more package gates
 
 ### 5. fastest-cli - User Interface
 
@@ -174,6 +176,8 @@ Command-line interface that orchestrates all functionality.
 - Smart prioritization
 - Plugin configuration
 
+These options are part of the product direction, but each option should be treated as experimental unless it is covered by current tests and documentation.
+
 ## Data Flow
 
 ### 1. Discovery Phase
@@ -184,8 +188,8 @@ Test Extraction → Fixture Analysis → Marker Processing → Cache Update
 
 ### 2. Execution Phase
 ```
-Test Selection → Strategy Selection → Plugin Initialization →
-Test Distribution → Parallel Execution → Result Collection → 
+Test Selection → Compatibility Execution Path → Plugin Initialization →
+Test Distribution → Result Collection →
 Plugin Hooks → Output Formatting
 ```
 
@@ -224,7 +228,7 @@ Test Prioritization → Coverage Collection → Report Generation
 
 1. **Performance First**: Every feature must improve or maintain performance
 2. **Modular Architecture**: Clear separation of concerns
-3. **pytest Compatibility**: Drop-in replacement goal
+3. **Evidence-Gated Compatibility**: Only claim pytest behavior that the compatibility suite or focused tests verify
 4. **Progressive Enhancement**: Advanced features are optional
 5. **Fail Gracefully**: Degradation when features unavailable
 
@@ -258,9 +262,9 @@ Test Prioritization → Coverage Collection → Report Generation
 5. GPU acceleration for suitable workloads
 
 ### Scalability
-- Designed for millions of tests
+- Architecture is intended to scale to large suites
 - Efficient resource utilization
 - Minimal memory footprint
-- Linear scaling with cores
+- Scaling behavior must be measured with current benchmark runs
 
-This architecture enables Fastest to achieve its 3.9x performance improvement over pytest while maintaining high compatibility and extensibility.
+This architecture keeps the compatibility surface modular while leaving room for measured performance work. Current performance statements belong in the benchmark reports generated from the active codebase.

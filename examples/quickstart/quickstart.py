@@ -7,18 +7,19 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def create_test_project():
     """Create a sample project for testing fastest"""
-    
+
     print("🚀 Creating sample project for testing fastest...")
-    
+
     # Create project directory
     project_dir = Path("fastest-demo")
     project_dir.mkdir(exist_ok=True)
-    
+
     # Create test files
     test_files = {
-        "test_math.py": '''
+        "test_math.py": """
 def test_addition():
     assert 1 + 1 == 2
 
@@ -37,8 +38,8 @@ class TestMathOperations:
     
     def test_modulo(self):
         assert 10 % 3 == 1
-''',
-        "test_strings.py": '''
+""",
+        "test_strings.py": """
 def test_upper():
     assert "hello".upper() == "HELLO"
 
@@ -57,8 +58,8 @@ class TestStringMethods:
     
     def test_join(self):
         assert "-".join(["a", "b", "c"]) == "a-b-c"
-''',
-        "test_lists.py": '''
+""",
+        "test_lists.py": """
 def test_append():
     lst = [1, 2, 3]
     lst.append(4)
@@ -87,8 +88,8 @@ class TestListComprehensions:
     def test_filter(self):
         evens = [x for x in range(10) if x % 2 == 0]
         assert evens == [0, 2, 4, 6, 8]
-''',
-        "pytest.ini": '''[tool:pytest]
+""",
+        "pytest.ini": """[tool:pytest]
 # Test discovery patterns
 python_files = test_*.py
 python_classes = Test*
@@ -97,52 +98,51 @@ python_functions = test_*
 # Fastest configuration
 fastest_optimizer = lightning
 fastest_workers = 4
-'''
+""",
     }
-    
+
     # Create test files
     tests_dir = project_dir / "tests"
     tests_dir.mkdir(exist_ok=True)
-    
+
     for filename, content in test_files.items():
         if filename == "pytest.ini":
             filepath = project_dir / filename
         else:
             filepath = tests_dir / filename
-        
-        with open(filepath, 'w') as f:
+
+        with open(filepath, "w") as f:
             f.write(content.strip())
         print(f"  ✓ Created {filepath}")
-    
+
     print(f"\n✅ Sample project created in '{project_dir}/'")
     print("\nTo test fastest:")
     print(f"  cd {project_dir}")
     print("  fastest tests/")
     print("  fastest tests/ --optimizer simple")
     print("  fastest tests/ -v")
-    
+
     return project_dir
+
 
 def run_benchmarks(project_dir):
     """Run benchmarks comparing fastest and pytest"""
-    
+
     print("\n📊 Running performance comparison...")
     os.chdir(project_dir)
-    
+
     # Run with pytest
     print("\n1. Running with pytest:")
     try:
         result = subprocess.run(
-            ["python3", "-m", "pytest", "tests/", "-q"],
-            capture_output=True,
-            text=True
+            ["python3", "-m", "pytest", "tests/", "-q"], capture_output=True, text=True
         )
         print(result.stdout)
         if result.stderr:
             print(result.stderr)
     except Exception as e:
         print(f"  ⚠️  pytest not installed: {e}")
-    
+
     # Run with fastest
     print("\n2. Running with fastest:")
     optimizers = ["simple", "lightning", "optimized"]
@@ -152,7 +152,7 @@ def run_benchmarks(project_dir):
             result = subprocess.run(
                 ["fastest", "tests/", "--optimizer", optimizer],
                 capture_output=True,
-                text=True
+                text=True,
             )
             print(result.stdout)
             if result.stderr:
@@ -164,31 +164,32 @@ def run_benchmarks(project_dir):
         except Exception as e:
             print(f"  Error: {e}")
 
+
 def main():
     """Main function"""
     print("Fastest Test Runner - Quick Start Demo")
     print("=" * 50)
-    
+
     # Check if fastest is installed
     try:
-        subprocess.run(["fastest", "--version"], 
-                      capture_output=True, check=True)
+        subprocess.run(["fastest", "--version"], capture_output=True, check=True)
         print("✓ fastest is installed")
     except (subprocess.CalledProcessError, FileNotFoundError):
         print("⚠️  fastest not found. Installing...")
         print("\nPlease run: ./install-dev.sh")
         print("Then run this script again.")
         sys.exit(1)
-    
+
     # Create test project
     project_dir = create_test_project()
-    
+
     # Ask if user wants to run benchmarks
     response = input("\nRun performance comparison? (y/N): ")
-    if response.lower() == 'y':
+    if response.lower() == "y":
         run_benchmarks(project_dir)
-    
+
     print("\n🎉 Done! You can now test fastest in the 'fastest-demo' directory.")
+
 
 if __name__ == "__main__":
     main()

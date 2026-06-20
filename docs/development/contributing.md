@@ -6,6 +6,7 @@ This guide helps you set up and contribute to the Fastest project.
 
 - Rust 1.75 or later
 - Python 3.8 or later
+- uv
 - Git
 
 ## Setting Up Development Environment
@@ -13,7 +14,7 @@ This guide helps you set up and contribute to the Fastest project.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/fastest.git
+git clone https://github.com/derens99/fastest.git
 cd fastest
 ```
 
@@ -24,10 +25,10 @@ cd fastest
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Install all development tools (rustfmt, clippy, etc.)
-./scripts/install-dev-tools.sh
+./scripts/development/install-dev-tools.sh
 
 # Enable Git hooks for automatic validation
-./scripts/setup-hooks.sh
+./scripts/development/setup-hooks.sh
 ```
 
 ### 3. Quick Start
@@ -60,18 +61,18 @@ cargo install cargo-criterion
 
 ```bash
 # Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install Python dependencies
-pip install -r requirements-dev.txt
+uv pip install -r requirements-dev.txt
 ```
 
 ### 5. Pre-commit Hooks
 
 ```bash
 # Install pre-commit
-pip install pre-commit
+uv pip install pre-commit
 
 # Install hooks
 pre-commit install
@@ -82,23 +83,19 @@ pre-commit install
 ```
 fastest/
 ├── crates/
-│   ├── fastest-core/        # Core functionality
-│   │   ├── src/
-│   │   │   ├── lib.rs      # Library root
-│   │   │   ├── discovery.rs # Test discovery
-│   │   │   ├── executor/   # Test execution
-│   │   │   ├── parser/     # Python parsing
-│   │   │   └── ...
-│   │   └── tests/          # Unit tests
-│   ├── fastest-cli/        # CLI application
-│   │   ├── src/
-│   │   │   └── main.rs     # CLI entry point
-│   │   └── tests/          # CLI tests
-│   └── fastest-python/     # Python bindings (optional)
-├── tests/                  # Integration tests
-├── benchmarks/            # Performance benchmarks
-├── docs/                  # Documentation
-└── examples/              # Example usage
+│   ├── fastest-core/            # Discovery, parsing, config, caching
+│   ├── fastest-execution/       # Execution strategies and Python runtime
+│   ├── fastest-advanced/        # Coverage, incremental testing, watch mode
+│   ├── fastest-cli/             # CLI application
+│   ├── fastest-plugins/         # Plugin system
+│   └── fastest-plugins-macros/  # Plugin proc macros
+├── python/                      # Python package wrapper
+├── pytest-compat-suite/         # pytest compatibility fixtures
+├── tests/                       # Fastest project tests
+├── scripts/                     # Development, benchmark, and release tools
+├── benchmarks/                  # Benchmark artifacts
+├── docs/                        # Documentation
+└── examples/                    # Example usage
 ```
 
 ## Development Workflow
@@ -113,18 +110,21 @@ git checkout -b feature/my-new-feature
 
 Follow the coding standards:
 - Run `cargo fmt` before committing
-- Ensure `cargo clippy` passes
+- Ensure `cargo clippy` passes with `PYO3_PYTHON` set to a linkable Python
 - Add tests for new functionality
 - Update documentation
 
 ### 3. Run Tests
 
 ```bash
+# Set once per shell before Rust commands that compile PyO3 crates
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
+
 # Run all tests
-cargo test
+cargo test --workspace
 
 # Run with output
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Run specific test
 cargo test test_name
@@ -140,6 +140,7 @@ cargo test --test '*'
 cargo fmt
 
 # Run linter
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
 cargo clippy -- -D warnings
 
 # Check for security issues
@@ -153,6 +154,7 @@ cargo tarpaulin --out Html
 
 ```bash
 # Build release binary
+export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
 cargo build --release
 
 # Test with example Python files
@@ -173,6 +175,7 @@ cargo build --release
 
 2. **Using env_logger**:
    ```bash
+   export PYO3_PYTHON="$(command -v python3.12 || command -v python3)"
    RUST_LOG=debug cargo run
    ```
 
@@ -339,4 +342,4 @@ cargo doc --document-private-items
 - [Rust Book](https://doc.rust-lang.org/book/)
 - [PyO3 Guide](https://pyo3.rs/) (for Python bindings)
 - [Tree-sitter Docs](https://tree-sitter.github.io/tree-sitter/)
-- [Rayon Docs](https://docs.rs/rayon/) (for parallelism) 
+- [Rayon Docs](https://docs.rs/rayon/) (for parallelism)

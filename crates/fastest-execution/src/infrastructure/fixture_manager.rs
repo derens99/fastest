@@ -44,7 +44,7 @@ impl Clone for FixtureValue {
             value: self.value.clone_ref(py),
             is_generator: self.is_generator,
             generator: self.generator.as_ref().map(|g| g.clone_ref(py)),
-            _scope: self._scope.clone(),
+            _scope: self._scope,
             _created_at: self._created_at,
         })
     }
@@ -338,12 +338,12 @@ sys.modules['pytest'] = pytest
         // Add autouse fixtures for the current scope
         let defs = self.fixture_definitions.lock().unwrap();
         for (name, def) in defs.iter() {
-            if def.autouse && self.is_fixture_applicable(&def.scope, request) {
-                required.insert(name.clone());
+            if def.is_autouse() && self.is_fixture_applicable(&def.scope, request) {
+                required.insert(Arc::from(name.as_str()));
             }
         }
 
-        Ok(required.into_iter().collect())
+        Ok(required.into_iter().map(|s| s.to_string()).collect())
     }
 
     /// Check if a fixture scope is applicable to the current request
@@ -464,7 +464,7 @@ sys.modules['pytest'] = pytest
             } else {
                 None
             },
-            _scope: def.scope.clone(),
+            _scope: def.scope,
             _created_at: std::time::Instant::now(),
         };
 
@@ -544,17 +544,17 @@ sys.modules['pytest'] = pytest
 
         let args = PyTuple::new(
             py,
-            &[
-                request.node_id.as_str(),
-                request.test_name.as_str(),
+            [
+                &*request.node_id,
+                &*request.test_name,
                 "function", // Default scope for now
             ],
         )
         .unwrap();
 
         let kwargs = PyDict::new(py);
-        if let Some(param_index) = request.param_index {
-            kwargs.set_item("param", param_index)?;
+        if request.param_index > 0 {
+            kwargs.set_item("param", request.param_index)?;
         }
 
         Ok(request_class.call(args, Some(&kwargs))?.unbind())
@@ -567,7 +567,7 @@ sys.modules['pytest'] = pytest
                 .lock()
                 .unwrap()
                 .get(name)
-                .map(|d| d.scope.clone())
+                .map(|d| d.scope)
                 .unwrap_or(FixtureScope::Function),
         );
         format!("{}::{}", name, scope_id)

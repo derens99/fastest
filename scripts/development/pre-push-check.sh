@@ -19,6 +19,12 @@ if [ ! -f "Cargo.toml" ]; then
     exit 1
 fi
 
+if [ -z "${PYO3_PYTHON:-}" ]; then
+    PYO3_PYTHON="$(command -v python3.12 2>/dev/null || command -v python3)"
+fi
+export PYO3_PYTHON
+echo "🐍 Using PyO3 Python: ${PYO3_PYTHON}"
+
 # Function to check if command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1
@@ -150,7 +156,7 @@ fi
 echo ""
 echo "⚡ Testing fastest binary..."
 if [ -f "./target/release/fastest" ]; then
-    if ./target/release/fastest --version >/dev/null 2>&1; then
+    if ./target/release/fastest version >/dev/null 2>&1; then
         echo -e "${GREEN}✅ Fastest binary works${NC}"
     else
         echo -e "${RED}❌ Fastest binary failed to run${NC}"
