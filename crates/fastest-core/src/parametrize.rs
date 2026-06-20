@@ -609,7 +609,10 @@ fn expr_to_json(expr: &Expr) -> serde_json::Value {
             _ => {
                 // Variable reference — use __repr__ so it can be eval'd in module context
                 let mut map = serde_json::Map::new();
-                map.insert("__repr__".to_string(), serde_json::Value::String(name.id.to_string()));
+                map.insert(
+                    "__repr__".to_string(),
+                    serde_json::Value::String(name.id.to_string()),
+                );
                 serde_json::Value::Object(map)
             }
         },
@@ -636,17 +639,19 @@ fn expr_to_json(expr: &Expr) -> serde_json::Value {
             }
             // For other calls, serialize as a repr string marker so we can eval it later
             let mut map = serde_json::Map::new();
-            map.insert("__repr__".to_string(), serde_json::Value::String(
-                format!("{}", ExprRepr(expr))
-            ));
+            map.insert(
+                "__repr__".to_string(),
+                serde_json::Value::String(format!("{}", ExprRepr(expr))),
+            );
             serde_json::Value::Object(map)
         }
         Expr::Attribute(_) => {
             // Handle module.attr references like re.IGNORECASE, httpx.Client
             let mut map = serde_json::Map::new();
-            map.insert("__repr__".to_string(), serde_json::Value::String(
-                format!("{}", ExprRepr(expr))
-            ));
+            map.insert(
+                "__repr__".to_string(),
+                serde_json::Value::String(format!("{}", ExprRepr(expr))),
+            );
             serde_json::Value::Object(map)
         }
         _ => serde_json::Value::Null,

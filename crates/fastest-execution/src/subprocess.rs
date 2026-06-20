@@ -441,7 +441,8 @@ impl SubprocessPool {
                     };
 
                     let mut restart_count = 0;
-                    let mut retried_tests: std::collections::HashSet<usize> = std::collections::HashSet::new();
+                    let mut retried_tests: std::collections::HashSet<usize> =
+                        std::collections::HashSet::new();
                     // Worker #0 drains session-bound tests first, then helps with parallel tests.
                     // Other workers only process from the shared injector.
                     let mut session_phase = is_session_worker;
@@ -487,7 +488,9 @@ impl SubprocessPool {
                                     },
                                     duration: result.duration,
                                     output: String::new(),
-                                    error: Some("Worker process crashed while running this test".into()),
+                                    error: Some(
+                                        "Worker process crashed while running this test".into(),
+                                    ),
                                     stdout: result.stdout,
                                     stderr: result.stderr,
                                 };

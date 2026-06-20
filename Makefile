@@ -5,6 +5,7 @@
 FASTEST_BINARY ?= ./target/release/fastest
 PYTEST_BINARY ?= pytest
 PYTHON ?= python3
+PYO3_PYTHON ?= $(shell command -v python3.12 2>/dev/null || command -v python3 2>/dev/null || command -v python)
 TEST_DIR ?= tests/compatibility
 COMPARISON_RUNS ?= 3
 
@@ -22,12 +23,12 @@ all: build test
 # Build the project
 build:
 	@echo "$(GREEN)Building fastest binary...$(NC)"
-	cargo build --release
+	PYO3_PYTHON=$(PYO3_PYTHON) cargo build --release
 
 # Run all tests
 test:
-	cargo test --all-features
-	cargo test --test '*' --all-features
+	PYO3_PYTHON=$(PYO3_PYTHON) cargo test --all-features
+	PYO3_PYTHON=$(PYO3_PYTHON) cargo test --test '*' --all-features
 
 # Run integration tests with Python
 test-integration: build
@@ -151,7 +152,7 @@ dev-setup:
 # Run linters
 lint:
 	cargo fmt -- --check
-	cargo clippy --all-targets --all-features -- -D warnings
+	PYO3_PYTHON=$(PYO3_PYTHON) cargo clippy --all-targets --all-features -- -D warnings
 	./venv/bin/python -m ruff check .
 	./venv/bin/python -m black --check .
 
@@ -177,7 +178,7 @@ audit:
 
 # Create a release build
 release:
-	cargo build --release --all-features
+	PYO3_PYTHON=$(PYO3_PYTHON) cargo build --release --all-features
 	strip target/release/fastest
 	ls -lh target/release/fastest
 
@@ -222,6 +223,7 @@ status:
 	@echo "📁 Project: $(PWD)"
 	@echo "🦀 Rust: $(shell rustc --version 2>/dev/null || echo 'Not installed')"
 	@echo "🐍 Python: $(shell $(PYTHON) --version 2>/dev/null || echo 'Not installed')"
+	@echo "🐍 PyO3 Python: $(PYO3_PYTHON)"
 	@echo "📦 Cargo: $(shell cargo --version 2>/dev/null || echo 'Not installed')"
 	@echo "🧪 pytest: $(shell $(PYTEST_BINARY) --version 2>/dev/null | head -1 || echo 'Not installed')"
 
@@ -260,4 +262,4 @@ help:
 	@echo "  make release      - Create optimized release build"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make clean-data   - Clean performance and comparison data"
-	@echo "  make status       - Show project status" 
+	@echo "  make status       - Show project status"
