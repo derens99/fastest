@@ -26,7 +26,7 @@ mkdocs-material>=9.2.0
 mkdocstrings[python]>=0.22.0
 
 # Development tools
-ipython>=8.14.0
+ipython>=8.18.1
 ipdb>=0.13.13
 rich>=13.5.0
 
